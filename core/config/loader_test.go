@@ -29,6 +29,9 @@ const workspaceYAML = `
 version: 1
 workspace:
   parent_page_id: "44444444-4444-4444-8444-444444444444"
+lifecycle:
+  prevent_destroy: [projects]
+  allow_data_loss: []
 `
 
 func TestLoadMergesMultipleFiles(t *testing.T) {
@@ -61,6 +64,12 @@ databases:
 	}
 	if len(cfg.Databases) != 2 {
 		t.Fatalf("databases = %d, want 2", len(cfg.Databases))
+	}
+	// lifecycle vient de workspace.yaml comme le reste de la config globale.
+	// Sans cette assertion, supprimer la fusion de lifecycle ne casserait aucun
+	// test, alors que prevent_destroy est un garde-fou de sécurité.
+	if len(cfg.Lifecycle.PreventDestroy) != 1 || cfg.Lifecycle.PreventDestroy[0] != "projects" {
+		t.Errorf("Lifecycle.PreventDestroy = %v, want [projects]", cfg.Lifecycle.PreventDestroy)
 	}
 	// Ordre déterministe : par key triée. Il n'y a pas de graphe au MVP 0,
 	// mais la sortie de plan doit être stable entre deux runs.
@@ -163,6 +172,24 @@ func TestLoadRequiresVersionInWorkspaceFile(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
+	}
+}
+
+func TestLoadRejectsWrongVersionWithADifferentHint(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": "version: 2\nworkspace:\n  parent_page_id: \"abc\"\n",
+	})
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load() error = nil, want un rejet de version: 2")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "remplacez") {
+		t.Errorf("message = %q : quand le champ est présent mais faux, le conseil doit dire de le REMPLACER", msg)
+	}
+	if strings.Contains(msg, "ajoutez") {
+		t.Errorf("message = %q : « ajoutez » envoie chercher un champ déjà présent", msg)
 	}
 }
 

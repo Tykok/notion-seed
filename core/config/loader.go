@@ -72,22 +72,35 @@ func Load(dir string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Pour workspace.yaml, vérifier la version AVANT la validation du schéma,
+		// sinon le schéma rejette une version fausse avec son propre message avant
+		// qu'on puisse donner notre message plus utile.
+		if path == wsPath {
+			var doc document
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				return nil, &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
+			}
+			if doc.Version != 1 {
+				hint := "ajoutez `version: 1` en tête du fichier"
+				if doc.Version != 0 {
+					// Si le champ est présent mais faux, dire de le remplacer
+					hint = fmt.Sprintf("remplacez `version: %d` par `version: 1`", doc.Version)
+				}
+				return nil, &ValidationError{
+					Path:    path,
+					Message: fmt.Sprintf("`version: 1` est obligatoire dans %s (trouvé %d)", WorkspaceFile, doc.Version),
+					Hint:    hint,
+				}
+			}
+		}
+
 		if err := ValidateDocument(path, raw); err != nil {
 			return nil, err
 		}
 		var doc document
 		if err := yaml.Unmarshal(raw, &doc); err != nil {
 			return nil, &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
-		}
-		// `version` n'est pas dans le `required` du schéma, parce que la
-		// validation est par document et que les fichiers de databases/ ne le
-		// portent pas. L'exigence vit donc ici, où l'on sait quel fichier on lit.
-		if path == wsPath && doc.Version != 1 {
-			return nil, &ValidationError{
-				Path:    path,
-				Message: fmt.Sprintf("`version: 1` est obligatoire dans %s (trouvé %d)", WorkspaceFile, doc.Version),
-				Hint:    "ajoutez `version: 1` en tête du fichier",
-			}
 		}
 		if doc.Workspace != nil {
 			cfg.Workspace = *doc.Workspace
