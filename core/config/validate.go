@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"github.com/tykok/notion-seed/schema"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -95,7 +96,7 @@ func ValidateDocument(path string, yamlBytes []byte) error {
 		Path:    path,
 		Pointer: pointer,
 		Message: leaf.ErrorKind.LocalizedString(msgPrinter),
-		Hint:    hintFor(pointer, jsonBytes),
+		Hint:    hintFor(pointer, leaf.ErrorKind, jsonBytes),
 	}
 }
 
@@ -125,35 +126,48 @@ func deepestCause(ve *jsonschema.ValidationError) *jsonschema.ValidationError {
 //     alors « 'not' failed » et rien d'autre — le mot-clé `not` dit seulement
 //     « ceci n'aurait pas dû valider », il ne porte aucune information sur ce
 //     qui a validé à tort. Le contexte doit donc venir d'ici.
-func hintFor(pointer string, jsonBytes []byte) string {
+//
+// L'ErrorKind est passé, et non deviné depuis la forme du document : un hint
+// qui filtre sur la forme se déclenche aussi quand l'échec réel est ailleurs.
+// Mesuré : une propriété sans `type` mais avec `options` produisait « missing
+// property 'type' » suivi de « retirez le bloc options », soit l'inverse de la
+// correction. Un message faux vaut moins qu'un message vide.
+func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 	var doc any
 	if err := json.Unmarshal(jsonBytes, &doc); err != nil {
 		return ""
 	}
 
-	// Cas `not` : le pointeur désigne la PROPRIÉTÉ, pas le champ fautif, donc
-	// on regarde ce qu'elle contient pour nommer le champ en trop.
-	if prop, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
-		t, _ := prop["type"].(string)
-		if _, hasOptions := prop["options"]; hasOptions && !acceptsOptions(t) {
-			return fmt.Sprintf(
-				"`options` n'existe que sur les types select, status et multi_select. La propriété est de type %q — retirez le bloc `options`.",
-				t)
+	// Cas `not` UNIQUEMENT : le pointeur désigne la PROPRIÉTÉ, pas le champ
+	// fautif, donc on regarde ce qu'elle contient pour nommer le champ en trop.
+	if _, isNot := errKind.(*kind.Not); isNot {
+		if prop, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+			t, _ := prop["type"].(string)
+			if _, hasOptions := prop["options"]; hasOptions && !acceptsOptions(t) {
+				return fmt.Sprintf(
+					"`options` n'existe que sur les types select, status et multi_select. La propriété est de type %q — retirez le bloc `options`.",
+					t)
+			}
+			if _, hasFormat := prop["format"]; hasFormat && t != "number" {
+				return fmt.Sprintf(
+					"`format` n'existe que sur le type number. La propriété est de type %q — retirez le champ `format`.",
+					t)
+			}
 		}
-		if _, hasFormat := prop["format"]; hasFormat && t != "number" {
-			return fmt.Sprintf(
-				"`format` n'existe que sur le type number. La propriété est de type %q — retirez le champ `format`.",
-				t)
-		}
+		return ""
 	}
 
-	// Piège du round-trip YAML : un scalaire non quoté en forme de date est
-	// résolu par yaml.v3 en time.Time, puis rendu en RFC3339. L'utilisateur est
-	// alors jugé sur une valeur qu'il n'a jamais écrite.
-	if got, ok := valueAtPointer(doc, pointer).(string); ok && looksLikeTimestamp(got) {
-		return fmt.Sprintf(
-			"la valeur a été interprétée comme une date par YAML et devient %q. Entourez-la de guillemets pour qu'elle reste du texte.",
-			got)
+	// Piège du round-trip YAML, sur un échec de motif UNIQUEMENT : un scalaire
+	// non quoté en forme de date est résolu par yaml.v3 en time.Time, puis rendu
+	// en RFC3339. Formulation prudente : on ne voit que la valeur décodée, jamais
+	// la source, donc on ne peut pas savoir si l'utilisateur avait déjà quoté —
+	// affirmer qu'il ne l'a pas fait serait faux une fois sur deux.
+	if _, isPattern := errKind.(*kind.Pattern); isPattern {
+		if got, ok := valueAtPointer(doc, pointer).(string); ok && looksLikeTimestamp(got) {
+			return fmt.Sprintf(
+				"si cette valeur n'était pas entourée de guillemets dans le YAML, elle a été interprétée comme une date et devient %q — dans ce cas, ajoutez des guillemets pour qu'elle reste du texte.",
+				got)
+		}
 	}
 
 	if !strings.HasSuffix(pointer, "/group") {

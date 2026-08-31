@@ -181,6 +181,32 @@ databases:
 	}
 }
 
+// Un hint ne doit jamais contredire l'erreur qu'il accompagne. Mesuré : filtrer
+// sur la forme du document faisait dire « retirez le bloc options » alors que
+// l'erreur réelle était « type manquant ».
+func TestValidateDocumentHintNeverContradictsTheError(t *testing.T) {
+	doc := []byte(`
+version: 1
+databases:
+  - name: "P"
+    properties:
+      Repository:
+        options:
+          - name: "x"
+`)
+	err := ValidateDocument("databases/projects.yaml", doc)
+	if err == nil {
+		t.Fatal("ValidateDocument() error = nil, want un rejet du type manquant")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "type") {
+		t.Errorf("message = %q, il doit signaler le type manquant", msg)
+	}
+	if strings.Contains(msg, "retirez le bloc `options`") {
+		t.Errorf("message = %q : le conseil contredit l'erreur — le vrai correctif est d'AJOUTER `type`", msg)
+	}
+}
+
 // Un scalaire non quoté en forme de date est résolu par yaml.v3 en time.Time.
 // L'utilisateur est alors jugé sur une valeur qu'il n'a jamais tapée : le
 // message doit lui dire de mettre des guillemets.
