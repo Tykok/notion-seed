@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"time"
+
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tykok/notion-seed/schema"
 	"golang.org/x/text/language"
@@ -114,15 +116,47 @@ func deepestCause(ve *jsonschema.ValidationError) *jsonschema.ValidationError {
 	return ve
 }
 
-// hintFor produit un conseil ciblé sur les pièges connus de l'API Notion.
-// Le cas central : l'API exige "To-do" avec un trait d'union. Un message
-// d'énumération brut ne le rend pas visible.
+// hintFor produit un conseil ciblé là où le message de la bibliothèque ne suffit
+// pas. Deux familles de cas :
+//
+//  1. Les pièges de l'API Notion, dont le central : elle exige "To-do" avec un
+//     trait d'union, et un message d'énumération brut ne le rend pas visible.
+//  2. Les contraintes que le schéma exprime par un `not`. La bibliothèque rend
+//     alors « 'not' failed » et rien d'autre — le mot-clé `not` dit seulement
+//     « ceci n'aurait pas dû valider », il ne porte aucune information sur ce
+//     qui a validé à tort. Le contexte doit donc venir d'ici.
 func hintFor(pointer string, jsonBytes []byte) string {
-	if !strings.HasSuffix(pointer, "/group") {
-		return ""
-	}
 	var doc any
 	if err := json.Unmarshal(jsonBytes, &doc); err != nil {
+		return ""
+	}
+
+	// Cas `not` : le pointeur désigne la PROPRIÉTÉ, pas le champ fautif, donc
+	// on regarde ce qu'elle contient pour nommer le champ en trop.
+	if prop, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+		t, _ := prop["type"].(string)
+		if _, hasOptions := prop["options"]; hasOptions && !acceptsOptions(t) {
+			return fmt.Sprintf(
+				"`options` n'existe que sur les types select, status et multi_select. La propriété est de type %q — retirez le bloc `options`.",
+				t)
+		}
+		if _, hasFormat := prop["format"]; hasFormat && t != "number" {
+			return fmt.Sprintf(
+				"`format` n'existe que sur le type number. La propriété est de type %q — retirez le champ `format`.",
+				t)
+		}
+	}
+
+	// Piège du round-trip YAML : un scalaire non quoté en forme de date est
+	// résolu par yaml.v3 en time.Time, puis rendu en RFC3339. L'utilisateur est
+	// alors jugé sur une valeur qu'il n'a jamais écrite.
+	if got, ok := valueAtPointer(doc, pointer).(string); ok && looksLikeTimestamp(got) {
+		return fmt.Sprintf(
+			"la valeur a été interprétée comme une date par YAML et devient %q. Entourez-la de guillemets pour qu'elle reste du texte.",
+			got)
+	}
+
+	if !strings.HasSuffix(pointer, "/group") {
 		return ""
 	}
 	got, ok := valueAtPointer(doc, pointer).(string)
@@ -136,6 +170,18 @@ func hintFor(pointer string, jsonBytes []byte) string {
 	return fmt.Sprintf(
 		"`group` n'accepte que %s — l'API Notion refuse les groupes nommés librement. Trouvé %q.",
 		quotedList(StatusGroups), got)
+}
+
+// acceptsOptions dit si un type de propriété accepte un bloc `options`.
+func acceptsOptions(t string) bool {
+	return t == "select" || t == "status" || t == "multi_select"
+}
+
+// looksLikeTimestamp reconnaît la forme RFC3339 que json.Marshal produit à
+// partir d'un time.Time issu du round-trip YAML.
+func looksLikeTimestamp(v string) bool {
+	_, err := time.Parse(time.RFC3339, v)
+	return err == nil
 }
 
 func normalizeGroup(s string) string {
@@ -164,8 +210,10 @@ func valueAtPointer(doc any, pointer string) any {
 		case map[string]any:
 			cur = node[token]
 		case []any:
+			// Garde sur les deux bornes. Ce code ne s'exécute qu'APRÈS qu'autre
+			// chose a déjà échoué : il ne doit jamais pouvoir faire planter la CLI.
 			var idx int
-			if _, err := fmt.Sscanf(token, "%d", &idx); err != nil || idx >= len(node) {
+			if _, err := fmt.Sscanf(token, "%d", &idx); err != nil || idx < 0 || idx >= len(node) {
 				return nil
 			}
 			cur = node[idx]

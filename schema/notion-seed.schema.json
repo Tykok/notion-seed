@@ -4,6 +4,7 @@
   "title": "notion-seed configuration",
   "type": "object",
   "additionalProperties": false,
+  "comment": "version n'est volontairement PAS dans un `required` : la validation est par document, et seul workspace.yaml porte ce champ — les fichiers de databases/ ne le portent pas. L'exigence de sa présence dans workspace.yaml est portée par le chargeur.",
   "properties": {
     "version": { "const": 1 },
     "workspace": {
