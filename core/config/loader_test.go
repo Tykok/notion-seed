@@ -173,6 +173,10 @@ func TestLoadRequiresVersionInWorkspaceFile(t *testing.T) {
 			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
 	}
+	// Ne pas exposer "trouvé 0" : c'est un détail d'implémentation (zéro Go), pas ce qu'a écrit l'utilisateur.
+	if strings.Contains(err.Error(), "trouvé 0") {
+		t.Errorf("message = %q, ne doit pas rapporter la version absente comme « trouvé 0 »", err.Error())
+	}
 }
 
 func TestLoadRejectsWrongVersionWithADifferentHint(t *testing.T) {

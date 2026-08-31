@@ -83,13 +83,15 @@ func Load(dir string) (*Config, error) {
 			}
 			if doc.Version != 1 {
 				hint := "ajoutez `version: 1` en tête du fichier"
+				what := "absent"
 				if doc.Version != 0 {
 					// Si le champ est présent mais faux, dire de le remplacer
 					hint = fmt.Sprintf("remplacez `version: %d` par `version: 1`", doc.Version)
+					what = fmt.Sprintf("trouvé %d", doc.Version)
 				}
 				return nil, &ValidationError{
 					Path:    path,
-					Message: fmt.Sprintf("`version: 1` est obligatoire dans %s (trouvé %d)", WorkspaceFile, doc.Version),
+					Message: fmt.Sprintf("`version: 1` est obligatoire dans %s (%s)", WorkspaceFile, what),
 					Hint:    hint,
 				}
 			}
