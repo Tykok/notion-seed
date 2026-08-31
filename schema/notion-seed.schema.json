@@ -12,7 +12,11 @@
       "additionalProperties": false,
       "required": ["parent_page_id"],
       "properties": {
-        "parent_page_id": { "type": "string", "minLength": 1 }
+        "parent_page_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$",
+          "description": "UUID de la page parente, avec ou sans tirets. Contraint ici pour que la config soit rejetée avant l'appel : l'API répond sinon un 400 validation_error dont le message est moins clair, et un id en forme de chemin relatif produirait une URL qui vise un autre endpoint."
+        }
       }
     },
     "databases": {

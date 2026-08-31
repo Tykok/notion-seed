@@ -160,7 +160,7 @@ func TestLoadIgnoresNonYAMLFiles(t *testing.T) {
 
 func TestLoadRequiresVersionInWorkspaceFile(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
-		"workspace.yaml": "workspace:\n  parent_page_id: \"abc\"\n",
+		"workspace.yaml":          "workspace:\n  parent_page_id: \"abc\"\n",
 		"databases/projects.yaml": "databases:\n  - key: projects\n    name: \"P\"\n    properties:\n      Name:\n        type: title\n",
 	})
 
@@ -261,5 +261,143 @@ databases:
 	}
 	if !strings.HasSuffix(cfg.Databases[0].SourceFile, "databases/projects.yaml") {
 		t.Errorf("SourceFile = %q", cfg.Databases[0].SourceFile)
+	}
+}
+
+// Démontré avant correction : `databases/z.yaml` déclarant
+// `workspace.parent_page_id: "HIJACKED"` produisait un GET /v1/pages/HIJACKED
+// alors que workspace.yaml disait autre chose, sans un avertissement. Le fichier
+// de databases/ gagne toujours, puisque workspace.yaml est fusionné en premier.
+func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		section string
+	}{
+		{
+			"workspace détourne la cible d'écriture",
+			"workspace:\n  parent_page_id: \"00000000-0000-0000-0000-000000000000\"\n" +
+				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
+			"workspace",
+		},
+		{
+			"lifecycle efface le garde-fou",
+			"lifecycle:\n  prevent_destroy: []\n" +
+				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
+			"lifecycle",
+		},
+		{
+			"version hors de workspace.yaml",
+			"version: 2\n" +
+				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
+			"version",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeConfig(t, map[string]string{
+				"workspace.yaml":   workspaceYAML,
+				"databases/z.yaml": tt.content,
+			})
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatalf("Load() error = nil, want un rejet de la section %q", tt.section)
+			}
+			// Le fichier ET la section fautive doivent être nommés, sinon
+			// l'utilisateur ne sait pas lequel de ses fichiers a gagné la fusion.
+			for _, want := range []string{"z.yaml", tt.section, WorkspaceFile} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// Le garde-fou ne doit pas se retourner contre workspace.yaml lui-même, qui
+// porte légitimement les trois sections.
+func TestLoadStillAcceptsGlobalSectionsInWorkspaceFile(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		"databases/z.yaml": "databases:\n  - key: z\n    name: \"Z\"\n" +
+			"    properties:\n      Name:\n        type: title\n",
+	})
+
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+// Démontré avant correction : une database avec deux propriétés `title` et une
+// avec zéro produisaient toutes deux `+ create` et un exit 0. L'API n'accepte
+// qu'exactement une propriété title par data source, donc plan annonçait quelque
+// chose qui ne peut pas se produire.
+func TestLoadRejectsDatabasesWithoutExactlyOneTitle(t *testing.T) {
+	tests := []struct {
+		name       string
+		properties string
+		wantInMsg  []string
+	}{
+		{
+			"deux title",
+			"      Name:\n        type: title\n      Autre:\n        type: title\n",
+			[]string{"z.yaml", `"Autre"`, `"Name"`, "2"},
+		},
+		{
+			"zéro title",
+			"      Estimate:\n        type: number\n",
+			[]string{"z.yaml", "title"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeConfig(t, map[string]string{
+				"workspace.yaml": workspaceYAML,
+				"databases/z.yaml": "databases:\n  - key: z\n    name: \"Z\"\n    properties:\n" +
+					tt.properties,
+			})
+
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("Load() error = nil, want un rejet : l'API exige exactement une propriété title")
+			}
+			for _, want := range tt.wantInMsg {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// parent_page_id porte un motif UUID : un id en forme de chemin relatif
+// produirait une URL qui vise un autre endpoint, et l'erreur de l'API sur un id
+// mal formé est moins claire que celle-ci.
+func TestLoadRejectsMalformedParentPageID(t *testing.T) {
+	for _, bad := range []string{"page1", "../../v1/users", "3cdf830d"} {
+		dir := writeConfig(t, map[string]string{
+			"workspace.yaml": "version: 1\nworkspace:\n  parent_page_id: \"" + bad + "\"\n",
+		})
+
+		_, err := Load(dir)
+		if err == nil {
+			t.Fatalf("Load() error = nil pour parent_page_id = %q", bad)
+		}
+		if !strings.Contains(err.Error(), "UUID") {
+			t.Errorf("message = %q pour %q, il doit dire où trouver l'UUID", err.Error(), bad)
+		}
+	}
+}
+
+// Un parent_page_id sans tirets est accepté : l'API Notion le tolère, et les
+// URL de Notion le rendent sous cette forme.
+func TestLoadAcceptsParentPageIDWithoutHyphens(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": "version: 1\nworkspace:\n  parent_page_id: \"3cdf830dbf9f81618d11c08cacf79fa2\"\n",
+	})
+
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("Load() error = %v", err)
 	}
 }

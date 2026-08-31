@@ -87,8 +87,15 @@ databases:
 		t.Fatal("ValidateDocument() error = nil, want un rejet de `To do`")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, `"To-do"`) {
-		t.Errorf("message = %q, il doit proposer la forme exacte \"To-do\"", msg)
+	// Asserter la seule présence de "To-do" ne prouvait rien : le hint générique
+	// de groupe le contient aussi, comme le message d'énumération de la
+	// bibliothèque. Supprimer la branche dédiée au piège laissait ce test vert.
+	// Ce qui est propre à la branche dédiée, c'est de NOMMER le trait d'union et
+	// de dire de REMPLACER la valeur.
+	for _, want := range []string{"trait d'union", "Remplacez", `"To do"`, `"To-do"`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message = %q, il doit contenir %q", msg, want)
+		}
 	}
 }
 
@@ -104,8 +111,18 @@ databases:
           - name: "Idea"
             group: "Backlog"
 `)
-	if err := ValidateDocument("databases/projects.yaml", doc); err == nil {
+	err := ValidateDocument("databases/projects.yaml", doc)
+	if err == nil {
 		t.Fatal("ValidateDocument() error = nil, want un rejet de `Backlog`")
+	}
+	// `err != nil` seul ne disait pas si l'utilisateur apprend quoi que ce soit.
+	// Le message doit nommer la valeur refusée, les trois groupes acceptés, et le
+	// fait que l'API refuse les groupes nommés librement.
+	msg := err.Error()
+	for _, want := range []string{`"Backlog"`, `"To-do"`, `"In progress"`, `"Complete"`, "librement"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message = %q, il doit contenir %q", msg, want)
+		}
 	}
 }
 

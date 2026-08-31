@@ -26,6 +26,14 @@ func writeConfigDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// testParentPageID est un UUID bien formé : le schéma impose ce motif sur
+// parent_page_id, pour que la config soit rejetée avant l'appel plutôt que par
+// un 400 de l'API.
+const testParentPageID = "44444444-4444-4444-8444-444444444444"
+
+// workspaceYAML est le workspace.yaml minimal des tests de plan.
+const workspaceYAML = "version: 1\nworkspace:\n  parent_page_id: \"" + testParentPageID + "\"\n"
+
 const twoDatabases = `
 databases:
   - key: projects
@@ -45,7 +53,7 @@ databases:
 func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
 	withFakeNtn(t, "ok")
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     "version: 1\nworkspace:\n  parent_page_id: \"page1\"\n",
+		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
 	})
 
@@ -73,7 +81,7 @@ func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
 
 func TestPlanFailsOnDuplicateKeyNamingBothFiles(t *testing.T) {
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":   "version: 1\nworkspace:\n  parent_page_id: \"page1\"\n",
+		"workspace.yaml":   workspaceYAML,
 		"databases/a.yaml": "databases:\n  - key: projects\n    name: \"A\"\n    properties:\n      Name:\n        type: title\n",
 		"databases/b.yaml": "databases:\n  - key: projects\n    name: \"B\"\n    properties:\n      Name:\n        type: title\n",
 	})
@@ -100,7 +108,7 @@ func TestPlanFailsOnDuplicateKeyNamingBothFiles(t *testing.T) {
 func TestPlanWritesNothingToDisk(t *testing.T) {
 	withFakeNtn(t, "ok")
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     "version: 1\nworkspace:\n  parent_page_id: \"page1\"\n",
+		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
 	})
 
@@ -168,7 +176,7 @@ func snapshot(t *testing.T, root string) map[string]string {
 
 func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     "version: 1\nworkspace:\n  parent_page_id: \"page1\"\n",
+		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
 	})
 	tests := []struct {
@@ -206,7 +214,7 @@ func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
 func TestDiffProducesSameOutputAsPlan(t *testing.T) {
 	withFakeNtn(t, "ok")
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     "version: 1\nworkspace:\n  parent_page_id: \"page1\"\n",
+		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
 	})
 

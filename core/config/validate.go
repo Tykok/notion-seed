@@ -163,6 +163,13 @@ func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 	// la source, donc on ne peut pas savoir si l'utilisateur avait déjà quoté —
 	// affirmer qu'il ne l'a pas fait serait faux une fois sur deux.
 	if _, isPattern := errKind.(*kind.Pattern); isPattern {
+		// Le motif UUID de parent_page_id est la porte d'entrée de tout `plan` :
+		// le message brut du validateur affiche l'expression rationnelle, ce qui
+		// ne dit pas où trouver la bonne valeur.
+		if strings.HasSuffix(pointer, "/parent_page_id") {
+			return "l'id de la page parente est un UUID : ouvrez la page dans Notion et " +
+				"copiez les 32 caractères hexadécimaux à la fin de son URL (avec ou sans tirets)."
+		}
 		if got, ok := valueAtPointer(doc, pointer).(string); ok && looksLikeTimestamp(got) {
 			return fmt.Sprintf(
 				"si cette valeur n'était pas entourée de guillemets dans le YAML, elle a été interprétée comme une date et devient %q — dans ce cas, ajoutez des guillemets pour qu'elle reste du texte.",
