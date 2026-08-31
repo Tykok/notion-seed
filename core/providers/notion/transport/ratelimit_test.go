@@ -108,6 +108,57 @@ func TestTokenBucketRespectsContextCancellation(t *testing.T) {
 	}
 }
 
+// RealClock.Sleep doit rendre dès l'annulation, pas au bout de la durée
+// demandée. Sans ça, un Ctrl+C pendant un apply rate-limité attendrait la fin
+// du backoff.
+func TestRealClockSleepReturnsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	err := RealClock{}.Sleep(ctx, 10*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("Sleep() error = nil, want une erreur d'annulation")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("Sleep a duré %v : l'annulation n'a pas interrompu l'attente", elapsed)
+	}
+}
+
+// cancellingClock annule le contexte en effet de bord de son Sleep, puis rend
+// nil. Ça cible la revérification de ctx que Wait fait APRÈS le Sleep : sans
+// elle, un jeton serait consommé sur un contexte déjà annulé.
+type cancellingClock struct {
+	now    time.Time
+	cancel context.CancelFunc
+}
+
+func (c *cancellingClock) Now() time.Time { return c.now }
+
+func (c *cancellingClock) Sleep(_ context.Context, d time.Duration) error {
+	c.now = c.now.Add(d)
+	c.cancel()
+	return nil
+}
+
+func TestTokenBucketRechecksContextAfterSleeping(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	clock := &cancellingClock{now: time.Unix(0, 0), cancel: cancel}
+	b := NewTokenBucket(1, 1, clock)
+
+	if err := b.Wait(ctx); err != nil {
+		t.Fatalf("premier Wait error = %v", err)
+	}
+	// Le bucket est vide : ce Wait dort, et le Sleep annule le contexte.
+	if err := b.Wait(ctx); err == nil {
+		t.Error("Wait() error = nil : le contexte annulé pendant le Sleep a été ignoré")
+	}
+}
+
 func TestTokenBucketIsSharedAcrossGoroutines(t *testing.T) {
 	clock := newFakeClock()
 	b := NewTokenBucket(5, 10, clock)

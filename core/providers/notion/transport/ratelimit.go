@@ -2,14 +2,16 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
 
 // DefaultRatePerSec et DefaultBurst : le spike a mesuré 21 req/s en lecture et
-// 7,5 writes/s sans un seul 429. Le plafond de ~3 req/s annoncé par la
-// documentation n'a jamais été atteint. 5 garde de la marge sans brider apply
-// d'un facteur 8 sur une base non vérifiée.
+// 7,5 writes/s, sans un seul 429 et sans un seul header Retry-After. Le plafond
+// de ~3 req/s annoncé par la documentation n'a jamais été atteint. Câbler les
+// 2,5 req/s que ce plafond suggère briderait chaque apply d'un facteur 8 sur
+// une base non vérifiée ; 5 garde de la marge tout en restant mesuré.
 const (
 	DefaultRatePerSec = 5.0
 	DefaultBurst      = 10
@@ -55,7 +57,18 @@ type TokenBucket struct {
 	clock    Clock
 }
 
+// NewTokenBucket panique si ratePerSec ou burst n'est pas strictement positif.
+// C'est un contrat de programmation, à la manière de regexp.MustCompile : un
+// rate nul ferait dormir 292 ans (time.Duration(+Inf) sature à MaxInt64) et un
+// rate négatif ferait tourner Wait à vide en consommant un cœur. Les appelants
+// qui lisent une valeur utilisateur la valident avant d'arriver ici.
 func NewTokenBucket(ratePerSec float64, burst int, clock Clock) *TokenBucket {
+	if ratePerSec <= 0 {
+		panic(fmt.Sprintf("NewTokenBucket: ratePerSec doit être > 0, reçu %v", ratePerSec))
+	}
+	if burst <= 0 {
+		panic(fmt.Sprintf("NewTokenBucket: burst doit être > 0, reçu %d", burst))
+	}
 	if clock == nil {
 		clock = RealClock{}
 	}
