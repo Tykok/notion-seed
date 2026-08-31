@@ -270,27 +270,45 @@ databases:
 // de databases/ gagne toujours, puisque workspace.yaml est fusionné en premier.
 func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string
-		section string
+		name         string
+		content      string
+		section      string
+		wantInMsg    []string
+		wantNotInMsg []string
 	}{
 		{
-			"workspace détourne la cible d'écriture",
-			"workspace:\n  parent_page_id: \"00000000-0000-0000-0000-000000000000\"\n" +
+			name: "workspace détourne la cible d'écriture",
+			content: "workspace:\n  parent_page_id: \"00000000-0000-0000-0000-000000000000\"\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
-			"workspace",
+			section:   "workspace",
+			wantInMsg: []string{"déplacez", "détourne la cible d'écriture"},
+			// Rien à supprimer ici : la section se déplace, elle ne disparaît pas.
+			wantNotInMsg: []string{"supprimez"},
 		},
 		{
-			"lifecycle efface le garde-fou",
-			"lifecycle:\n  prevent_destroy: []\n" +
+			name: "lifecycle efface le garde-fou",
+			content: "lifecycle:\n  prevent_destroy: []\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
-			"lifecycle",
+			section:      "lifecycle",
+			wantInMsg:    []string{"déplacez", "efface le garde-fou"},
+			wantNotInMsg: []string{"supprimez"},
 		},
 		{
-			"version hors de workspace.yaml",
-			"version: 2\n" +
+			// Résidu de re-review : un utilisateur suivant le conseil "déplacez"
+			// pour une offense `version` seule copierait une ligne déjà présente
+			// dans workspace.yaml — la bonne action est de la supprimer, et la
+			// justification sur parent_page_id/lifecycle n'a rien à faire là,
+			// puisque ni l'un ni l'autre n'est en cause ici.
+			name: "version hors de workspace.yaml",
+			content: "version: 2\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
-			"version",
+			section:   "version",
+			wantInMsg: []string{"supprimez"},
+			wantNotInMsg: []string{
+				"déplacez",
+				"détourne la cible d'écriture",
+				"efface le garde-fou",
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -309,6 +327,16 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 			for _, want := range []string{"z.yaml", tt.section, WorkspaceFile} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+			for _, want := range tt.wantInMsg {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+			for _, notWant := range tt.wantNotInMsg {
+				if strings.Contains(err.Error(), notWant) {
+					t.Errorf("message = %q, il ne doit pas contenir %q", err.Error(), notWant)
 				}
 			}
 		})
@@ -399,5 +427,39 @@ func TestLoadAcceptsParentPageIDWithoutHyphens(t *testing.T) {
 
 	if _, err := Load(dir); err != nil {
 		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+// Résidu de re-review : la passe laxiste `map[string]any` tourne maintenant
+// AVANT ValidateDocument pour tous les fichiers. Un fichier de databases/
+// écrit comme une séquence YAML à la racine — l'erreur plausible d'oublier
+// la clé `databases:` — ne doit donc pas dégénérer en message brut du
+// décodeur ; le schéma ne voit jamais ce fichier assez tôt pour nommer
+// l'erreur lui-même.
+func TestLoadReportsNonMappingRootInProjectVoice(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		"databases/z.yaml": "- key: z\n  name: \"Z\"\n  properties:\n" +
+			"    Name:\n      type: title\n",
+	})
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("Load() error = nil, want un rejet de la racine non-mapping")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "z.yaml") {
+		t.Errorf("message = %q, il doit nommer le fichier fautif", msg)
+	}
+	if !strings.Contains(msg, "mapping") {
+		t.Errorf("message = %q, il doit dire dans sa propre voix que la racine n'est pas un mapping", msg)
+	}
+	if !strings.Contains(msg, "databases:") {
+		t.Errorf("message = %q, il doit nommer la cause plausible : la clé `databases:` oubliée", msg)
+	}
+	// Le texte brut du décodeur reste disponible comme cause, à la manière des
+	// autres erreurs de ce fichier — mais il ne doit pas être le SEUL message.
+	if !strings.Contains(msg, "cannot unmarshal") {
+		t.Errorf("message = %q, il doit garder le texte brut du décodeur comme cause", msg)
 	}
 }

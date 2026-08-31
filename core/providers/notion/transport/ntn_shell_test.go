@@ -201,6 +201,29 @@ func TestExecuteExitZeroWithoutStatusLineIsAnError(t *testing.T) {
 	}
 }
 
+// Résidu de re-review : sur un exit non-nul, parseErr était perdu — une trace
+// -v tronquée ou illisible dégradait vers OutcomeUnknownError générique, sans
+// dire que la trace elle-même était en cause. Miroir de
+// TestExecuteExitZeroWithoutStatusLineIsAnError, sur l'autre branche.
+func TestExecuteNonZeroExitWithUnreadableTraceKeepsParseHint(t *testing.T) {
+	withFakeNtn(t, "exit1_unreadable_trace")
+	tr := NewNtnShell()
+
+	_, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want une erreur sur trace -v illisible")
+	}
+	// La classification reste OutcomeUnknownError : un exit non-nul avec une
+	// trace illisible ne dit toujours pas ce qui s'est passé côté serveur.
+	var unknown *OutcomeUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("error = %v (%T), want *OutcomeUnknownError", err, err)
+	}
+	if !strings.Contains(err.Error(), "0.22.11") {
+		t.Errorf("message = %q, il doit garder le conseil d'épingler ntn 0.22.11", err.Error())
+	}
+}
+
 // Un 4xx rendu avec un exit 0 ne doit pas passer pour un succès : le statut
 // n'est vérifié nulle part en aval, donc c'est ici qu'il doit être reclassé.
 func TestExecuteStatusAtLeast400IsAnErrorEvenOnExitZero(t *testing.T) {

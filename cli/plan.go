@@ -136,8 +136,11 @@ func newTransport(cmd *cobra.Command, opts *planOptions) transport.Transport {
 // étant scopé utilisateur, il voit tout le workspace : un 404 ici signifie
 // que la page n'existe pas, pas qu'elle n'a pas été partagée.
 func checkParentPage(ctx context.Context, tr transport.Transport, pageID string, ratePerSec float64) error {
-	// Le schéma exige minLength: 1 aujourd'hui, mais parent_page_id deviendra
-	// optionnel quand les pages seront des ressources (post-MVP).
+	// Le schéma exige aujourd'hui parent_page_id non vide et conforme à un UUID
+	// (pattern) : cette branche est donc inatteignable en pratique tant que le
+	// champ reste obligatoire. Le garde-fou reste utile pour le jour où
+	// parent_page_id deviendra optionnel, quand les pages seront des ressources
+	// (post-MVP).
 	if pageID == "" {
 		return fmt.Errorf("workspace.parent_page_id est vide dans workspace.yaml")
 	}
@@ -162,9 +165,9 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 	// Le raisonnement « la page n'existe pas » ne vaut QUE pour un 404. Le jeton
 	// de ntn est scopé utilisateur et voit tout le workspace sans partage
 	// préalable, donc un 404 ne peut pas venir d'un défaut de partage —
-	// mais attacher ce raisonnement à un 400 (parent_page_id mal formé, que le
-	// schéma laisse passer) ou à un 403 enverrait l'utilisateur sur une fausse
-	// piste.
+	// mais attacher ce raisonnement à un 400 (le schéma valide déjà le format de
+	// parent_page_id ; un 400 signifie donc autre chose) ou à un 403 enverrait
+	// l'utilisateur sur une fausse piste.
 	var apiErr *transport.APIError
 	errors.As(err, &apiErr)
 	if apiErr != nil && apiErr.Status == 404 {

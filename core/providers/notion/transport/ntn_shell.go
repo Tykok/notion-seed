@@ -145,6 +145,17 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 			Message:    strings.TrimSpace(stderr.String()),
 		}
 	}
+	// Un exit non-nul ET une trace -v illisible (tronquée, ou un format que le
+	// scanner refuse) : parseErr était perdu ici, donc l'échec dégradait en
+	// OutcomeUnknownError générique sans dire que la trace elle-même était en
+	// cause — exactement le diagnostic que l'autre branche (exit 0) donne déjà.
+	// La classification OutcomeUnknownError reste correcte : une trace
+	// illisible sur un exit non-nul ne dit toujours pas ce qui s'est passé.
+	if parseErr != nil {
+		return resp, &OutcomeUnknownError{
+			Cause: fmt.Errorf("%w\n  → %s", parseErr, preflight.PinNtnHint()),
+		}
+	}
 	return resp, &OutcomeUnknownError{Cause: runErr}
 }
 

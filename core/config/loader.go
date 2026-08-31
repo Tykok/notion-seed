@@ -92,6 +92,16 @@ func Load(dir string) (*Config, error) {
 		// que le schéma, lui, sait la nommer.
 		var top map[string]any
 		if err := yaml.Unmarshal(raw, &top); err != nil {
+			if isNonMappingRoot(err) {
+				return nil, &ValidationError{
+					Path:    path,
+					Message: "la racine du document n'est pas un mapping (clé: valeur)",
+					Hint: fmt.Sprintf(
+						"un fichier de config doit être un mapping à sa racine — une liste de "+
+							"databases se déclare sous une clé `databases:`, pas directement à la "+
+							"racine (cause : %s)", err),
+				}
+			}
 			return nil, &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
 		}
 
@@ -187,12 +197,55 @@ func rejectGlobalSections(path string, top map[string]any) error {
 		Message: fmt.Sprintf(
 			"%s : un fichier de %s/ ne déclare que des databases",
 			subject, DatabasesDir),
-		Hint: fmt.Sprintf(
+		Hint: globalSectionsHint(found),
+	}
+}
+
+// globalSectionsHint donne l'action correcte, par section. `version` se
+// SUPPRIME : workspace.yaml déclare déjà `version: 1`, la déplacer n'aurait
+// aucun effet. `workspace` et `lifecycle` se DÉPLACENT, avec le rappel de ce
+// qu'ils font ailleurs qu'ici. Mesuré : un conseil unique de « déplacer »
+// disait de déplacer `version`, ce que personne ne peut faire utilement —
+// c'était le seul cas où suivre le message produisait l'action fausse.
+func globalSectionsHint(found []string) string {
+	var move []string
+	removeVersion := false
+	for _, section := range found {
+		if section == "version" {
+			removeVersion = true
+			continue
+		}
+		move = append(move, section)
+	}
+
+	var parts []string
+	if len(move) > 0 {
+		parts = append(parts, fmt.Sprintf(
 			"déplacez %s dans %s, le seul fichier qui porte la configuration globale — "+
 				"sinon `workspace.parent_page_id` y détourne la cible d'écriture et "+
 				"`lifecycle` y efface le garde-fou prevent_destroy",
-			quotedList(found), WorkspaceFile),
+			quotedList(move), WorkspaceFile))
 	}
+	if removeVersion {
+		parts = append(parts, fmt.Sprintf(
+			"supprimez `version` : %s la déclare déjà, elle n'a rien à faire ici",
+			WorkspaceFile))
+	}
+	return strings.Join(parts, " ; ")
+}
+
+// isNonMappingRoot reconnaît l'échec de décodage YAML spécifique où la
+// racine du document n'est pas un mapping (une séquence ou un scalaire nu) :
+// gopkg.in/yaml.v3 rend alors un *yaml.TypeError qui nomme le type refusé.
+// Une vraie erreur de syntaxe (indentation, ':' manquant...) rend un type
+// d'erreur différent et n'est pas interceptée ici : elle garde le message
+// "YAML illisible" brut, faute de mieux à dire.
+func isNonMappingRoot(err error) bool {
+	te, ok := err.(*yaml.TypeError)
+	if !ok || len(te.Errors) != 1 {
+		return false
+	}
+	return strings.Contains(te.Errors[0], "into map[string]interface {}")
 }
 
 // checkVersion exige `version: 1`. La présence du champ est lue sur la forme

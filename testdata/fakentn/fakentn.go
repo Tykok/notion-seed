@@ -154,6 +154,15 @@ func main() {
 		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n"+
 			"HTTP/2 200 (nouveau format)\n")
 		fmt.Fprint(os.Stdout, `{"object":"data_source","id":"abc"}`)
+	case "exit1_unreadable_trace":
+		// ntn sort en échec (1) avec une trace -v tronquée : une ligne de plus de
+		// 1 MiB sans retour à la ligne, au-delà de ce que le scanner accepte.
+		// Couvre le chemin où parseErr était perdu sur un exit non-nul, dégradant
+		// vers un OutcomeUnknownError générique sans dire que la trace elle-même
+		// était en cause.
+		io.Copy(io.Discard, os.Stdin)
+		fmt.Fprint(os.Stderr, strings.Repeat("a", 2*1024*1024))
+		os.Exit(1)
 	case "echo_stdin":
 		fmt.Fprint(os.Stderr, "< 200 OK\n")
 		io.Copy(os.Stdout, os.Stdin)
