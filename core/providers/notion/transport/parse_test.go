@@ -1,6 +1,9 @@
 package transport
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const stderr200 = `> GET https://api.notion.com/v1/data_sources/66666666-6666-4666-8666-666666666666
 > authorization: <redacted>
@@ -23,6 +26,10 @@ error: Public API request failed (429 Too Many Requests rate_limited): Rate limi
 `
 
 const stderr400 = `error: Public API request failed (400 Bad Request validation_error): body failed validation: body.parent.page_id should be a valid uuid, instead was ` + "`\"nope\"`" + `.
+`
+
+const stderr400MultiLine = `error: Public API request failed (400 Bad Request validation_error): body failed validation. Fix one:
+` + `body.properties.Status.status.options[4].group should be ` + "`\"To-do\"`" + `, ` + "`\"In progress\"`" + `, ` + "`\"Complete\"`" + `, or ` + "`\"undefined\"`" + `, instead was ` + "`\"Waiting on someone\"`" + `.
 `
 
 func TestParseStatusAndHeaders(t *testing.T) {
@@ -69,6 +76,7 @@ func TestParseAPIError(t *testing.T) {
 	}{
 		{"404 object_not_found", stderr404, true, 404, "object_not_found", "Could not find data_source"},
 		{"400 validation_error", stderr400, true, 400, "validation_error", "should be a valid uuid"},
+		{"400 validation_error multi-line", stderr400MultiLine, true, 400, "validation_error", "instead was"},
 		{"429 rate_limited", stderr429, true, 429, "rate_limited", "Rate limited"},
 		{"succès, pas d'erreur", stderr200, false, 0, "", ""},
 	}
@@ -87,7 +95,7 @@ func TestParseAPIError(t *testing.T) {
 			if apiErr.NotionCode != tt.code {
 				t.Errorf("NotionCode = %q, want %q", apiErr.NotionCode, tt.code)
 			}
-			if !contains(apiErr.Message, tt.contains) {
+			if !strings.Contains(apiErr.Message, tt.contains) {
 				t.Errorf("Message = %q, want it to contain %q", apiErr.Message, tt.contains)
 			}
 		})
@@ -108,17 +116,4 @@ func TestAPIErrorRetryable(t *testing.T) {
 			t.Errorf("status %d: Retryable() = %v, want %v", tt.status, got, tt.want)
 		}
 	}
-}
-
-func contains(haystack, needle string) bool {
-	return needle == "" || len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
-}
-
-func indexOf(h, n string) int {
-	for i := 0; i+len(n) <= len(h); i++ {
-		if h[i:i+len(n)] == n {
-			return i
-		}
-	}
-	return -1
 }
