@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -53,18 +52,15 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 
 	cmd := exec.CommandContext(ctx, t.Binary, args...)
 
-	// stdin est TOUJOURS explicitement défini. Un stdin hérité, ouvert et sans
-	// EOF, fait bloquer ntn api indéfiniment : c'est une source de body valide
-	// pour lui, et il attend l'EOF qui ne vient jamais.
+	// Avec un body, il part sur stdin (-d @-) et son EOF vient de la fin de
+	// lecture. Sans body, on laisse cmd.Stdin nil : os/exec donne alors
+	// /dev/null à l'enfant, ce qui est exactement ce qu'on veut.
+	//
+	// Ne JAMAIS assigner os.Stdin ici. `ntn api` traite stdin comme une source
+	// de body valide, donc un stdin sans EOF le fait attendre indéfiniment —
+	// mesuré : 2 ms avec Stdin nil, blocage jusqu'au kill avec os.Stdin.
 	if len(req.Body) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Body)
-	} else {
-		devNull, err := os.Open(os.DevNull)
-		if err != nil {
-			return APIResponse{}, err
-		}
-		defer devNull.Close()
-		cmd.Stdin = devNull
 	}
 
 	var stdout, stderr bytes.Buffer

@@ -152,18 +152,46 @@ func TestExecuteSendsBodyOnStdinWithDashData(t *testing.T) {
 	}
 }
 
-func TestExecuteWithoutBodyDoesNotHangOnStdin(t *testing.T) {
-	withFakeNtn(t, "ok")
+// Sans body, aucun -d @- ne doit être passé : le passer sans alimenter stdin
+// ferait attendre ntn un body qui n'arrive jamais.
+func TestExecuteWithoutBodyPassesNoDataFlag(t *testing.T) {
+	withFakeNtn(t, "echo_argv")
 	tr := NewNtnShell()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Execute a bloqué sans body : stdin n'est pas explicitement défini")
+	resp, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if strings.Contains(string(resp.Body), "-d") {
+		t.Errorf("argv %q contient -d alors qu'il n'y a pas de body", resp.Body)
+	}
+}
+
+// Un binaire introuvable n'a émis AUCUN appel : l'issue est connue, c'est un
+// échec franc. La classer en OutcomeUnknownError serait l'erreur symétrique de
+// celle du timeout.
+func TestExecuteBinaryNotFoundIsAKnownFailure(t *testing.T) {
+	tr := NewNtnShell()
+	tr.Binary = "notion-seed-nonexistent-binary-xyz"
+
+	start := time.Now()
+	_, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want une erreur")
+	}
+	var unknown *OutcomeUnknownError
+	if errors.As(err, &unknown) {
+		t.Error("binaire absent classé en OutcomeUnknownError : aucun appel n'a été émis, l'issue est connue")
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		t.Error("binaire absent classé en APIError : l'API n'a jamais été contactée")
+	}
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		t.Error("binaire absent classé en UsageError : l'appel était valide, c'est le binaire qui manque")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("a mis %v : un binaire absent doit échouer immédiatement", elapsed)
 	}
 }
