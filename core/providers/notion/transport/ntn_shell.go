@@ -95,13 +95,13 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 		// constaté. C'est le risque nommé par la spec, « ntn change son format
 		// de sortie », et il doit échouer vers le rouge.
 		if parseErr != nil {
-			return resp, fmt.Errorf("%w\n  → %s", parseErr, pinNtnHint)
+			return resp, fmt.Errorf("%w\n  → %s", parseErr, preflight.PinNtnHint())
 		}
 		if !hasStatus {
 			return resp, fmt.Errorf(
 				"ntn est sorti en 0 mais sa trace -v ne contient aucune ligne de statut : "+
 					"notion-seed ne peut pas vérifier que l'appel a abouti\n  → %s",
-				pinNtnHint)
+				preflight.PinNtnHint())
 		}
 		// Rien en aval ne regarde resp.Status : si ntn rendait un 4xx/5xx en
 		// sortant en 0, l'erreur passerait pour un succès. On la reclasse ici,
@@ -147,13 +147,6 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 	}
 	return resp, &OutcomeUnknownError{Cause: runErr}
 }
-
-// pinNtnHint est l'action corrective commune aux deux façons dont le contrat de
-// sortie de ntn peut casser. La version vient de preflight : le format de sortie
-// de ntn est un contrat unique, il n'a qu'une source de vérité.
-var pinNtnHint = fmt.Sprintf(
-	"épinglez ntn %s (`npm i -g ntn@%s`), la seule version sur laquelle le format de sortie a été mesuré",
-	preflight.MinNtnVersion, preflight.MinNtnVersion)
 
 // checkPath refuse un chemin que notion-seed n'aurait pas dû construire. Il n'y
 // a pas d'injection possible aujourd'hui — argv part en éléments séparés, aucun

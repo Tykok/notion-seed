@@ -1,8 +1,12 @@
 package mapper
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/tykok/notion-seed/core/providers/notion/resources"
+	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
 const dbBody = `{
@@ -147,5 +151,53 @@ func TestRemoteDatabaseFromJSONRejectsStatusOptionMissingFromAnyGroup(t *testing
 	}
 	if !strings.Contains(err.Error(), "Building") {
 		t.Errorf("erreur = %q, want qu'elle nomme l'option %q", err.Error(), "Building")
+	}
+}
+
+// stubTransport rend une réponse par chemin appelé, et retient les chemins.
+type stubTransport struct {
+	byPath map[string]string
+	calls  []string
+}
+
+func (s *stubTransport) Execute(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+	s.calls = append(s.calls, req.Path)
+	return transport.APIResponse{Status: 200, Body: []byte(s.byPath[req.Path])}, nil
+}
+
+// La sonde minimale de resources.Read et le décodeur de ce paquet lisent tous
+// deux data_sources[0].id depuis le MÊME corps, avec deux structs distincts.
+//
+// Ce test vit ici et non dans resources : là-bas, il ne pouvait qu'injecter une
+// closure codée en dur, donc renommer le tag `json:"data_sources"` de
+// from_api.go ne cassait rien — le contrôle compensatoire qui justifiait la
+// duplication n'existait pas. Ici, le vrai décodeur tourne sur la fixture que
+// la sonde a lue, et les deux doivent s'accorder sur l'id.
+func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
+	const probeBody = `{"object":"database","id":"db1","data_sources":[{"id":"ds-attendu","name":"P"}]}`
+	st := &stubTransport{byPath: map[string]string{
+		"/v1/databases/db1": probeBody,
+		"/v1/data_sources/ds-attendu": `{"id":"ds-attendu","title":[{"plain_text":"P"}],
+			"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`,
+	}}
+	r := resources.NewDatabaseResource(st, RemoteDatabaseFromJSON)
+
+	state, err := r.Read(context.Background(), "db1")
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	db, ok := state.(resources.RemoteDatabase)
+	if !ok {
+		t.Fatalf("Read() a rendu %T, want resources.RemoteDatabase", state)
+	}
+	if db.DataSourceID != "ds-attendu" {
+		t.Errorf("le décodeur a lu DataSourceID = %q, want %q", db.DataSourceID, "ds-attendu")
+	}
+	if len(st.calls) != 2 {
+		t.Fatalf("appels = %v, want database puis data_source", st.calls)
+	}
+	if st.calls[1] != "/v1/data_sources/"+db.DataSourceID {
+		t.Errorf("la sonde a appelé %q, le décodeur a lu l'id %q : les deux formes ont dérivé",
+			st.calls[1], db.DataSourceID)
 	}
 }

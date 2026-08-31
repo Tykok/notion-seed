@@ -83,18 +83,25 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	// corps — il ne peut donc pas tourner en premier. Exporter un helper depuis
 	// mapper recréerait le cycle d'import que l'injection brise, et injecter une
 	// seconde fonction pour un seul champ coûterait plus que la duplication.
-	// TestProbeAndDecoderAgreeOnDataSourceID garde les deux formes synchronisées.
+	// TestProbeAndDecoderAgreeOnDataSourceID, dans le paquet mapper, garde les
+	// deux formes synchronisées en faisant tourner le vrai décodeur.
 	var probe struct {
 		DataSources []struct {
 			ID string `json:"id"`
 		} `json:"data_sources"`
 	}
-	if err := jsonUnmarshal(dbResp.Body, &probe); err != nil {
-		return RemoteDatabase{}, err
+	if err := json.Unmarshal(dbResp.Body, &probe); err != nil {
+		return RemoteDatabase{}, fmt.Errorf(
+			"réponse de GET /v1/databases/%s illisible: %w\n"+
+				"  → réessayez ; si ça persiste, vérifiez que `ntn` parle bien la version "+
+				"d'API 2025-09-03 (`ntn --version`)", id, err)
 	}
 	if len(probe.DataSources) == 0 {
 		return RemoteDatabase{}, fmt.Errorf(
-			"database %s n'expose aucun data source, ce qui ne devrait pas arriver", id)
+			"database %s n'expose aucun data source, ce qui ne devrait pas arriver\n"+
+				"  → vérifiez que l'id désigne bien une database (et non une page) dans "+
+				"l'URL Notion ; si c'est le cas, rapportez le cas : notion-seed ne sait "+
+				"pas lire cette forme de réponse", id)
 	}
 
 	dsResp, err := r.tr.Execute(ctx, transport.APIRequest{
@@ -137,9 +144,4 @@ func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, err
 	// correspondance, donc ce chemin est inatteignable au MVP 0.
 	cs.Kind = KindNone
 	return cs, nil
-}
-
-// jsonUnmarshal isole l'import encoding/json du reste du fichier.
-func jsonUnmarshal(data []byte, v any) error {
-	return json.Unmarshal(data, v)
 }

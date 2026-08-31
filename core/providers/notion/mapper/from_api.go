@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/tykok/notion-seed/core/preflight"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
 
@@ -70,11 +71,15 @@ type rawDataSource struct {
 func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, error) {
 	var db rawDatabase
 	if err := json.Unmarshal(dbBody, &db); err != nil {
-		return resources.RemoteDatabase{}, fmt.Errorf("réponse database illisible: %w", err)
+		return resources.RemoteDatabase{}, fmt.Errorf(
+			"réponse de GET /v1/databases illisible: %w\n  → réessayez ; si ça persiste, %s",
+			err, preflight.PinNtnHint())
 	}
 	var ds rawDataSource
 	if err := json.Unmarshal(dsBody, &ds); err != nil {
-		return resources.RemoteDatabase{}, fmt.Errorf("réponse data_source illisible: %w", err)
+		return resources.RemoteDatabase{}, fmt.Errorf(
+			"réponse de GET /v1/data_sources illisible: %w\n  → réessayez ; si ça persiste, %s",
+			err, preflight.PinNtnHint())
 	}
 
 	out := resources.RemoteDatabase{

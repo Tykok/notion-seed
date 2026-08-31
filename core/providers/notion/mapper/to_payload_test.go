@@ -1,6 +1,7 @@
 package mapper
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -174,5 +175,46 @@ func TestPropertyPayloadRejectsUnsupportedType(t *testing.T) {
 	_, err := PropertyPayload(config.Property{Type: "formula"})
 	if !errors.Is(err, ErrUnsupportedType) {
 		t.Fatalf("error = %v, want ErrUnsupportedType", err)
+	}
+}
+
+// Le déterminisme de la sortie est une contrainte liante, et le payload ne le
+// tient que parce qu'encoding/json trie les clés de map. Rien ne l'épinglait :
+// passer un jour à une construction ordonnée à la main (ou à un encodeur qui
+// préserve l'ordre d'insertion) rendrait deux plans successifs différents sur
+// une config identique.
+func TestDatabaseCreatePayloadIsDeterministic(t *testing.T) {
+	db := config.Database{
+		Key:         "projects",
+		Name:        "Projects",
+		Description: "Suivi",
+		Properties: map[string]config.Property{
+			"Name":     {Type: "title"},
+			"Estimate": {Type: "number", Format: "number"},
+			"Owner":    {Type: "people"},
+			"Statut": {Type: "status", Options: []config.Option{
+				{Name: "À faire", Group: "To-do"},
+				{Name: "Fini", Group: "Complete"},
+			}},
+			"Tags": {Type: "multi_select", Options: []config.Option{
+				{Name: "a"}, {Name: "b"},
+			}},
+		},
+	}
+
+	first, err := DatabaseCreatePayload(db, "44444444-4444-4444-8444-444444444444")
+	if err != nil {
+		t.Fatalf("DatabaseCreatePayload() error = %v", err)
+	}
+	// Plusieurs itérations : l'ordre d'itération d'une map Go est randomisé à
+	// chaque parcours, donc une seule comparaison pourrait passer par chance.
+	for i := 0; i < 20; i++ {
+		again, err := DatabaseCreatePayload(db, "44444444-4444-4444-8444-444444444444")
+		if err != nil {
+			t.Fatalf("DatabaseCreatePayload() error = %v", err)
+		}
+		if !bytes.Equal(first, again) {
+			t.Fatalf("payload non déterministe à l'itération %d:\n  %s\n  %s", i, first, again)
+		}
 	}
 }

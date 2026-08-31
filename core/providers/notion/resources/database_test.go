@@ -55,26 +55,10 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 	}
 }
 
-// La sonde de Read et le décodeur lisent tous deux data_sources[0].id depuis le
-// même corps, avec deux structs distincts. Ce test les garde synchronisés : une
-// dérive de forme entre les deux le casse.
-func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
-	const dbBody = `{"id":"db1","data_sources":[{"id":"ds-attendu","name":"P"}]}`
-	st := &stubTransport{byPath: map[string]string{
-		"/v1/databases/db1":           dbBody,
-		"/v1/data_sources/ds-attendu": `{"id":"ds-attendu","properties":{}}`,
-	}}
-	r := NewDatabaseResource(st, func(db, ds []byte) (RemoteDatabase, error) {
-		return RemoteDatabase{ID: "db1", DataSourceID: "ds-attendu", Found: true}, nil
-	})
-
-	if _, err := r.Read(context.Background(), "db1"); err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if st.calls[1] != "/v1/data_sources/ds-attendu" {
-		t.Errorf("second appel = %q : la sonde n'a pas lu le même id que le décodeur", st.calls[1])
-	}
-}
+// Le test de dérive entre la sonde de Read et le décodeur vit dans le paquet
+// mapper (TestProbeAndDecoderAgreeOnDataSourceID) : ici, il ne pouvait
+// qu'injecter une closure codée en dur, donc ne rien garder. Le paquet mapper,
+// lui, peut importer resources et faire tourner le VRAI décodeur.
 
 func TestDatabaseResourceDiffOnAbsentRemoteIsCreate(t *testing.T) {
 	r := NewDatabaseResource(nil, nil)

@@ -35,6 +35,16 @@ func (e *TooOldError) Error() string {
 		e.Found, e.Minimum)
 }
 
+// PinNtnHint est l'action corrective commune à tous les endroits où le contrat
+// de sortie de ntn peut casser : notion-seed lit un format de sortie, et une
+// seule version l'a été mesurée. Une seule source de vérité, pour que le
+// message et la version exigée ne divergent jamais.
+func PinNtnHint() string {
+	return fmt.Sprintf(
+		"épinglez ntn %s (`npm i -g ntn@%s`), la seule version sur laquelle le format de sortie a été mesuré",
+		MinNtnVersion, MinNtnVersion)
+}
+
 // Info décrit l'environnement validé.
 type Info struct {
 	NtnVersion    string
@@ -102,11 +112,8 @@ func run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 func parseVersion(out []byte) (string, error) {
 	fields := strings.Fields(string(out))
 	if len(fields) < 2 {
-		return "", fmt.Errorf(
-			"sortie de `ntn --version` illisible: %q\n"+
-				"  → notion-seed lit le format de sortie de ntn %s ; épinglez cette "+
-				"version avec `npm i -g ntn@%s`",
-			strings.TrimSpace(string(out)), MinNtnVersion, MinNtnVersion)
+		return "", fmt.Errorf("sortie de `ntn --version` illisible: %q\n  → %s",
+			strings.TrimSpace(string(out)), PinNtnHint())
 	}
 	return fields[len(fields)-1], nil
 }
@@ -120,9 +127,8 @@ func parseWhoami(out []byte) (Info, error) {
 	if len(fields) < 6 {
 		return Info{}, fmt.Errorf(
 			"sortie de `ntn whoami` illisible (%d champs, 6 attendus au minimum): %q\n"+
-				"  → notion-seed lit le format de sortie de ntn %s ; épinglez cette "+
-				"version avec `npm i -g ntn@%s`, ou relancez `ntn login` si la session a expiré",
-			len(fields), line, MinNtnVersion, MinNtnVersion)
+				"  → %s ; ou relancez `ntn login` si la session a expiré",
+			len(fields), line, PinNtnHint())
 	}
 	return Info{
 		BotEmail:      fields[3],
