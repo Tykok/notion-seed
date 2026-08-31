@@ -111,6 +111,19 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 				}
 			}
 			rp.Options = convertOptions(p.Status.Options, groupByOption)
+			// Dans une réponse bien formée, une option de status appartient
+			// toujours à exactement un groupe : l'API en assigne un d'office,
+			// même quand la requête n'en fournit aucun. Un group vide ne veut
+			// donc pas dire « sans groupe », il veut dire « réponse tronquée ».
+			// Le laisser passer produirait une différence fantôme à chaque run
+			// du diff, puisque le désiré ne vaut jamais "".
+			for _, o := range rp.Options {
+				if o.Group == "" {
+					return resources.RemoteDatabase{}, fmt.Errorf(
+						"propriété %q : l'option %q (id %s) n'apparaît dans aucun groupe — réponse de l'API incomplète",
+						name, o.Name, o.ID)
+				}
+			}
 		}
 		out.Properties[name] = rp
 	}

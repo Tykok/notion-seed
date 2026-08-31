@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/tykok/notion-seed/core/config"
@@ -25,7 +26,11 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 		"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Projects"}],
 			"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`,
 	}}
+	// Le stub CAPTURE ce qu'il reçoit. Sans ça, un appel decode(dsBody, dbBody)
+	// avec les arguments inversés passerait le test sans être vu.
+	var gotDB, gotDS []byte
 	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
+		gotDB, gotDS = dbBody, dsBody
 		return RemoteDatabase{ID: "db1", DataSourceID: "ds1", Name: "Projects", Found: true}, nil
 	}
 	r := NewDatabaseResource(st, decode)
@@ -40,6 +45,34 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 	if len(st.calls) != 2 ||
 		st.calls[0] != "/v1/databases/db1" || st.calls[1] != "/v1/data_sources/ds1" {
 		t.Errorf("appels = %v, want database puis data_source", st.calls)
+	}
+	if !strings.Contains(string(gotDB), `"object":"database"`) &&
+		!strings.Contains(string(gotDB), `"data_sources"`) {
+		t.Errorf("decode a reçu %q comme dbBody : arguments probablement inversés", gotDB)
+	}
+	if !strings.Contains(string(gotDS), `"properties"`) {
+		t.Errorf("decode a reçu %q comme dsBody : arguments probablement inversés", gotDS)
+	}
+}
+
+// La sonde de Read et le décodeur lisent tous deux data_sources[0].id depuis le
+// même corps, avec deux structs distincts. Ce test les garde synchronisés : une
+// dérive de forme entre les deux le casse.
+func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
+	const dbBody = `{"id":"db1","data_sources":[{"id":"ds-attendu","name":"P"}]}`
+	st := &stubTransport{byPath: map[string]string{
+		"/v1/databases/db1":           dbBody,
+		"/v1/data_sources/ds-attendu": `{"id":"ds-attendu","properties":{}}`,
+	}}
+	r := NewDatabaseResource(st, func(db, ds []byte) (RemoteDatabase, error) {
+		return RemoteDatabase{ID: "db1", DataSourceID: "ds-attendu", Found: true}, nil
+	})
+
+	if _, err := r.Read(context.Background(), "db1"); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if st.calls[1] != "/v1/data_sources/ds-attendu" {
+		t.Errorf("second appel = %q : la sonde n'a pas lu le même id que le décodeur", st.calls[1])
 	}
 }
 
@@ -70,6 +103,27 @@ func TestDatabaseResourceDiffOnAbsentRemoteIsCreate(t *testing.T) {
 	// Ordre déterministe : tri alphabétique des propriétés.
 	if cs.Details[0].Target != `property "Budget" (number)` {
 		t.Errorf("Details[0].Target = %q", cs.Details[0].Target)
+	}
+}
+
+// Piège du typed-nil : un RemoteState non-nil dont Exists() est false doit
+// mener à une création comme un nil. Sans ce test, simplifier la condition en
+// `remote == nil` ne casserait rien.
+func TestDatabaseResourceDiffOnNonNilButAbsentRemoteIsAlsoCreate(t *testing.T) {
+	r := NewDatabaseResource(nil, nil)
+	db := config.Database{Key: "projects", Name: "Projects",
+		Properties: map[string]config.Property{"Name": {Type: "title"}}}
+
+	var remote RemoteState = RemoteDatabase{} // non-nil, Found == false
+	if remote == nil {
+		t.Fatal("le montage du test est faux : remote doit être non-nil")
+	}
+	cs, err := r.Diff(db, remote)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if cs.Kind != KindCreate {
+		t.Errorf("Kind = %v, want KindCreate", cs.Kind)
 	}
 }
 
