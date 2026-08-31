@@ -65,8 +65,13 @@ func Check(ctx context.Context, binary string) (Info, error) {
 
 	whoamiOut, err := run(ctx, binary, "whoami")
 	if err != nil {
+		// La cause réelle est conservée : un échec réseau, un plantage interne de
+		// ntn ou une annulation de contexte ne sont pas « pas connecté », et dire
+		// à l'utilisateur de relancer init ne corrigerait rien. Le %w sur la
+		// sentinelle garde errors.Is utilisable par les appelants.
 		return Info{}, fmt.Errorf(
-			"%w — lancez `notion-seed init` pour vous connecter", ErrNotAuthenticated)
+			"%w — lancez `notion-seed init` pour vous connecter (cause: %v)",
+			ErrNotAuthenticated, err)
 	}
 	info, err := parseWhoami(whoamiOut)
 	if err != nil {

@@ -70,6 +70,12 @@ func TestCheckNotAuthenticated(t *testing.T) {
 	if !strings.Contains(err.Error(), "notion-seed init") {
 		t.Errorf("message = %q, il doit renvoyer vers `notion-seed init`", err.Error())
 	}
+	// La cause réelle doit survivre : sans elle, une panne réseau et un « pas
+	// connecté » produisent le même message, et l'utilisateur suit un conseil
+	// qui ne s'applique pas.
+	if !strings.Contains(err.Error(), "cause:") {
+		t.Errorf("message = %q, il doit conserver la cause remontée par ntn", err.Error())
+	}
 }
 
 func TestParseVersion(t *testing.T) {
@@ -104,6 +110,10 @@ func TestVersionAtLeast(t *testing.T) {
 		{"0.22.10", "0.22.11", false},
 		{"0.19.0", "0.22.11", false},
 		{"0.9.0", "0.22.11", false},
+		// Forme canonique du piège : dans le MÊME champ, un nombre à un chiffre
+		// contre un à deux chiffres. Lexicographiquement "0.22.2" > "0.22.11",
+		// donc une comparaison de chaînes rendrait true ici.
+		{"0.22.2", "0.22.11", false},
 	}
 	for _, tt := range tests {
 		if got := versionAtLeast(tt.found, tt.min); got != tt.want {
