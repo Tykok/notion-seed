@@ -186,6 +186,14 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 			pageID, err, ratePerSec)
 	}
 
+	if apiErr == nil {
+		// L'erreur ne vient pas de l'API : format de sortie de ntn non reconnu,
+		// binaire introuvable, appel mal construit. Elle porte déjà sa propre
+		// action corrective — empiler un second conseil générique enverrait
+		// chercher au mauvais endroit.
+		return fmt.Errorf("page parente %s illisible: %w", pageID, err)
+	}
+
 	return fmt.Errorf(
 		"page parente %s illisible: %w\n"+
 			"  → vérifiez que `ntn` est authentifié sur le bon workspace "+

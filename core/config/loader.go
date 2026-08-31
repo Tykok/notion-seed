@@ -178,11 +178,15 @@ func rejectGlobalSections(path string, top map[string]any) error {
 	if len(found) == 0 {
 		return nil
 	}
+	subject := fmt.Sprintf("section %s interdite ici", quotedList(found))
+	if len(found) > 1 {
+		subject = fmt.Sprintf("sections %s interdites ici", quotedList(found))
+	}
 	return &ValidationError{
 		Path: path,
 		Message: fmt.Sprintf(
-			"section %s interdite ici : un fichier de %s/ ne déclare que des databases",
-			quotedList(found), DatabasesDir),
+			"%s : un fichier de %s/ ne déclare que des databases",
+			subject, DatabasesDir),
 		Hint: fmt.Sprintf(
 			"déplacez %s dans %s, le seul fichier qui porte la configuration globale — "+
 				"sinon `workspace.parent_page_id` y détourne la cible d'écriture et "+
