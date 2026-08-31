@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -23,7 +24,9 @@ func (o *planOptions) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&o.dir, "dir", ".",
 		"dossier de configuration (contient workspace.yaml et databases/)")
 	cmd.Flags().BoolVar(&o.skipPreflight, "skip-preflight", false,
-		"ne pas vérifier ntn (tests et CI hors ligne)")
+		"mode entièrement hors ligne : ne vérifie ni ntn (présence, version, auth) "+
+			"ni l'existence de la page parente. Valide la configuration et rend le "+
+			"plan sans aucun appel réseau.")
 	cmd.Flags().Float64Var(&o.ratePerSec, "rate", transport.DefaultRatePerSec,
 		"plafond d'appels API par seconde")
 	cmd.Flags().IntVar(&o.burst, "burst", transport.DefaultBurst,
@@ -58,16 +61,20 @@ func newPlanCmd() *cobra.Command {
 }
 
 func runPlan(cmd *cobra.Command, opts *planOptions) error {
+	// Pas de fallback sur un contexte nil : cobra le peuple toujours avant RunE
+	// (vérifié dans les sources de v1.10.2), et un fallback silencieux
+	// masquerait une erreur de programmation au lieu de la révéler.
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
+
+	// 0. Valider les flags AVANT tout. NewTokenBucket panique sur un rate non
+	// positif, et une panic est un message inutilisable pour qui a tapé
+	// `--rate 0`.
+	if err := opts.validate(); err != nil {
+		return err
 	}
 
 	// 1. Load — valider chaque fichier, fusionner, PUIS vérifier l'unicité
 	// globale des key. config.Load garantit cet ordre.
-	if err := opts.validate(); err != nil {
-		return err
-	}
 
 	cfg, err := config.Load(opts.dir)
 	if err != nil {
@@ -125,6 +132,8 @@ func newTransport(opts *planOptions) transport.Transport {
 // étant scopé utilisateur, il voit tout le workspace : un 404 ici signifie
 // que la page n'existe pas, pas qu'elle n'a pas été partagée.
 func checkParentPage(ctx context.Context, tr transport.Transport, pageID string) error {
+	// Le schéma exige minLength: 1 aujourd'hui, mais parent_page_id deviendra
+	// optionnel quand les pages seront des ressources (post-MVP).
 	if pageID == "" {
 		return fmt.Errorf("workspace.parent_page_id est vide dans workspace.yaml")
 	}
@@ -132,12 +141,35 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string)
 		Method: "GET",
 		Path:   "/v1/pages/" + pageID,
 	})
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+
+	// Une issue inconnue n'est pas un échec : le type le dit lui-même. La
+	// rapporter comme « page illisible » serait affirmer ce qu'on ne sait pas.
+	var unknown *transport.OutcomeUnknownError
+	if errors.As(err, &unknown) {
 		return fmt.Errorf(
-			"page parente %s illisible: %w\n"+
-				"  → vérifiez workspace.parent_page_id ; le jeton de ntn voit tout le "+
-				"workspace, donc un 404 signifie que la page n'existe pas",
+			"impossible de savoir si la page parente %s est lisible: %w\n"+
+				"  → relancez la commande ; si ça persiste, augmentez le timeout",
 			pageID, err)
 	}
-	return nil
+
+	// Le raisonnement « la page n'existe pas » ne vaut QUE pour un 404. Le jeton
+	// de ntn est scopé utilisateur et voit tout le workspace sans partage
+	// préalable, donc un 404 ne peut pas venir d'un défaut de partage —
+	// mais attacher ce raisonnement à un 400 (parent_page_id mal formé, que le
+	// schéma laisse passer) ou à un 403 enverrait l'utilisateur sur une fausse
+	// piste.
+	var apiErr *transport.APIError
+	if errors.As(err, &apiErr) && apiErr.Status == 404 {
+		return fmt.Errorf(
+			"page parente %s introuvable: %w\n"+
+				"  → cette page n'existe pas. Le jeton de ntn voit tout le workspace "+
+				"sans partage préalable, donc ce n'est pas un problème de permissions — "+
+				"vérifiez workspace.parent_page_id",
+			pageID, err)
+	}
+
+	return fmt.Errorf("page parente %s illisible: %w", pageID, err)
 }

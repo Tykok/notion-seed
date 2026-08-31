@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,10 +104,7 @@ func TestPlanWritesNothingToDisk(t *testing.T) {
 		"databases/all.yaml": twoDatabases,
 	})
 
-	before, err := os.ReadDir(filepath.Join(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
+	before := snapshot(t, dir)
 
 	cmd := NewRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -114,13 +114,56 @@ func TestPlanWritesNothingToDisk(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	after, err := os.ReadDir(filepath.Join(dir))
+	after := snapshot(t, dir)
+
+	for path, sum := range before {
+		got, ok := after[path]
+		if !ok {
+			t.Errorf("plan a supprimé %s", path)
+			continue
+		}
+		if got != sum {
+			t.Errorf("plan a modifié le contenu de %s", path)
+		}
+	}
+	for path := range after {
+		if _, ok := before[path]; !ok {
+			t.Errorf("plan a créé %s", path)
+		}
+	}
+}
+
+// snapshot parcourt l'arborescence RÉCURSIVEMENT et retient une empreinte du
+// contenu de chaque fichier. Compter les entrées à la racine ne verrait ni une
+// écriture dans databases/, ni une mutation de contenu en place, ni un fichier
+// créé puis supprimé — or « plan n'écrit rien » est la promesse centrale de la
+// commande, elle mérite d'être épinglée pour de vrai.
+func snapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			out[rel+"/"] = ""
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out[rel] = fmt.Sprintf("%x", sha256.Sum256(b))
+		return nil
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("snapshot(%s): %v", root, err)
 	}
-	if len(before) != len(after) {
-		t.Errorf("plan a créé ou supprimé des fichiers: %d avant, %d après", len(before), len(after))
-	}
+	return out
 }
 
 func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
@@ -156,6 +199,10 @@ func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
 	}
 }
 
+// ATTENTION, vérité temporaire : cette égalité ne tient qu'au MVP 0, parce que
+// plan n'écrit pas encore de state. Au MVP 1 plan divergera de diff par
+// construction — c'est la raison même de garder deux commandes. Ce test devra
+// alors être desserré ou remplacé, pas « réparé ».
 func TestDiffProducesSameOutputAsPlan(t *testing.T) {
 	withFakeNtn(t, "ok")
 	dir := writeConfigDir(t, map[string]string{
