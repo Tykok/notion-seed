@@ -29,7 +29,7 @@ const stderr400 = `error: Public API request failed (400 Bad Request validation_
 `
 
 const stderr400MultiLine = `error: Public API request failed (400 Bad Request validation_error): body failed validation. Fix one:
-` + `body.properties.Status.status.options[4].group should be ` + "`\"To-do\"`" + `, ` + "`\"In progress\"`" + `, ` + "`\"Complete\"`" + `, or ` + "`\"undefined\"`" + `, instead was ` + "`\"Waiting on someone\"`" + `.
+` + `body.properties.Status.status.options[4].group should be ` + "`\"To-do\"`" + `, ` + "`\"In progress\"`" + `, ` + "`\"Complete\"`" + `, or ` + "`undefined`" + `, instead was ` + "`\"Waiting on someone\"`" + `.
 `
 
 func TestParseStatusAndHeaders(t *testing.T) {
