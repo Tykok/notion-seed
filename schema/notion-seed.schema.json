@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tykok/notion-seed/schema/notion-seed.schema.json",
+  "title": "notion-seed configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent_page_id"],
+      "properties": {
+        "parent_page_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "databases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/database" }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prevent_destroy": { "type": "array", "items": { "type": "string" } },
+        "allow_data_loss": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "properties"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "icon": { "type": "string" },
+        "properties": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/property" }
+        }
+      }
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "minLength": 1
+    },
+    "property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": [
+            "title", "rich_text", "number", "url", "select",
+            "status", "multi_select", "date", "checkbox", "people"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "description": "number uniquement"
+        },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/option" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "number" } }, "required": ["type"] },
+          "else": { "not": { "required": ["format"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["select", "status", "multi_select"] }
+            },
+            "required": ["type"]
+          },
+          "else": { "not": { "required": ["options"] } }
+        }
+      ]
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "type": "string", "minLength": 1 },
+        "color": {
+          "enum": [
+            "default", "gray", "brown", "orange", "yellow",
+            "green", "blue", "purple", "pink", "red"
+          ]
+        },
+        "group": {
+          "enum": ["To-do", "In progress", "Complete"],
+          "description": "status uniquement. L'API n'accepte que ces trois groupes, à la création comme à la modification. Les groupes nommés librement ne sont pas supportés."
+        }
+      }
+    }
+  }
+}
