@@ -103,6 +103,29 @@ func TestRetryingHonoursRetryAfterOverBackoff(t *testing.T) {
 	}
 }
 
+// Retry-After doit sortir TEL QUEL, sans être plafonné par policy.Max. Le test
+// précédent utilise 7s < Max, donc il passerait même si le code clampait ; il
+// faut une valeur au-dessus du plafond pour vérifier cette moitié de la règle.
+func TestRetryingDoesNotClampRetryAfterByMax(t *testing.T) {
+	clock := newFakeClock()
+	inner := scripted(
+		entry{
+			APIResponse{Status: 429, Headers: map[string][]string{"retry-after": {"120"}}},
+			&APIError{Status: 429, NotionCode: "rate_limited"},
+		},
+		entry{APIResponse{Status: 200}, nil},
+	)
+	r := newTestRetrying(inner, clock)
+
+	if _, err := r.Execute(context.Background(), APIRequest{Path: "/v1/x"}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	// Max vaut 30s ; le serveur a demandé 120s. C'est le serveur qui gagne.
+	if got := clock.totalSlept(); got < 120*time.Second {
+		t.Errorf("sommeil = %v, want >= 120s — Retry-After a été plafonné par Max", got)
+	}
+}
+
 func TestRetryingNeverRetriesOutcomeUnknown(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(

@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -43,7 +44,15 @@ type Retrying struct {
 	clock   Clock
 }
 
+// NewRetrying panique si policy.MaxAttempts est inférieur à 1, même contrat que
+// NewTokenBucket. Sans cette garde, une RetryPolicy à sa valeur zéro fait que la
+// boucle d'Execute ne tourne jamais et rend (APIResponse{}, nil) : un faux
+// succès silencieux, sans qu'aucun appel n'ait été émis. Un apply construirait
+// son state là-dessus.
 func NewRetrying(inner Transport, limiter Limiter, policy RetryPolicy, clock Clock) *Retrying {
+	if policy.MaxAttempts < 1 {
+		panic(fmt.Sprintf("NewRetrying: policy.MaxAttempts doit être >= 1, reçu %d", policy.MaxAttempts))
+	}
 	if clock == nil {
 		clock = RealClock{}
 	}
@@ -103,7 +112,12 @@ func (r *Retrying) backoff(attempt int, resp APIResponse) time.Duration {
 		return d
 	}
 	d := time.Duration(float64(r.policy.Base) * math.Pow(2, float64(attempt)))
-	if d > r.policy.Max {
+	// Une policy pathologique (Base énorme, ou beaucoup de tentatives) peut faire
+	// sortir la conversion float64 -> int64 du domaine. Le résultat est alors
+	// dépendant de l'architecture : amd64 rend un négatif, arm64 sature vers le
+	// positif. Un négatif contournerait le clamp ci-dessous et dégénérerait en
+	// sleep nul, donc en retry immédiat.
+	if d < 0 || d > r.policy.Max {
 		d = r.policy.Max
 	}
 	return r.policy.Jitter(d)
