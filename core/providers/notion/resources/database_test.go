@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -115,5 +116,27 @@ func TestDatabaseResourceDiffRejectsWrongDesiredType(t *testing.T) {
 	r := NewDatabaseResource(nil, nil)
 	if _, err := r.Diff("pas une database", nil); err == nil {
 		t.Fatal("Diff() error = nil, want une erreur de type")
+	}
+}
+
+// La méthode Diff délègue à la fonction de paquet, qui n'a besoin d'aucune
+// ressource. C'est ce qui permet au moteur de diff de ne plus construire un
+// NewDatabaseResource(nil, nil) pour appeler un calcul pur.
+func TestDiffDelegatesToDatabaseChangeset(t *testing.T) {
+	db := config.Database{
+		Key:  "projects",
+		Name: "Projects",
+		Properties: map[string]config.Property{
+			"Name":   {Type: "title"},
+			"Budget": {Type: "number", Format: "euro"},
+		},
+	}
+
+	viaMethod, err := NewDatabaseResource(nil, nil).Diff(db, nil)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if viaFunc := DatabaseChangeset(db, nil); !reflect.DeepEqual(viaMethod, viaFunc) {
+		t.Errorf("méthode = %+v, fonction = %+v : la délégation a divergé", viaMethod, viaFunc)
 	}
 }

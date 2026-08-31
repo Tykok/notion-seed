@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tykok/notion-seed/core/config"
@@ -80,5 +81,24 @@ func TestComputeEmptyConfigProducesEmptyPlan(t *testing.T) {
 	}
 	if p.ToAdd != 0 || len(p.Changes) != 0 {
 		t.Errorf("plan non vide: %+v", p)
+	}
+}
+
+// Le rendu promet une ligne par entrée. Note était concaténée brute, alors que
+// le nom dans Target passe par %q : la première tâche qui peuplera Note avec un
+// message multi-ligne aurait cassé le contrat sans que rien ne le voie.
+func TestDetailLinesKeepOneLinePerEntryEvenWithAMultilineNote(t *testing.T) {
+	lines := detailLines([]resources.Detail{
+		{Op: "~", Target: `property "Status"`, Note: "avant\naprès"},
+	})
+
+	if len(lines) != 1 {
+		t.Fatalf("lignes = %q, want 1", lines)
+	}
+	if strings.Contains(lines[0], "\n") {
+		t.Errorf("ligne = %q : un retour à la ligne dans Note casse « une ligne par entrée »", lines[0])
+	}
+	if !strings.Contains(lines[0], `\n`) {
+		t.Errorf("ligne = %q : le retour à la ligne doit apparaître échappé", lines[0])
 	}
 }

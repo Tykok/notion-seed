@@ -121,8 +121,21 @@ func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, err
 	if !ok {
 		return Changeset{}, fmt.Errorf("desired doit être une config.Database, got %T", desired)
 	}
+	return DatabaseChangeset(db, remote), nil
+}
+
+// DatabaseChangeset est le diff d'une database, sans transport ni décodeur.
+//
+// C'est une FONCTION de paquet, et la méthode Diff y délègue : l'exiger sur un
+// receiver forçait le moteur de diff à construire un
+// NewDatabaseResource(nil, nil) juste pour appeler une méthode pure — une mine
+// qui n'attendait qu'un appel réseau ajouté dans ce chemin, et un commentaire
+// d'invariant à maintenir.
+func DatabaseChangeset(db config.Database, remote RemoteState) Changeset {
 	cs := Changeset{Resource: "database." + db.Key}
 
+	// Le typed-nil compte : un RemoteState non-nil dont Exists() est false doit
+	// mener à une création comme un nil.
 	if remote == nil || !remote.Exists() {
 		cs.Kind = KindCreate
 		names := make([]string, 0, len(db.Properties))
@@ -136,12 +149,12 @@ func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, err
 				Target: fmt.Sprintf("property %q (%s)", name, db.Properties[name].Type),
 			})
 		}
-		return cs, nil
+		return cs
 	}
 
 	// Le diff fin sur une database existante arrive au MVP 2, avec le refresh
 	// et la détection de dérive. Sans state, on ne met aucune ressource en
 	// correspondance, donc ce chemin est inatteignable au MVP 0.
 	cs.Kind = KindNone
-	return cs, nil
+	return cs
 }
