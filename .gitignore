@@ -2,4 +2,3 @@
 /dist/
 *.test
 .DS_Store
-.claude/
