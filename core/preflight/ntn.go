@@ -23,6 +23,27 @@ var (
 	ErrNotAuthenticated = errors.New("ntn n'est pas authentifié")
 )
 
+// NotAuthenticatedError signale une authentification absente ou invalide, en
+// GARDANT la cause réelle : un échec réseau, un plantage interne de ntn ou une
+// annulation de contexte ne sont pas « pas connecté ». Le type existe pour que
+// `init` puisse donner son propre conseil sans perdre le détail — afficher
+// « pas authentifié » pour une panne réseau, sur la commande dont le seul rôle
+// est de diagnostiquer l'environnement, envoie chercher au mauvais endroit.
+type NotAuthenticatedError struct {
+	Cause error
+}
+
+func (e *NotAuthenticatedError) Error() string {
+	return fmt.Sprintf("%v — lancez `notion-seed init` pour vous connecter (cause: %v)",
+		ErrNotAuthenticated, e.Cause)
+}
+
+// Unwrap rend les deux : errors.Is(err, ErrNotAuthenticated) reste vrai pour les
+// appelants, et la cause reste inspectable.
+func (e *NotAuthenticatedError) Unwrap() []error {
+	return []error{ErrNotAuthenticated, e.Cause}
+}
+
 // TooOldError signale un ntn présent mais trop ancien.
 type TooOldError struct {
 	Found   string
@@ -79,13 +100,7 @@ func Check(ctx context.Context, binary string) (Info, error) {
 
 	whoamiOut, err := run(ctx, binary, "whoami")
 	if err != nil {
-		// La cause réelle est conservée : un échec réseau, un plantage interne de
-		// ntn ou une annulation de contexte ne sont pas « pas connecté », et dire
-		// à l'utilisateur de relancer init ne corrigerait rien. Le %w sur la
-		// sentinelle garde errors.Is utilisable par les appelants.
-		return Info{}, fmt.Errorf(
-			"%w — lancez `notion-seed init` pour vous connecter (cause: %v)",
-			ErrNotAuthenticated, err)
+		return Info{}, &NotAuthenticatedError{Cause: err}
 	}
 	info, err := parseWhoami(whoamiOut)
 	if err != nil {

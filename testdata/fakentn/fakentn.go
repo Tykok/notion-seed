@@ -76,6 +76,22 @@ func main() {
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
+	case "authenticated_rate_limited":
+		// ntn authentifié, mais l'API limite le débit à chaque tentative : couvre
+		// l'épuisement des retries, son message et l'annonce des attentes.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+apiPath()+"\n"+
+				"< 429 Too Many Requests\n< retry-after: 1\n"+
+				"error: Public API request failed (429 Too Many Requests rate_limited): "+
+				"Rate limited.\n")
+			os.Exit(5)
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
 	case "version_no_auth":
 		// ntn présent et à jour, mais pas authentifié.
 		switch subcommand() {

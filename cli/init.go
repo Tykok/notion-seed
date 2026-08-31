@@ -18,15 +18,19 @@ func newInitCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info, err := preflight.Check(cmd.Context(), "ntn")
+			var notAuth *preflight.NotAuthenticatedError
 			switch {
-			case errors.Is(err, preflight.ErrNotAuthenticated):
-				// On n'enveloppe PAS le message de preflight ici : il conseille de
+			case errors.As(err, &notAuth):
+				// Le message de preflight n'est PAS enveloppé : il conseille de
 				// lancer `notion-seed init`, ce que l'utilisateur vient de faire.
-				// init a un seul rôle, l'authentification, donc « pas authentifié »
-				// n'y est pas ambigu et n'a pas besoin de la cause détaillée — que
-				// le chemin `plan` affiche, lui.
+				// init émet donc son propre conseil — mais annexe la cause, sans
+				// quoi une panne réseau ou un plantage de ntn s'afficheraient comme
+				// « pas authentifié », sur la commande dont le seul rôle est de
+				// diagnostiquer l'environnement.
 				return fmt.Errorf(
-					"ntn n'est pas authentifié.\n\n  Lancez d'abord :\n\n    ntn login\n\n  Puis relancez `notion-seed init`.\n")
+					"ntn n'est pas authentifié.\n\n  Lancez d'abord :\n\n    ntn login\n\n"+
+						"  Puis relancez `notion-seed init`.\n\n  Cause : %v\n",
+					notAuth.Cause)
 			case err != nil:
 				return err
 			}

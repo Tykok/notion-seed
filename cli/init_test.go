@@ -60,6 +60,12 @@ func TestInitTellsUserToRunNtnLoginWhenNotAuthenticated(t *testing.T) {
 	if strings.Index(err.Error(), "ntn login") > strings.Index(err.Error(), "notion-seed init") {
 		t.Errorf("message = %q : `ntn login` doit venir avant la relance de `notion-seed init`", err.Error())
 	}
+	// La cause est annexée : sans elle, une panne réseau ou un plantage interne
+	// de ntn s'affichent comme « pas authentifié », sur la commande dont le seul
+	// rôle est de diagnostiquer l'environnement.
+	if !strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("message = %q, il doit annexer la cause rapportée par ntn", err.Error())
+	}
 }
 
 func TestInitReportsWorkspaceWhenAuthenticated(t *testing.T) {

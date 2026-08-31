@@ -95,7 +95,7 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		// Aucune ressource n'est mise en correspondance au MVP 0 : sans state,
 		// il n'y a pas d'ancre d'identité fiable.
 		tr := newTransport(cmd, opts)
-		if err := checkParentPage(ctx, tr, cfg.Workspace.ParentPageID); err != nil {
+		if err := checkParentPage(ctx, tr, cfg.Workspace.ParentPageID, opts.ratePerSec); err != nil {
 			return err
 		}
 	}
@@ -135,7 +135,7 @@ func newTransport(cmd *cobra.Command, opts *planOptions) transport.Transport {
 // checkParentPage vérifie que la page parente est lisible. Le token de ntn
 // étant scopé utilisateur, il voit tout le workspace : un 404 ici signifie
 // que la page n'existe pas, pas qu'elle n'a pas été partagée.
-func checkParentPage(ctx context.Context, tr transport.Transport, pageID string) error {
+func checkParentPage(ctx context.Context, tr transport.Transport, pageID string, ratePerSec float64) error {
 	// Le schéma exige minLength: 1 aujourd'hui, mais parent_page_id deviendra
 	// optionnel quand les pages seront des ressources (post-MVP).
 	if pageID == "" {
@@ -166,7 +166,8 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string)
 	// schéma laisse passer) ou à un 403 enverrait l'utilisateur sur une fausse
 	// piste.
 	var apiErr *transport.APIError
-	if errors.As(err, &apiErr) && apiErr.Status == 404 {
+	errors.As(err, &apiErr)
+	if apiErr != nil && apiErr.Status == 404 {
 		return fmt.Errorf(
 			"page parente %s introuvable: %w\n"+
 				"  → cette page n'existe pas. Le jeton de ntn voit tout le workspace "+
@@ -175,5 +176,20 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string)
 			pageID, err)
 	}
 
-	return fmt.Errorf("page parente %s illisible: %w", pageID, err)
+	// Un 429 épuisé est l'échec non-404 le plus probable, et c'est le seul dont
+	// l'action corrective est un réglage de notion-seed lui-même.
+	if apiErr != nil && apiErr.Status == 429 {
+		return fmt.Errorf(
+			"page parente %s illisible: %w\n"+
+				"  → l'API a limité le débit et les tentatives sont épuisées : "+
+				"réessayez dans une minute, ou baissez `--rate` (actuellement %v appels/s)",
+			pageID, err, ratePerSec)
+	}
+
+	return fmt.Errorf(
+		"page parente %s illisible: %w\n"+
+			"  → vérifiez que `ntn` est authentifié sur le bon workspace "+
+			"(`notion-seed init`) et que workspace.parent_page_id désigne une page "+
+			"de ce workspace ; réessayez si l'API est en incident",
+		pageID, err)
 }

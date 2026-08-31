@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/sha256"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -50,8 +51,69 @@ databases:
         type: number
 `
 
+// Ce test tourne EN LIGNE, sans --skip-preflight : le faux ntn est réellement
+// invoqué. Avant, les trois tests du chemin plan posaient le faux binaire sur le
+// PATH puis passaient --skip-preflight, donc ni l'assemblage de la pile de
+// transport, ni l'en-tête de workspace, ni checkParentPage n'étaient exécutés.
+//
+// La comparaison se fait sur un fichier golden : toutes les assertions sur la
+// sortie réelle du produit étaient des strings.Contains, donc l'indentation, les
+// lignes vides, l'en-tête et la précédence des marqueurs pouvaient changer avec
+// la suite verte. Le golden épingle aussi le déterminisme, contrainte liante.
 func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
-	withFakeNtn(t, "ok")
+	withFakeNtn(t, "authenticated")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+
+	cmd := NewRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"plan", "--dir", dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v\n%s\n%s", err, out.String(), errOut.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr non vide sur un plan qui réussit: %q", errOut.String())
+	}
+	assertGolden(t, "plan_two_databases.golden", out.String())
+}
+
+// La sortie doit être identique d'un run à l'autre : plan est fait pour être lu
+// en CI et comparé.
+func TestPlanOutputIsStableAcrossRuns(t *testing.T) {
+	withFakeNtn(t, "authenticated")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+
+	run := func() string {
+		cmd := NewRootCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{"plan", "--dir", dir})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		return out.String()
+	}
+	first := run()
+	for i := 0; i < 5; i++ {
+		if got := run(); got != first {
+			t.Fatalf("run %d diffère du premier:\n%s", i, lineDiff(first, got))
+		}
+	}
+}
+
+// La branche 404 de checkParentPage et son message n'étaient couverts par aucun
+// test : les trois tests du chemin plan sautaient le preflight.
+func TestPlanReportsUnreachableParentPage(t *testing.T) {
+	withFakeNtn(t, "authenticated_page_404")
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
@@ -61,21 +123,27 @@ func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"plan", "--dir", dir, "--skip-preflight"})
+	cmd.SetArgs([]string{"plan", "--dir", dir})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v\n%s", err, out.String())
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un échec sur la page parente\n%s", out.String())
 	}
-	got := out.String()
 	for _, want := range []string{
-		"Plan: 2 to add",
-		"+ database.projects (new)",
-		"+ database.tasks (new)",
-		`property "Estimate" (number)`,
+		testParentPageID,
+		"introuvable",
+		"parent_page_id",
+		// Le jeton de ntn voit tout le workspace : un 404 n'est pas un défaut de
+		// partage, et le message ne doit pas envoyer sur cette piste.
+		"pas un problème de permissions",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("sortie ne contient pas %q\n--- sortie ---\n%s", want, got)
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
+	}
+	// Le plan ne doit pas être rendu quand la page parente est illisible.
+	if strings.Contains(out.String(), "Plan:") {
+		t.Errorf("un plan a été affiché malgré une page parente illisible:\n%s", out.String())
 	}
 }
 
@@ -106,7 +174,9 @@ func TestPlanFailsOnDuplicateKeyNamingBothFiles(t *testing.T) {
 // plan n'écrit rien au MVP 0 : ni state, ni mutation. Le test garde cette
 // propriété, qui est la promesse de la commande.
 func TestPlanWritesNothingToDisk(t *testing.T) {
-	withFakeNtn(t, "ok")
+	// En ligne, sans --skip-preflight : « plan n'écrit rien » doit tenir aussi
+	// quand la commande parle réellement à ntn.
+	withFakeNtn(t, "authenticated")
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml":     workspaceYAML,
 		"databases/all.yaml": twoDatabases,
@@ -117,7 +187,7 @@ func TestPlanWritesNothingToDisk(t *testing.T) {
 	cmd := NewRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{"plan", "--dir", dir, "--skip-preflight"})
+	cmd.SetArgs([]string{"plan", "--dir", dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -231,5 +301,96 @@ func TestDiffProducesSameOutputAsPlan(t *testing.T) {
 	}
 	if run("plan") != run("diff") {
 		t.Error("plan et diff doivent produire la même sortie au MVP 0")
+	}
+}
+
+// updateGolden réécrit les fichiers golden au lieu de les comparer :
+//
+//	go test ./cli/ -run TestPlan -update
+var updateGolden = flag.Bool("update", false, "réécrit les fichiers golden de testdata/")
+
+// assertGolden compare une sortie au fichier golden correspondant. En cas
+// d'écart, l'échec affiche un diff ligne à ligne : « sortie différente » sans le
+// détail obligerait à relancer à la main pour savoir quoi.
+func assertGolden(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join("testdata", name)
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("golden réécrit: %s", path)
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("golden illisible: %v — relancez avec -update pour le créer", err)
+	}
+	if got != string(want) {
+		t.Errorf("la sortie de plan diffère de %s :\n%s", path, lineDiff(string(want), got))
+	}
+}
+
+// lineDiff rend un diff ligne à ligne, aligné sur les numéros de ligne : "-"
+// pour la ligne attendue, "+" pour celle obtenue.
+func lineDiff(want, got string) string {
+	wantLines := strings.Split(want, "\n")
+	gotLines := strings.Split(got, "\n")
+	var b strings.Builder
+	for i := 0; i < len(wantLines) || i < len(gotLines); i++ {
+		w, g := "", ""
+		if i < len(wantLines) {
+			w = wantLines[i]
+		}
+		if i < len(gotLines) {
+			g = gotLines[i]
+		}
+		if w == g {
+			fmt.Fprintf(&b, "  %3d  %s\n", i+1, w)
+			continue
+		}
+		if i < len(wantLines) {
+			fmt.Fprintf(&b, "- %3d  %s\n", i+1, w)
+		}
+		if i < len(gotLines) {
+			fmt.Fprintf(&b, "+ %3d  %s\n", i+1, g)
+		}
+	}
+	return b.String()
+}
+
+// Démontré avant correction : un 429 épuisé rendait « page parente X illisible:
+// notion api 429 rate_limited: Rate limited. » sans aucune action corrective, sur
+// l'échec non-404 le plus probable. Et les attentes de retry étaient totalement
+// muettes — mesuré, 9,35 s de silence.
+func TestPlanReportsExhaustedRateLimitWithAnAction(t *testing.T) {
+	withFakeNtn(t, "authenticated_rate_limited")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+
+	cmd := NewRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"plan", "--dir", dir})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un échec après épuisement des tentatives\n%s", out.String())
+	}
+	for _, want := range []string{"429", "--rate", "réessayez"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+	// Une attente muette est indistinguable d'un blocage : chaque attente est
+	// annoncée, et sur stderr pour ne pas polluer le plan.
+	if !strings.Contains(errOut.String(), "en attente") {
+		t.Errorf("stderr = %q, chaque attente de retry doit être annoncée", errOut.String())
 	}
 }

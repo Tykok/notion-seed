@@ -1,0 +1,11 @@
+ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
+
+Plan: 2 to add, 0 to change, 0 to destroy
+
+  + database.projects (new)
+      + property "Name" (title)
+
+  + database.tasks (new)
+      + property "Estimate" (number)
+      + property "Name" (title)
+
