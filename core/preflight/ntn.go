@@ -53,7 +53,11 @@ func Check(ctx context.Context, binary string) (Info, error) {
 
 	versionOut, err := run(ctx, binary, "--version")
 	if err != nil {
-		return Info{}, fmt.Errorf("`%s --version` a échoué: %w", binary, err)
+		return Info{}, fmt.Errorf(
+			"`%s --version` a échoué: %w\n"+
+				"  → %s est présent mais ne répond pas ; réinstallez-le avec "+
+				"`npm i -g ntn@%s`, puis relancez `notion-seed init`",
+			binary, err, binary, MinNtnVersion)
 	}
 	version, err := parseVersion(versionOut)
 	if err != nil {
@@ -98,7 +102,11 @@ func run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 func parseVersion(out []byte) (string, error) {
 	fields := strings.Fields(string(out))
 	if len(fields) < 2 {
-		return "", fmt.Errorf("sortie de `ntn --version` illisible: %q", strings.TrimSpace(string(out)))
+		return "", fmt.Errorf(
+			"sortie de `ntn --version` illisible: %q\n"+
+				"  → notion-seed lit le format de sortie de ntn %s ; épinglez cette "+
+				"version avec `npm i -g ntn@%s`",
+			strings.TrimSpace(string(out)), MinNtnVersion, MinNtnVersion)
 	}
 	return fields[len(fields)-1], nil
 }
@@ -111,8 +119,10 @@ func parseWhoami(out []byte) (Info, error) {
 	fields := strings.Split(line, "\t")
 	if len(fields) < 6 {
 		return Info{}, fmt.Errorf(
-			"sortie de `ntn whoami` illisible (%d champs, 6 attendus au minimum): %q",
-			len(fields), line)
+			"sortie de `ntn whoami` illisible (%d champs, 6 attendus au minimum): %q\n"+
+				"  → notion-seed lit le format de sortie de ntn %s ; épinglez cette "+
+				"version avec `npm i -g ntn@%s`, ou relancez `ntn login` si la session a expiré",
+			len(fields), line, MinNtnVersion, MinNtnVersion)
 	}
 	return Info{
 		BotEmail:      fields[3],

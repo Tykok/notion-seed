@@ -121,3 +121,28 @@ func TestVersionAtLeast(t *testing.T) {
 		}
 	}
 }
+
+// Les chemins d'imprévu sont visibles par l'utilisateur autant que les chemins
+// nominaux : une sortie de ntn illisible doit dire quoi faire, pas seulement ce
+// qui n'a pas marché.
+func TestUnreadableNtnOutputNamesTheCorrectiveAction(t *testing.T) {
+	_, err := parseVersion([]byte("bonjour\n"))
+	if err == nil {
+		t.Fatal("parseVersion() error = nil, want une erreur")
+	}
+	for _, want := range []string{"→", MinNtnVersion} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("parseVersion: message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+
+	_, err = parseWhoami([]byte("une seule colonne\n"))
+	if err == nil {
+		t.Fatal("parseWhoami() error = nil, want une erreur")
+	}
+	for _, want := range []string{"→", MinNtnVersion} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("parseWhoami: message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
