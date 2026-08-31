@@ -1,6 +1,9 @@
 package mapper
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const dbBody = `{
   "object": "database",
@@ -108,5 +111,41 @@ func TestRemoteDatabaseFromJSONKeepsOptionIDs(t *testing.T) {
 	}
 	if sel.Options[0].ID != "77777777-7777-4777-8777-777777777777" {
 		t.Errorf("Options[0].ID = %q", sel.Options[0].ID)
+	}
+}
+
+// Dans une réponse bien formée, chaque option de status apparaît dans
+// exactement un groupe : l'API en assigne un d'office, même si la requête
+// n'en fournit aucun. Une option absente de tous les option_ids signale donc
+// une réponse tronquée, pas une option "sans groupe" — et doit être rejetée,
+// pas décodée avec un group vide qui produirait un diff fantôme permanent.
+const dsBodyMissingGroup = `{
+  "object": "data_source",
+  "id": "66666666-6666-4666-8666-666666666666",
+  "title": [{"plain_text": "spike-projects"}],
+  "properties": {
+    "Status": {
+      "id": "f%3Cyc", "name": "Status", "type": "status",
+      "status": {
+        "options": [
+          {"id": "88888888-8888-4888-8888-888888888888", "name": "To-Do", "color": "gray"},
+          {"id": "5529b100-0000-0000-0000-000000000000", "name": "Building", "color": "blue"}
+        ],
+        "groups": [
+          {"id": "6ac28dc1-0000-0000-0000-000000000000", "name": "To-do", "color": "gray",
+           "option_ids": ["88888888-8888-4888-8888-888888888888"]}
+        ]
+      }
+    }
+  }
+}`
+
+func TestRemoteDatabaseFromJSONRejectsStatusOptionMissingFromAnyGroup(t *testing.T) {
+	_, err := RemoteDatabaseFromJSON([]byte(dbBody), []byte(dsBodyMissingGroup))
+	if err == nil {
+		t.Fatal("RemoteDatabaseFromJSON() error = nil, want une erreur : Building n'apparaît dans aucun groupe")
+	}
+	if !strings.Contains(err.Error(), "Building") {
+		t.Errorf("erreur = %q, want qu'elle nomme l'option %q", err.Error(), "Building")
 	}
 }

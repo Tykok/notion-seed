@@ -77,6 +77,13 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	if err != nil {
 		return RemoteDatabase{}, err
 	}
+	// Ce parsing minimal duplique un champ que le décodeur relira. C'est
+	// structurel, pas accidentel : on a besoin de l'id du data source AVANT de
+	// pouvoir faire le second appel, alors que le décodeur a besoin des deux
+	// corps — il ne peut donc pas tourner en premier. Exporter un helper depuis
+	// mapper recréerait le cycle d'import que l'injection brise, et injecter une
+	// seconde fonction pour un seul champ coûterait plus que la duplication.
+	// TestProbeAndDecoderAgreeOnDataSourceID garde les deux formes synchronisées.
 	var probe struct {
 		DataSources []struct {
 			ID string `json:"id"`
