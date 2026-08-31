@@ -48,7 +48,10 @@ func TestParseStatusAndHeaders(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, headers, ok := ParseStatusAndHeaders([]byte(tt.stderr))
+			status, headers, ok, err := ParseStatusAndHeaders([]byte(tt.stderr))
+			if err != nil {
+				t.Fatalf("ParseStatusAndHeaders() error = %v", err)
+			}
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -115,5 +118,23 @@ func TestAPIErrorRetryable(t *testing.T) {
 		if got := e.Retryable(); got != tt.want {
 			t.Errorf("status %d: Retryable() = %v, want %v", tt.status, got, tt.want)
 		}
+	}
+}
+
+// Une ligne au-delà du plafond du scanner tronque la trace : un header peut
+// manquer sans que rien ne le signale. L'erreur du scanner était jetée, donc un
+// stderr tronqué ressortait comme un parsing normal.
+func TestParseStatusAndHeadersReportsScannerError(t *testing.T) {
+	huge := []byte("< 200 OK\n< x-long: " + strings.Repeat("a", 2*1024*1024) + "\n")
+
+	status, _, ok, err := ParseStatusAndHeaders(huge)
+	if err == nil {
+		t.Fatal("error = nil : l'erreur du scanner a été avalée")
+	}
+	if ok {
+		t.Error("ok = true sur une trace tronquée : on ne sait pas ce qui a été perdu après le statut")
+	}
+	if status != 0 {
+		t.Errorf("status = %d, want 0 sur une trace tronquée", status)
 	}
 }

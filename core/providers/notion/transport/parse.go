@@ -3,6 +3,7 @@ package transport
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +20,12 @@ var apiErrorLine = regexp.MustCompile(
 // ParseStatusAndHeaders extrait le statut HTTP et les headers de réponse du
 // stderr verbeux. Les noms de headers sont normalisés en minuscules. ok vaut
 // false si aucune ligne de statut n'est présente (ntn n'a pas atteint l'API).
-func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool) {
+//
+// L'erreur du scanner est rendue, jamais avalée : une ligne au-delà du plafond
+// de 1 MiB tronque la trace, donc un header peut manquer sans que rien ne le
+// signale — `retry-after` notamment. Un statut lu avant la troncature n'est pas
+// rendu comme valide : on ne sait pas ce qui a été perdu après lui.
+func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool, error) {
 	var status int
 	headers := make(map[string][]string)
 	inResponse := false
@@ -43,10 +49,14 @@ func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool) {
 		name = strings.ToLower(strings.TrimSpace(name))
 		headers[name] = append(headers[name], strings.TrimSpace(value))
 	}
-	if status == 0 {
-		return 0, headers, false
+	if err := sc.Err(); err != nil {
+		return 0, headers, false, fmt.Errorf(
+			"trace -v de ntn illisible (%d octets lus): %w", len(stderr), err)
 	}
-	return status, headers, true
+	if status == 0 {
+		return 0, headers, false, nil
+	}
+	return status, headers, true, nil
 }
 
 // ParseAPIError extrait l'erreur API du stderr. Le message peut s'étendre sur

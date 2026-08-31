@@ -35,6 +35,23 @@ func fullJitter(d time.Duration) time.Duration {
 	return time.Duration(rand.Int63n(int64(d)) + 1)
 }
 
+// MaxRetryAfterWait plafonne l'attente qu'un serveur peut imposer via
+// Retry-After. Le header garde la priorité sur le backoff calculé — le serveur
+// sait mieux que nous quand il acceptera le prochain appel — mais « prioritaire
+// sur la valeur calculée » ne veut pas dire « exempté de tout plafond absolu ».
+//
+// Sans plafond, un `retry-after: 60` — parfaitement plausible d'un vrai
+// limiteur — bloquerait un `plan` en LECTURE SEULE trois minutes en CI, et un
+// header hostile bloquerait indéfiniment. La valeur retenue est celle du
+// plafond du backoff calculé (RetryPolicy.Max par défaut, 30 s) : deux
+// plafonds différents pour la même question — « combien de temps accepte-t-on
+// d'attendre entre deux tentatives » — se justifieraient mal.
+//
+// L'échéance restante du contexte n'a pas été retenue comme plafond : au MVP 0,
+// le contexte de plan n'en porte aucune (le timeout est posé par appel dans
+// NtnShell), donc elle ne bornerait rien.
+const MaxRetryAfterWait = 30 * time.Second
+
 // Retrying décore un Transport avec le rate limiter et la politique de retry.
 // Le limiter est consulté avant chaque tentative, y compris les rejouées.
 type Retrying struct {
@@ -42,6 +59,7 @@ type Retrying struct {
 	limiter Limiter
 	policy  RetryPolicy
 	clock   Clock
+	notify  func(string)
 }
 
 // NewRetrying panique si policy.MaxAttempts est inférieur à 1, même contrat que
@@ -49,7 +67,10 @@ type Retrying struct {
 // boucle d'Execute ne tourne jamais et rend (APIResponse{}, nil) : un faux
 // succès silencieux, sans qu'aucun appel n'ait été émis. Un apply construirait
 // son state là-dessus.
-func NewRetrying(inner Transport, limiter Limiter, policy RetryPolicy, clock Clock) *Retrying {
+//
+// notify reçoit une ligne par attente. Il peut être nil, mais une CLI ne doit
+// pas le laisser nil : une attente muette est indistinguable d'un blocage.
+func NewRetrying(inner Transport, limiter Limiter, policy RetryPolicy, clock Clock, notify func(string)) *Retrying {
 	if policy.MaxAttempts < 1 {
 		panic(fmt.Sprintf("NewRetrying: policy.MaxAttempts doit être >= 1, reçu %d", policy.MaxAttempts))
 	}
@@ -59,7 +80,7 @@ func NewRetrying(inner Transport, limiter Limiter, policy RetryPolicy, clock Clo
 	if policy.Jitter == nil {
 		policy.Jitter = fullJitter
 	}
-	return &Retrying{inner: inner, limiter: limiter, policy: policy, clock: clock}
+	return &Retrying{inner: inner, limiter: limiter, policy: policy, clock: clock, notify: notify}
 }
 
 func (r *Retrying) Execute(ctx context.Context, req APIRequest) (APIResponse, error) {
@@ -98,18 +119,37 @@ func (r *Retrying) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 			break
 		}
 
-		if err := r.clock.Sleep(ctx, r.backoff(attempt, resp)); err != nil {
+		wait, source := r.backoff(attempt, resp)
+		r.announce(wait, source)
+		if err := r.clock.Sleep(ctx, wait); err != nil {
 			return resp, err
 		}
 	}
 	return lastResp, lastErr
 }
 
+// announce dit à l'utilisateur qu'on attend, et pourquoi. Une attente de
+// plusieurs dizaines de secondes sans une ligne de sortie est indistinguable
+// d'un blocage : mesuré, un `retry-after: 3` produisait 9,35 s de silence total.
+func (r *Retrying) announce(d time.Duration, source string) {
+	if r.notify == nil || d <= 0 {
+		return
+	}
+	r.notify(fmt.Sprintf("en attente %s avant nouvelle tentative (%s)",
+		d.Round(time.Millisecond), source))
+}
+
 // backoff privilégie toujours Retry-After sur le calcul interne : le serveur
-// sait mieux que nous quand il acceptera le prochain appel.
-func (r *Retrying) backoff(attempt int, resp APIResponse) time.Duration {
+// sait mieux que nous quand il acceptera le prochain appel. Il reste plafonné
+// par MaxRetryAfterWait. La seconde valeur rendue nomme la source de l'attente,
+// pour que le message affiché le dise.
+func (r *Retrying) backoff(attempt int, resp APIResponse) (time.Duration, string) {
 	if d, ok := resp.RetryAfter(); ok {
-		return d
+		if d > MaxRetryAfterWait {
+			return MaxRetryAfterWait, fmt.Sprintf(
+				"Retry-After %s, plafonné à %s", d, MaxRetryAfterWait)
+		}
+		return d, "Retry-After"
 	}
 	d := time.Duration(float64(r.policy.Base) * math.Pow(2, float64(attempt)))
 	// Une policy pathologique (Base énorme, ou beaucoup de tentatives) peut faire
@@ -120,5 +160,5 @@ func (r *Retrying) backoff(attempt int, resp APIResponse) time.Duration {
 	if d < 0 || d > r.policy.Max {
 		d = r.policy.Max
 	}
-	return r.policy.Jitter(d)
+	return r.policy.Jitter(d), "backoff"
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -32,13 +33,46 @@ func subcommand() string {
 	return ""
 }
 
+// apiPath rend le chemin passé à `ntn api`, pour que la trace imite celle du
+// vrai binaire.
+func apiPath() string {
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "/") {
+			return a
+		}
+	}
+	return "/"
+}
+
 func main() {
 	switch os.Getenv("FAKE_NTN_SCENARIO") {
 	case "authenticated":
-		// ntn présent, à jour, authentifié : le chemin heureux de preflight.
+		// ntn présent, à jour, authentifié : le chemin heureux de preflight ET
+		// du preflight en ligne de plan, qui lit la page parente.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+apiPath()+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
+	case "authenticated_page_404":
+		// ntn authentifié, mais la page parente n'existe pas : couvre la branche
+		// 404 de checkParentPage et son message.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+apiPath()+"\n"+
+				"< 404 Not Found\n"+
+				"error: Public API request failed (404 Not Found object_not_found): "+
+				"Could not find page with ID: page-absente.\n")
+			os.Exit(5)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
@@ -85,10 +119,25 @@ func main() {
 	case "hang":
 		time.Sleep(10 * time.Minute)
 	case "echo_argv":
-		// Permet de vérifier les arguments construits par notion-seed.
+		// Permet de vérifier les arguments construits par notion-seed. La ligne
+		// de statut est indispensable : sans elle, Execute refuse le succès.
+		fmt.Fprint(os.Stderr, "< 200 OK\n")
 		for _, a := range os.Args[1:] {
 			fmt.Fprintln(os.Stdout, a)
 		}
+	case "exit0_status_403":
+		// ntn sort en 0 alors que l'API a répondu 403 : le statut est la seule
+		// façon de le savoir.
+		io.Copy(io.Discard, os.Stdin)
+		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n< 403 Forbidden\n")
+		fmt.Fprint(os.Stdout, `{"object":"error","status":403}`)
+	case "exit0_no_status":
+		// ntn sort en 0 mais sa trace -v ne porte aucune ligne "< NNN" : c'est la
+		// forme que prendrait un changement de format de sortie de ntn.
+		io.Copy(io.Discard, os.Stdin)
+		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n"+
+			"HTTP/2 200 (nouveau format)\n")
+		fmt.Fprint(os.Stdout, `{"object":"data_source","id":"abc"}`)
 	case "echo_stdin":
 		fmt.Fprint(os.Stderr, "< 200 OK\n")
 		io.Copy(os.Stdout, os.Stdin)

@@ -49,12 +49,12 @@ type Limiter interface {
 
 // TokenBucket est un seau à jetons classique, sûr en concurrence.
 type TokenBucket struct {
-	mu       sync.Mutex
-	rate     float64
-	burst    float64
-	tokens   float64
-	last     time.Time
-	clock    Clock
+	mu     sync.Mutex
+	rate   float64
+	burst  float64
+	tokens float64
+	last   time.Time
+	clock  Clock
 }
 
 // NewTokenBucket panique si ratePerSec ou burst n'est pas strictement positif.

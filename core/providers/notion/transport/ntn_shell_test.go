@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +121,11 @@ func TestExecuteServerErrorIsRetryable(t *testing.T) {
 	}
 }
 
+// L'argv est comparé comme une LISTE, avec égalité exacte. Une assertion par
+// sous-chaîne ne pouvait pas échouer : `strings.Contains(argv, "-v")` est
+// satisfait par `--notion-version` seul, donc retirer -v de l'argv laissait le
+// test vert — alors que la trace -v est la seule source du statut HTTP et du
+// header Retry-After.
 func TestExecuteAlwaysPassesVerboseAndNotionVersion(t *testing.T) {
 	withFakeNtn(t, "echo_argv")
 	tr := NewNtnShell()
@@ -128,12 +134,19 @@ func TestExecuteAlwaysPassesVerboseAndNotionVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	argv := string(resp.Body)
-	for _, want := range []string{"-v", "api", "--notion-version", DefaultNotionVersion, "-X", "PATCH", "/v1/x"} {
-		if !strings.Contains(argv, want) {
-			t.Errorf("argv %q ne contient pas %q", argv, want)
-		}
+	want := []string{"-v", "api", "--notion-version", DefaultNotionVersion, "-X", "PATCH", "/v1/x"}
+	if got := echoedArgv(resp.Body); !slices.Equal(got, want) {
+		t.Errorf("argv = %q, want %q", got, want)
 	}
+}
+
+// echoedArgv relit la sortie du scénario echo_argv : un argument par ligne.
+func echoedArgv(body []byte) []string {
+	trimmed := strings.TrimRight(string(body), "\n")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
 }
 
 func TestExecuteSendsBodyOnStdinWithDashData(t *testing.T) {
@@ -153,7 +166,8 @@ func TestExecuteSendsBodyOnStdinWithDashData(t *testing.T) {
 }
 
 // Sans body, aucun -d @- ne doit être passé : le passer sans alimenter stdin
-// ferait attendre ntn un body qui n'arrive jamais.
+// ferait attendre ntn un body qui n'arrive jamais. Égalité exacte, ici aussi :
+// chercher l'absence de la sous-chaîne "-d" ne dit rien de ce qui est présent.
 func TestExecuteWithoutBodyPassesNoDataFlag(t *testing.T) {
 	withFakeNtn(t, "echo_argv")
 	tr := NewNtnShell()
@@ -162,8 +176,62 @@ func TestExecuteWithoutBodyPassesNoDataFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if strings.Contains(string(resp.Body), "-d") {
-		t.Errorf("argv %q contient -d alors qu'il n'y a pas de body", resp.Body)
+	want := []string{"-v", "api", "--notion-version", DefaultNotionVersion, "-X", "GET", "/v1/x"}
+	if got := echoedArgv(resp.Body); !slices.Equal(got, want) {
+		t.Errorf("argv = %q, want %q — aucun -d @- sans body", got, want)
+	}
+}
+
+// Un exit 0 sans ligne de statut est le risque nommé par la spec : ntn change
+// son format de sortie. Il doit échouer vers le rouge, jamais rendre un succès
+// qu'on n'a pas constaté — sinon un plan déclare la page parente lisible sans
+// avoir lu un seul statut, et un apply rapporterait une mutation non vérifiée.
+func TestExecuteExitZeroWithoutStatusLineIsAnError(t *testing.T) {
+	withFakeNtn(t, "exit0_no_status")
+	tr := NewNtnShell()
+
+	resp, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
+	if err == nil {
+		t.Fatalf("Execute() error = nil alors que la trace -v ne porte aucun statut (resp = %+v)", resp)
+	}
+	for _, want := range []string{"ligne de statut", "0.22.11"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
+// Un 4xx rendu avec un exit 0 ne doit pas passer pour un succès : le statut
+// n'est vérifié nulle part en aval, donc c'est ici qu'il doit être reclassé.
+func TestExecuteStatusAtLeast400IsAnErrorEvenOnExitZero(t *testing.T) {
+	withFakeNtn(t, "exit0_status_403")
+	tr := NewNtnShell()
+
+	_, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/x"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v (%T), want *APIError", err, err)
+	}
+	if apiErr.Status != 403 {
+		t.Errorf("Status = %d, want 403", apiErr.Status)
+	}
+	if apiErr.Retryable() {
+		t.Error("un 403 ne doit pas être retryable")
+	}
+}
+
+// Un chemin d'API relatif est refusé avant tout appel : normalisé par la couche
+// HTTP, il viserait un autre endpoint que celui prévu.
+func TestExecuteRejectsRelativePath(t *testing.T) {
+	withFakeNtn(t, "ok")
+	tr := NewNtnShell()
+
+	for _, bad := range []string{"v1/pages/abc", "/v1/pages/../../v1/users"} {
+		_, err := tr.Execute(context.Background(), APIRequest{Method: "GET", Path: bad})
+		var usageErr *UsageError
+		if !errors.As(err, &usageErr) {
+			t.Errorf("Execute(%q) error = %v (%T), want *UsageError", bad, err, err)
+		}
 	}
 }
 

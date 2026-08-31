@@ -10,9 +10,9 @@ import (
 // fakeClock avance uniquement quand on le lui demande, ou quand un Sleep est
 // réclamé. Ça rend le débit vérifiable sans attendre en temps réel.
 type fakeClock struct {
-	mu     sync.Mutex
-	now    time.Time
-	slept  []time.Duration
+	mu    sync.Mutex
+	now   time.Time
+	slept []time.Duration
 }
 
 func newFakeClock() *fakeClock {
@@ -66,9 +66,12 @@ func TestTokenBucketThrottlesBeyondBurst(t *testing.T) {
 			t.Fatalf("Wait() #%d error = %v", i, err)
 		}
 	}
-	// 10 en burst, puis 5 à 5/s : au moins 1 seconde de sommeil cumulé.
-	if got := clock.totalSlept(); got < time.Second {
-		t.Errorf("sommeil cumulé = %v, want >= 1s", got)
+	// 10 en burst, puis 5 à 5/s : exactement 1 seconde de sommeil cumulé. La
+	// borne SUPÉRIEURE compte autant que l'inférieure : --rate est exposé à
+	// l'utilisateur, et un limiteur qui sur-étrangle d'un facteur 10 passerait
+	// une assertion en `>=`.
+	if got := clock.totalSlept(); got != time.Second {
+		t.Errorf("sommeil cumulé = %v, want exactement 1s", got)
 	}
 }
 
@@ -172,8 +175,15 @@ func TestTokenBucketIsSharedAcrossGoroutines(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// 30 appels, burst 10, 5/s : au moins 4 secondes cumulées.
-	if got := clock.totalSlept(); got < 4*time.Second {
-		t.Errorf("sommeil cumulé = %v, want >= 4s — le bucket n'est pas partagé", got)
+	// 30 appels, burst 10, 5/s : 20 jetons à produire, donc 4 secondes cumulées.
+	// Borne inférieure : sans partage, chaque goroutine aurait son propre burst
+	// et personne ne dormirait. Borne supérieure : le sommeil est découpé en
+	// tranches d'un jeton, mais leur somme ne doit pas dépasser le temps
+	// nécessaire — sinon --rate ne veut plus dire ce qu'il annonce. La marge
+	// d'une tranche couvre les réveils qui se croisent.
+	const want = 4 * time.Second
+	got := clock.totalSlept()
+	if got < want || got > want+time.Second/5 {
+		t.Errorf("sommeil cumulé = %v, want %v (±1 tranche) — débit mal borné", got, want)
 	}
 }

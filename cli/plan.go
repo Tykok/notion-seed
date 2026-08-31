@@ -94,7 +94,7 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		// 3. Refresh — vérifier que la page parente existe et est accessible.
 		// Aucune ressource n'est mise en correspondance au MVP 0 : sans state,
 		// il n'y a pas d'ancre d'identité fiable.
-		tr := newTransport(opts)
+		tr := newTransport(cmd, opts)
 		if err := checkParentPage(ctx, tr, cfg.Workspace.ParentPageID); err != nil {
 			return err
 		}
@@ -118,13 +118,17 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 
 // newTransport assemble la pile : shell-out vers ntn, entouré du rate limiter
 // partagé et de la politique de retry.
-func newTransport(opts *planOptions) transport.Transport {
+//
+// Les attentes de retry partent sur stderr, pas sur stdout : stdout ne porte que
+// le plan, qui doit rester identique entre deux runs et exploitable dans un pipe.
+func newTransport(cmd *cobra.Command, opts *planOptions) transport.Transport {
 	clock := transport.RealClock{}
 	return transport.NewRetrying(
 		transport.NewNtnShell(),
 		transport.NewTokenBucket(opts.ratePerSec, opts.burst, clock),
 		transport.DefaultRetryPolicy(),
 		clock,
+		func(msg string) { fmt.Fprintln(cmd.ErrOrStderr(), msg) },
 	)
 }
 
