@@ -39,3 +39,8 @@ jobs:
 
       - name: en-têtes de licence
         run: ./scripts/check-spdx.sh
+
+      # Le dépôt porte maintenant trois workflows qui se publient eux-mêmes ;
+      # une expression fautive n'y apparaîtrait qu'au moment d'une release.
+      - name: actionlint
+        uses: raven-actions/actionlint@v2

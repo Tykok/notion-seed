@@ -1,13 +1,22 @@
 name: Dépôt apt
 
 on:
-  release:
-    types: [published]
+  # Surtout pas `release: published` : GoReleaser crée la release avec
+  # GITHUB_TOKEN, et GitHub ne déclenche aucun workflow depuis un événement
+  # produit par ce jeton. Le dépôt apt ne serait jamais publié. release.yml
+  # appelle donc ce workflow directement.
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag de la release à publier
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: Tag de la release à (re)publier
         required: true
+        type: string
 
 permissions:
   contents: write
@@ -33,7 +42,7 @@ jobs:
       - name: Télécharger les .deb de la release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           mkdir -p incoming
           gh release download "$TAG" --pattern '*.deb' --dir incoming
@@ -69,7 +78,7 @@ jobs:
 
       - name: Publier sur gh-pages
         env:
-          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
           rm -rf pages && mkdir pages && cd pages
           git init -q -b gh-pages

@@ -31,3 +31,12 @@ jobs:
           # GITHUB_TOKEN ne porte que sur ce dépôt : pousser le cask dans
           # tykok/homebrew-tap demande un jeton qui porte sur l'autre dépôt.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  apt:
+    # Dans le même run que la release : le dépôt apt se republie à chaque tag
+    # sans dépendre d'un événement que GITHUB_TOKEN ne peut pas déclencher.
+    needs: goreleaser
+    uses: ./.github/workflows/apt.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
