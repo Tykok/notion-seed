@@ -66,7 +66,10 @@ func Save(dir string, s *Snapshot) error {
 
 	body, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		return fmt.Errorf("sérialisation du state impossible: %w", err)
+		return fmt.Errorf(
+			"sérialisation du state impossible: %w\n"+
+				"  → c'est un bug de notion-seed, pas une erreur de configuration : "+
+				"signalez-le", err)
 	}
 	body = append(body, '\n')
 
@@ -83,6 +86,13 @@ func Save(dir string, s *Snapshot) error {
 	if _, err := tmp.Write(body); err != nil {
 		tmp.Close()
 		return fmt.Errorf("écriture de %s impossible: %w\n"+
+			"  → l'ancien state est intact", FileName, err)
+	}
+	// os.CreateTemp crée le fichier en 0600 ; ce n'est pas le mode d'un
+	// fichier destiné à être versionné, relu en revue et lu par la CI.
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("changement de permissions de %s impossible: %w\n"+
 			"  → l'ancien state est intact", FileName, err)
 	}
 	if err := tmp.Sync(); err != nil {

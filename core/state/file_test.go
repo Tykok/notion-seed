@@ -117,6 +117,22 @@ func TestLoadRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestSaveWritesAWorldReadableFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := Save(dir, sampleSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(Path(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Le fichier est fait pour être versionné et relu : os.CreateTemp le crée
+	// en 0600, ce qui le rendrait illisible pour tout le monde sauf son auteur.
+	if perm := fi.Mode().Perm(); perm != 0o644 {
+		t.Errorf("mode = %o, want 644", perm)
+	}
+}
+
 // Review Focus 3 : l'écriture atomique doit laisser l'ancien fichier intact
 // quand elle échoue.
 func TestSaveKeepsPreviousFileWhenWriteFails(t *testing.T) {
