@@ -40,15 +40,25 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/tykok/notion-seed
     description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
-    hooks:
-      post:
-        install: |
+    # custom_block plutôt que `hooks`, qui émet `postflight` : Homebrew le
+    # déprécie et avertit à chaque installation, deux fois, en invitant
+    # l'utilisateur à ouvrir un ticket ici.
+    #
+    # postflight_steps n'est pas un renommage : c'est un DSL déclaratif
+    # restreint, sans system_command. D'où `run`, et `chdir: "."` — sa base de
+    # chemin par défaut est déjà staged_path, alors que `chdir: :staged_path`
+    # est pris pour un chemin littéral.
+    custom_block: |
+      postflight_steps do
+        on_macos do
           # Le binaire n'est pas notarié : sans ça macOS le met en quarantaine
           # et refuse de l'exécuter, avec un message qui parle de développeur
           # non vérifié plutôt que de quarantaine.
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status.zero?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/notion-seed"]
-          end
+          run "/usr/bin/xattr",
+              args:  ["-dr", "com.apple.quarantine", "notion-seed"],
+              chdir: "."
+        end
+      end
 
 nfpms:
   - id: packages
