@@ -27,6 +27,10 @@ func sel(opts ...state.Option) state.Property {
 	return state.Property{ID: "p1", Type: "select", Options: opts}
 }
 
+func multiSel(opts ...state.Option) state.Property {
+	return state.Property{ID: "p1", Type: "multi_select", Options: opts}
+}
+
 func TestCompareDatabase(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -91,6 +95,15 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"B"`,
 		},
 		{
+			name:      "option de multi_select retirée : destructif",
+			desired:   db("Tags", multiSel(state.Option{Key: "a", Name: "A"})),
+			applied:   db("Tags", multiSel(state.Option{ID: "o1", Key: "a", Name: "A"}, state.Option{ID: "o2", Key: "b", Name: "B"})),
+			actual:    db("Tags", multiSel(state.Option{ID: "o1", Name: "A"}, state.Option{ID: "o2", Name: "B"})),
+			wantKind:  resources.KindUpdate,
+			wantClass: change.ClassDestructive,
+			wantLine:  `"B"`,
+		},
+		{
 			name:      "option ajoutée : sûr",
 			desired:   db("Tag", sel(state.Option{Key: "a", Name: "A"}, state.Option{Key: "b", Name: "B"})),
 			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "a", Name: "A"})),
@@ -98,6 +111,24 @@ func TestCompareDatabase(t *testing.T) {
 			wantKind:  resources.KindUpdate,
 			wantClass: change.ClassSafe,
 			wantLine:  `"B"`,
+		},
+		{
+			// L'id porté par `applied` ("o1") n'existe plus côté réel : l'option a
+			// été détruite puis recréée hors de notion-seed, sous un nouvel id mais
+			// le même nom. La key ne peut plus servir de pont — elle doit retomber
+			// sur l'appariement par nom plutôt que produire un retrait suivi d'une
+			// création fantômes.
+			name:      "key déclarée sans correspondance dans le réel : retombe sur le nom",
+			desired:   db("Tag", sel(state.Option{Key: "x", Name: "Foo"})),
+			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "x", Name: "Foo"})),
+			actual:    db("Tag", sel(state.Option{ID: "o2", Name: "Foo"})),
+			wantKind:  resources.KindNone,
+			wantClass: change.ClassSafe,
+			// L'id "o1" que portait `applied` a réellement disparu du réel : c'est
+			// une vraie dérive (constat), distincte du plan (Changeset) qui, lui,
+			// ne doit ni recréer ni retirer "Foo" — c'est ce que vérifient
+			// wantKind/wantClass ci-dessus.
+			wantDrift: "hors de notion-seed",
 		},
 		{
 			name:      "type de propriété changé : destructif",
@@ -118,6 +149,32 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "euro",
 		},
 		{
+			// La description n'est pas gardée comme le nom : une database sans
+			// `description` dans le YAML ne doit jamais proposer d'écraser celle que
+			// porte Notion — sinon chaque plan afficherait un changement fantôme.
+			name:    "description omise du YAML : aucune ligne",
+			desired: db("Name", state.Property{Type: "title"}),
+			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
+			actual: &state.Database{Name: "Tasks", Description: "Description existante", Properties: map[string]state.Property{
+				"Name": {ID: "p1", Type: "title"},
+			}},
+			wantKind:  resources.KindNone,
+			wantClass: change.ClassSafe,
+		},
+		{
+			name: "description déclarée et différente : les deux valeurs",
+			desired: &state.Database{Name: "Tasks", Description: "Nouvelle description", Properties: map[string]state.Property{
+				"Name": {Type: "title"},
+			}},
+			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
+			actual: &state.Database{Name: "Tasks", Description: "Ancienne description", Properties: map[string]state.Property{
+				"Name": {ID: "p1", Type: "title"},
+			}},
+			wantKind:  resources.KindUpdate,
+			wantClass: change.ClassSafe,
+			wantLine:  `"Ancienne description" → "Nouvelle description"`,
+		},
+		{
 			name:    "propriété hors config : listée, non touchée",
 			desired: db("Name", state.Property{Type: "title"}),
 			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
@@ -127,6 +184,9 @@ func TestCompareDatabase(t *testing.T) {
 			}},
 			wantKind:  resources.KindNone,
 			wantClass: change.ClassSafe,
+			// "Créé le" n'est dans aucun `applied` connu : elle est aussi une
+			// dérive (apparue hors de notion-seed), en plus d'être hors config.
+			wantDrift: `"Créé le"`,
 			wantUnman: `"Créé le"`,
 		},
 		{
@@ -134,10 +194,13 @@ func TestCompareDatabase(t *testing.T) {
 			desired: db("Statut", status(state.Option{Key: "done", Name: "Fait", Group: "Complete"})),
 			applied: db("Statut", status(state.Option{ID: "o1", Key: "done", Name: "Fait", Group: "Complete"})),
 			actual:  db("Statut", status(state.Option{ID: "o1", Name: "Terminé", Group: "Complete"})),
-			// Le YAML gagne : on replanifie le retour à "Fait".
+			// Le YAML gagne : on replanifie le retour à "Fait". L'assertion cible le
+			// texte du renommage, pas seulement "Fait" : une ligne de RETRAIT
+			// contiendrait aussi "Fait" et laisserait passer une régression qui
+			// confondrait renommage et suppression.
 			wantKind:  resources.KindUpdate,
 			wantClass: change.ClassMigration,
-			wantDrift: `"Fait"`,
+			wantDrift: `renommée en "Terminé"`,
 		},
 		{
 			name:      "database orpheline : destruction planifiée",
@@ -227,6 +290,72 @@ func TestCompareDatabaseRenamedPropertyIsCreationPlusUnmanaged(t *testing.T) {
 	}
 	if worstClass(got.Changeset.Details) != change.ClassSafe {
 		t.Error("un renommage de propriété ne détruit rien, il duplique")
+	}
+}
+
+// Correction 1 (ronde de relecture 1) : `claimed` était indexée par nom, donc
+// une option renommée par key libérait son ancien nom, et la branche de
+// repli par nom croyait ce nom encore occupé — une option déclarée sortait
+// du plan sans une ligne. Triplet fourni par la relecture.
+func TestCompareDatabaseOptionRenameFreesNameForNewOption(t *testing.T) {
+	desired := db("Statut", status(
+		state.Option{Key: "a", Name: "Terminé"},
+		state.Option{Name: "Fait"},
+	))
+	applied := db("Statut", status(state.Option{ID: "o1", Key: "a", Name: "Fait"}))
+	actual := db("Statut", status(state.Option{ID: "o1", Name: "Fait"}))
+
+	got := CompareDatabase("tasks", desired, applied, actual)
+
+	if got.Changeset.Kind != resources.KindUpdate {
+		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
+	}
+	if c := worstClass(got.Changeset.Details); c != change.ClassMigration {
+		t.Errorf("classe = %v, want ClassMigration (détails: %+v)", c, got.Changeset.Details)
+	}
+
+	lines := detailStrings(got.Changeset.Details)
+	if !containsSub(lines, `"Fait" → "Terminé"`) {
+		t.Errorf("la migration par key doit apparaître: %v", lines)
+	}
+	if !containsSub(lines, `+ option "Fait"`) {
+		t.Errorf(
+			"la création de \"Fait\" doit apparaître : sans elle le YAML déclare "+
+				"une option qui ne sera jamais créée, sans que le plan ne le montre: %v",
+			lines)
+	}
+}
+
+// Angle mort de la table (ronde de relecture 1) : un renommage par key et un
+// retrait sur la même propriété status doivent produire les DEUX lignes, et
+// la classe rendue doit rester la plus grave des deux — réécriture
+// silencieuse, pas migration.
+func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
+	desired := db("Statut", status(state.Option{Key: "a", Name: "Migré"}))
+	applied := db("Statut", status(
+		state.Option{ID: "o1", Key: "a", Name: "Ancien"},
+		state.Option{ID: "o2", Key: "b", Name: "Obsolète"},
+	))
+	actual := db("Statut", status(
+		state.Option{ID: "o1", Name: "Ancien"},
+		state.Option{ID: "o2", Name: "Obsolète"},
+	))
+
+	got := CompareDatabase("tasks", desired, applied, actual)
+
+	if got.Changeset.Kind != resources.KindUpdate {
+		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
+	}
+	if c := worstClass(got.Changeset.Details); c != change.ClassSilentRewrite {
+		t.Errorf("classe = %v, want ClassSilentRewrite (détails: %+v)", c, got.Changeset.Details)
+	}
+
+	lines := detailStrings(got.Changeset.Details)
+	if !containsSub(lines, `"Ancien" → "Migré"`) {
+		t.Errorf("la migration doit apparaître: %v", lines)
+	}
+	if !containsSub(lines, `"Obsolète"`) {
+		t.Errorf("le retrait doit apparaître: %v", lines)
 	}
 }
 
