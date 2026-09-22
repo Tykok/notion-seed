@@ -25,15 +25,16 @@ remplacée par une autre.
 
 ## État actuel
 
-MVP 0 : lecture seule. `plan` et `diff` calculent et affichent les
-changements, rien n'est jamais écrit dans Notion.
+MVP 1 : lecture et adoption. `import` inscrit une database existante dans le
+state ; `plan` et `diff` comparent la configuration, le state et le réel, et
+nomment la dérive. Rien n'est jamais écrit dans Notion.
 
 | | |
 |---|---|
-| `init`, `version`, `plan`, `diff` | disponibles |
+| `init`, `version`, `plan`, `diff`, `import` | disponibles |
+| fichier de state | `notion-seed.state.json`, écrit par `import` seul |
+| `lifecycle.prevent_destroy` / `allow_data_loss` | appliqués au plan |
 | `apply` | pas encore |
-| fichier de state | pas encore — `plan` diffe contre un état réel vide, donc tout ressort en création |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | lus et validés, pas encore appliqués au plan |
 
 ## Prérequis
 
@@ -155,6 +156,58 @@ databases:
 
 Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
 
+## State
+
+`notion-seed.state.json`, à côté de `workspace.yaml`, retient l'identité Notion
+de chaque ressource gérée et son dernier état appliqué. **Versionnez-le** : il
+ne contient aucun secret, et c'est lui qui rend le plan reproductible entre
+machines et en CI.
+
+Sans lui, `notion-seed` n'a aucune ancre d'identité : toute database déclarée
+ressort en création, même si elle existe déjà dans Notion.
+
+C'est ce fichier qui permet de distinguer « le YAML a changé » de « quelqu'un a
+changé Notion à la main ». Le second cas s'affiche sous la section `Dérive
+détectée hors de notion-seed`, avant le plan qui ramène le réel vers le YAML.
+
+Seule la commande `import` l'écrit. `plan` et `diff` lisent le réel mais n'y
+touchent jamais : un `plan` en CI ne peut donc pas produire un diff git
+surprise, et une dérive ne s'efface pas d'elle-même.
+
+## Adopter une database existante
+
+```sh
+notion-seed import database.tasks https://www.notion.so/space/Tasks-1b2c3d4e5f60...
+```
+
+La key doit être déclarée dans `databases/`. `import` adopte la database telle
+qu'elle est, sans exiger qu'elle corresponde déjà au YAML — c'est le `plan`
+suivant qui affiche l'écart.
+
+Les `key` d'options sont accrochées à cet instant, en joignant sur le nom.
+Une option présente dans Notion et absente du YAML est enregistrée sans key et
+comptée dans la sortie :
+
+```
+database.tasks importée — id 1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d (8 propriétés, 2 options sans key de config)
+```
+
+### Ce qui n'est pas déclaré
+
+Une **propriété** présente dans Notion et absente du YAML n'est jamais touchée :
+elle apparaît sous `Hors config — présent dans Notion, non touché`. L'API
+modifie les propriétés une par une, donc ne pas la déclarer suffit à ne pas y
+toucher.
+
+Une **option** présente dans Notion et absente du YAML, elle, sera détruite dès
+qu'on écrit sa propriété : l'API remplace la liste entière des options au lieu
+de la fusionner. Le plan la fait donc ressortir en retrait, `destructif` pour
+`select` et `multi_select`, `réécriture silencieuse` pour `status`.
+
+Autrement dit, « non déclaré = non touché » est vrai pour les propriétés et faux
+pour les options. C'est exactement le genre d'écart que cet outil existe pour
+rendre visible.
+
 ## Sortie
 
 ```
@@ -184,6 +237,9 @@ Un plan bloqué sort en code non nul.
 | `--skip-preflight` | `false` | mode entièrement hors ligne : ni vérification de `ntn`, ni vérification de la page parente. Valide la configuration et rend le plan sans aucun appel réseau |
 | `--rate` | `5` | plafond d'appels API par seconde |
 | `--burst` | `10` | appels tolérés en rafale |
+
+`import` prend `--dir`, `--rate` et `--burst`, mais pas `--skip-preflight` :
+la commande lit l'état réel, elle n'a aucun sens hors ligne.
 
 `diff` est aujourd'hui identique à `plan`, puisque `plan` n'écrit pas encore
 de state. Les deux restent distinctes pour que l'usage en CI soit stable le
