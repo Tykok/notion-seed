@@ -470,6 +470,135 @@ databases:
 	}
 }
 
+// tasksWorkspaceYAML, tasksConfigYAML et tasksStateJSON décrivent une
+// configuration à une seule database "tasks", dont le state ancre l'id
+// "db-1" — celui que sert le scénario fakentn "authenticated_database".
+// Partagés par les tests ci-dessous, qui vérifient le comportement de plan
+// avec un state qui fait réellement lire une ressource distante.
+const tasksWorkspaceYAML = `
+version: 1
+workspace:
+  parent_page_id: 33333333-3333-4333-8333-333333333333
+`
+
+const tasksConfigYAML = `
+databases:
+  - key: tasks
+    name: Tasks
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: À faire
+            group: To-do
+          - key: done
+            name: Fait
+            group: Complete
+`
+
+const tasksStateJSON = `{
+  "version": 1,
+  "workspace_id": "33333333-3333-4333-8333-333333333333",
+  "databases": {
+    "tasks": {
+      "id": "db-1",
+      "data_source_id": "ds-1",
+      "name": "Tasks",
+      "properties": {
+        "Name": {"id": "title", "type": "title"},
+        "Statut": {"id": "p-statut", "type": "status", "options": [
+          {"id": "o-todo", "key": "todo", "name": "À faire", "color": "blue", "group": "To-do"},
+          {"id": "o-done", "key": "done", "name": "Fait", "color": "green", "group": "Complete"}
+        ]}
+      }
+    }
+  }
+}
+`
+
+// Ronde de correction 1 : TestPlanWritesNothingToDisk ne verrouille
+// l'invariant « plan n'écrit rien » QUE sur le chemin sans state — sans
+// entrée dans snap.Databases, refreshManaged sort à son premier garde et sa
+// boucle de lecture n'est jamais exercée. Ce test rejoue le même verrou avec
+// un state peuplé qui fait réellement lire une database (id "db-1", servie
+// par le scénario fakentn "authenticated_database") : le refresh doit
+// accomplir ses appels GET sans jamais écrire sur disque.
+func TestPlanWithPopulatedStateWritesNothingToDisk(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":       tasksWorkspaceYAML,
+		"databases/tasks.yaml": tasksConfigYAML,
+		state.FileName:         tasksStateJSON,
+	})
+
+	before := snapshot(t, dir)
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err != nil {
+		t.Fatalf("plan error = %v\n%s", err, out)
+	}
+	// La preuve que le refresh a réellement tourné, et pas seulement traversé
+	// le garde « state vide » : la comparaison à trois voies ne peut rendre
+	// « Aucun changement » que si `actual` a été lu avec succès depuis l'API.
+	if !strings.Contains(out, "Aucun changement") {
+		t.Fatalf("le refresh n'a pas produit la comparaison attendue:\n%s", out)
+	}
+
+	after := snapshot(t, dir)
+	for path, sum := range before {
+		got, ok := after[path]
+		if !ok {
+			t.Errorf("plan a supprimé %s", path)
+			continue
+		}
+		if got != sum {
+			t.Errorf("plan a modifié le contenu de %s", path)
+		}
+	}
+	for path := range after {
+		if _, ok := before[path]; !ok {
+			t.Errorf("plan a créé %s", path)
+		}
+	}
+}
+
+// Ronde de correction 1 : une entrée de state sans id (state écrit ou
+// fusionné à la main) ne doit pas atteindre l'API. Sans ce garde,
+// refreshManaged appellerait GET /v1/databases/ (chemin vide), qui rendrait
+// soit un faux « disparue », soit un message qui parle de suppression alors
+// que le vrai problème est un state abîmé.
+func TestPlanRejectsStateEntryWithoutID(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":       tasksWorkspaceYAML,
+		"databases/tasks.yaml": tasksConfigYAML,
+		state.FileName: `{
+  "version": 1,
+  "workspace_id": "33333333-3333-4333-8333-333333333333",
+  "databases": {
+    "tasks": {
+      "data_source_id": "ds-1",
+      "name": "Tasks"
+    }
+  }
+}
+`,
+	})
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un refus d'entrée sans id\n%s", out)
+	}
+	for _, want := range []string{"database.tasks", "n'a pas d'identifiant", state.FileName} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
 // Review Focus 5 : un state sans workspace_id ne peut pas être comparé. Ça ne
 // doit pas valoir « workspace différent ».
 func TestCheckWorkspaceMatchAcceptsEmptyWorkspaceID(t *testing.T) {
