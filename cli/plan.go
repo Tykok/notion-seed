@@ -6,12 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/diff"
 	"github.com/tykok/notion-seed/core/preflight"
+	"github.com/tykok/notion-seed/core/providers/notion/mapper"
+	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
+	"github.com/tykok/notion-seed/core/state"
 )
 
 // planOptions porte les flags partagés par plan et diff.
@@ -83,8 +87,14 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		return err
 	}
 
-	// 2. Preflight — ntn présent, assez récent, authentifié. Le workspace est
-	// affiché : l'utilisateur doit voir sur lequel il opère avant tout apply.
+	// 2. State — le dernier état appliqué. Absent = premier run, tout ressort
+	// en création, exactement comme avant l'existence du state.
+	snap, err := state.Load(opts.dir)
+	if err != nil {
+		return err
+	}
+
+	var refreshed map[string]diff.Refreshed
 	if !opts.skipPreflight {
 		info, err := preflight.Check(ctx, "ntn")
 		if err != nil {
@@ -93,17 +103,26 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		cmd.Printf("ntn %s — workspace %s (%s)\n\n",
 			info.NtnVersion, info.WorkspaceName, info.WorkspaceID)
 
-		// 3. Refresh — vérifier que la page parente existe et est accessible.
-		// Aucune ressource n'est mise en correspondance au MVP 0 : sans state,
-		// il n'y a pas d'ancre d'identité fiable.
+		if err := checkWorkspaceMatch(snap, info.WorkspaceID); err != nil {
+			return err
+		}
+
 		tr := newTransport(cmd, opts)
 		if err := checkParentPage(ctx, tr, cfg.Workspace.ParentPageID, opts.ratePerSec); err != nil {
 			return err
 		}
+
+		// 3. Refresh — lire l'état réel des seules ressources que le state ancre.
+		// Sans id, aucune mise en correspondance n'est possible : une database
+		// non importée ressort en création, ce qui est exact.
+		refreshed, err = refreshManaged(ctx, tr, snap)
+		if err != nil {
+			return err
+		}
 	}
 
-	// 4. Diff — desired contre un état réel vide : tout ressort en création.
-	p, err := diff.Compute(cfg, nil, nil)
+	// 4. Diff — config, state et réel.
+	p, err := diff.Compute(cfg, snap, refreshed)
 	if err != nil {
 		return err
 	}
@@ -113,9 +132,74 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		return err
 	}
 	if p.Blocked {
-		return fmt.Errorf("plan bloqué par au moins un changement refusé par défaut")
+		// Le rendu ci-dessus détaille déjà chaque raison de blocage avec son
+		// action corrective (section « Plan bloqué »). Cette erreur ne les
+		// répète pas : elle sert uniquement à faire sortir la commande en échec.
+		return fmt.Errorf("plan bloqué, voir les raisons ci-dessus")
 	}
 	return nil
+}
+
+// checkWorkspaceMatch refuse un state venu d'un autre workspace.
+//
+// Un workspace_id vide n'est PAS un désaccord : c'est un state écrit avant que
+// le champ existe, ou à la main. On ne peut pas vérifier, donc on ne prétend
+// pas savoir.
+func checkWorkspaceMatch(snap *state.Snapshot, workspaceID string) error {
+	if snap == nil || snap.WorkspaceID == "" || snap.WorkspaceID == workspaceID {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s décrit le workspace %s, mais ntn est authentifié sur %s\n"+
+			"  → les identités du state n'existent pas dans ce workspace. Authentifiez "+
+			"ntn sur le bon workspace (`ntn login`), ou travaillez dans le dossier de "+
+			"configuration correspondant",
+		state.FileName, snap.WorkspaceID, workspaceID)
+}
+
+// refreshManaged lit l'état réel de chaque ressource ancrée par le state.
+//
+// Une ressource introuvable ou archivée n'est pas une erreur de la commande :
+// c'est un fait que le plan doit rapporter et sur lequel il bloquera. La faire
+// remonter en erreur priverait l'utilisateur du reste du plan.
+func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Snapshot) (map[string]diff.Refreshed, error) {
+	if snap == nil || len(snap.Databases) == 0 {
+		return nil, nil
+	}
+	res := resources.NewDatabaseResource(tr, mapper.RemoteDatabaseFromJSON)
+	out := make(map[string]diff.Refreshed, len(snap.Databases))
+
+	keys := make([]string, 0, len(snap.Databases))
+	for key := range snap.Databases {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		remote, err := res.Read(ctx, snap.Databases[key].ID)
+		if err != nil {
+			var apiErr *transport.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == 404 {
+				out[key] = diff.Refreshed{Missing: true, Reason: "introuvable (404)"}
+				continue
+			}
+			return nil, fmt.Errorf(
+				"lecture de database.%s (id %s) impossible: %w\n"+
+					"  → réessayez ; si la database a été supprimée, retirez son entrée de %s",
+				key, snap.Databases[key].ID, err, state.FileName)
+		}
+		rd, ok := remote.(resources.RemoteDatabase)
+		if !ok || !rd.Found {
+			out[key] = diff.Refreshed{Missing: true, Reason: "introuvable"}
+			continue
+		}
+		if rd.Archived {
+			out[key] = diff.Refreshed{Missing: true, Reason: "archivée ou en corbeille"}
+			continue
+		}
+		out[key] = diff.Refreshed{Database: state.FromRemote(rd)}
+	}
+	return out, nil
 }
 
 // newTransport assemble la pile : shell-out vers ntn, entouré du rate limiter
