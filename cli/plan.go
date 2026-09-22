@@ -103,7 +103,7 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 	}
 
 	// 4. Diff — desired contre un état réel vide : tout ressort en création.
-	p, err := diff.Compute(cfg, nil)
+	p, err := diff.Compute(cfg, nil, nil)
 	if err != nil {
 		return err
 	}
