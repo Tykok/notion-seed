@@ -5,7 +5,11 @@
 // ajouter un type ne doit pas le modifier.
 package resources
 
-import "context"
+import (
+	"context"
+
+	"github.com/tykok/notion-seed/core/change"
+)
 
 // RemoteState est l'état réel d'une ressource, lu depuis l'API.
 type RemoteState interface {
@@ -19,6 +23,9 @@ const (
 	KindNone ChangeKind = iota
 	KindCreate
 	KindUpdate
+	// KindDestroy : la ressource est dans le state mais plus dans la config.
+	// Son identité n'a plus d'ancre déclarée.
+	KindDestroy
 )
 
 // Detail décrit un changement élémentaire à l'intérieur d'une ressource.
@@ -26,6 +33,7 @@ type Detail struct {
 	Op     string // "+", "~", "-"
 	Target string // `property "Estimate" (number)`
 	Note   string // précision optionnelle
+	Class  change.Class
 }
 
 // Changeset regroupe les changements d'une ressource.
