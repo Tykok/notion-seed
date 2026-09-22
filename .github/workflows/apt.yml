@@ -1,0 +1,89 @@
+name: Dépôt apt
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag de la release à (re)publier
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  # Deux releases publiées coup sur coup réécriraient le même index apt :
+  # la seconde partirait d'un gh-pages que la première n'a pas encore poussé,
+  # et perdrait ses paquets. Une seule à la fois, sans annuler la précédente.
+  group: apt-repo
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Outils Debian
+        run: sudo apt-get update -qq && sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Télécharger les .deb de la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          mkdir -p incoming
+          gh release download "$TAG" --pattern '*.deb' --dir incoming
+
+      - name: Importer la clé de signature
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APT_GPG_PRIVATE_KEY" ]; then
+            echo "::error::secret APT_GPG_PRIVATE_KEY absent — un dépôt apt non signé est refusé par apt"
+            exit 1
+          fi
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format=long
+
+      - name: Reprendre les paquets déjà publiés
+        run: |
+          # Sans cette étape, publier une version rendrait toutes les
+          # précédentes introuvables : le dépôt est reconstruit en entier à
+          # chaque fois, donc il doit repartir de ce qui est déjà en ligne.
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth 1 origin gh-pages
+            mkdir -p pages
+            git archive FETCH_HEAD | tar -x -C pages
+            find pages/apt/pool -name '*.deb' -exec cp -n {} incoming/ \; 2>/dev/null || true
+          fi
+          ls -1 incoming/
+
+      - name: Construire le dépôt
+        env:
+          APT_GPG_KEY: ${{ secrets.APT_GPG_KEY_ID }}
+        run: ./scripts/build-apt-repo.sh incoming apt-repo
+
+      - name: Publier sur gh-pages
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+        run: |
+          rm -rf pages && mkdir pages && cd pages
+          git init -q -b gh-pages
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth 1 origin gh-pages && git reset --soft FETCH_HEAD
+          fi
+          rm -rf apt
+          cp -r ../apt-repo apt
+          # GitHub Pages passe le contenu par Jekyll sans ça, qui ignore les
+          # dossiers commençant par un underscore et réécrit certains fichiers.
+          touch .nojekyll
+          git add -A
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "apt: publier $TAG" || { echo "rien à publier"; exit 0; }
+          git push -q origin gh-pages

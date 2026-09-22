@@ -60,7 +60,31 @@ curl -fsSL https://github.com/tykok/notion-seed/releases/latest/download/notion-
   | tar -xz notion-seed
 ```
 
-Ou depuis les sources :
+### Debian, Ubuntu
+
+apt n'a pas de mécanisme de tap par utilisateur, mais un dépôt apt n'est qu'un
+arbre de fichiers statiques : celui-ci est hébergé sur GitHub Pages et signé.
+
+```sh
+sudo install -d /etc/apt/keyrings
+curl -fsSL https://tykok.github.io/notion-seed/apt/gpg.key \
+  | sudo tee /etc/apt/keyrings/notion-seed.asc > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/notion-seed.asc] https://tykok.github.io/notion-seed/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/notion-seed.list > /dev/null
+sudo apt update && sudo apt install notion-seed
+```
+
+`signed-by` restreint la clé à ce seul dépôt : sans lui, la clé vaudrait pour
+toutes les sources apt de la machine.
+
+Un `.deb`, `.rpm` ou `.apk` est aussi attaché à chaque release, si vous préférez
+ne rien ajouter aux sources :
+
+```sh
+sudo apt install ./notion-seed_<version>_linux_amd64.deb
+```
+
+### Depuis les sources
 
 ```sh
 go install github.com/tykok/notion-seed@latest

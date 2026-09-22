@@ -28,6 +28,19 @@ archives:
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
+nfpms:
+  - id: packages
+    package_name: notion-seed
+    formats: [deb, rpm, apk]
+    maintainer: Tykok <treportelie12@gmail.com>
+    description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
+    homepage: https://github.com/tykok/notion-seed
+    license: GPL-3.0-or-later
+    # /usr/bin et non /usr/local/bin : un paquet géré par le gestionnaire de
+    # paquets appartient à la hiérarchie de la distribution, /usr/local étant
+    # réservé à ce que l'administrateur installe hors paquet.
+    bindir: /usr/bin
+
 checksum:
   name_template: checksums.txt
 
