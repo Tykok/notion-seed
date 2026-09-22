@@ -28,6 +28,28 @@ archives:
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
+homebrew_casks:
+  - name: notion-seed
+    binaries: [notion-seed]
+    repository:
+      owner: tykok
+      name: homebrew-tap
+      branch: main
+      # GITHUB_TOKEN ne vaut que pour le dépôt courant : pousser la formule
+      # dans le tap demande un jeton qui porte sur l'autre dépôt.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/tykok/notion-seed
+    description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
+    hooks:
+      post:
+        install: |
+          # Le binaire n'est pas notarié : sans ça macOS le met en quarantaine
+          # et refuse de l'exécuter, avec un message qui parle de développeur
+          # non vérifié plutôt que de quarantaine.
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status.zero?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/notion-seed"]
+          end
+
 nfpms:
   - id: packages
     package_name: notion-seed

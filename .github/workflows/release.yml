@@ -28,3 +28,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN ne porte que sur ce dépôt : pousser le cask dans
+          # tykok/homebrew-tap demande un jeton qui porte sur l'autre dépôt.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -60,6 +60,12 @@ curl -fsSL https://github.com/tykok/notion-seed/releases/latest/download/notion-
   | tar -xz notion-seed
 ```
 
+### macOS, Linux (Homebrew)
+
+```sh
+brew install tykok/tap/notion-seed
+```
+
 ### Debian, Ubuntu
 
 apt n'a pas de mécanisme de tap par utilisateur, mais un dépôt apt n'est qu'un
