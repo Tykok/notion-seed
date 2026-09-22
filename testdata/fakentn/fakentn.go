@@ -128,6 +128,42 @@ func main() {
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
+	case "archived_database":
+		// ntn authentifié, mais la database est archivée/en corbeille : couvre
+		// le refus d'import d'une ressource en corbeille, seul défaut à
+		// n'avoir eu aucun test — copie de authenticated_database avec
+		// "archived":true.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			switch {
+			case strings.HasPrefix(path, "/v1/databases/"):
+				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
+					`"archived":true,"in_trash":true,`+
+					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
+			case strings.HasPrefix(path, "/v1/data_sources/"):
+				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
+					`"title":[{"plain_text":"Tasks"}],`+
+					`"properties":{`+
+					`"Name":{"id":"title","name":"Name","type":"title"},`+
+					`"Statut":{"id":"p-statut","name":"Statut","type":"status",`+
+					`"status":{"options":[`+
+					`{"id":"o-todo","name":"À faire","color":"blue"},`+
+					`{"id":"o-done","name":"Fait","color":"green"}],`+
+					`"groups":[`+
+					`{"id":"g1","name":"To-do","option_ids":["o-todo"]},`+
+					`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`)
+			default:
+				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			}
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
 	case "version_no_auth":
 		// ntn présent et à jour, mais pas authentifié.
 		switch subcommand() {

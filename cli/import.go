@@ -155,11 +155,16 @@ func parseNotionID(s string) (string, error) {
 		return dashed(m), nil
 	}
 
-	// La query string est retirée AVANT de chercher : une URL de database finit
-	// par `?v=<32 hexadécimaux>`, l'id de la VUE. Le garder ferait adopter la
-	// vue à la place de la database, avec un id parfaitement bien formé — donc
-	// un échec incompréhensible à la lecture, et non au parsing.
-	path, _, _ := strings.Cut(s, "?")
+	// La query string ET le fragment sont retirés AVANT de chercher : une URL de
+	// database finit par `?v=<32 hexadécimaux>`, l'id de la VUE, et un lien
+	// « copier le lien vers ce bloc » finit par `#<32 hexadécimaux>`, l'id du
+	// BLOC. L'un comme l'autre ferait adopter la mauvaise ressource, avec un id
+	// parfaitement bien formé — donc un échec incompréhensible à la lecture, et
+	// non au parsing.
+	path := s
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
 
 	// Dans ce qui reste, l'id est le dernier groupe de 32 hexadécimaux : le
 	// titre le précède (`.../Mes-taches-<id>`).
