@@ -27,6 +27,15 @@ func TestParseNotionID(t *testing.T) {
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
 		{"https://www.notion.so/1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d",
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
+		// Ronde de correction 1 : « copier le lien vers ce bloc » ajoute un
+		// fragment `#<id de bloc>`, lui aussi sur 32 hexadécimaux, APRÈS l'id de
+		// la database dans le chemin. Sans coupe sur le fragment, c'est lui que
+		// ramasse le dernier groupe hex — la même classe de piège que `?v=`.
+		{"https://www.notion.so/space/Tasks-1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d#99887766554433221100ffeeddccbbaa",
+			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
+		// Un id en majuscules, tel que Notion peut le rendre : le code le gère
+		// déjà (dashed() force ToLower), mais rien ne l'épinglait.
+		{"1B2C3D4E-5F60-4A1B-8C2D-3E4F5A6B7C8D", "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
 	}
 	for _, tc := range cases {
 		got, err := parseNotionID(tc.in)
@@ -175,5 +184,47 @@ func TestImportRefusesNonDatabaseAddress(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "database.") {
 		t.Errorf("le message doit montrer la forme attendue: %v", err)
+	}
+}
+
+// Ronde de correction 1 : seul des cinq refus d'import sans couverture. Il
+// protège contre l'inscription dans le state d'une identité qui pointe vers
+// une ressource en corbeille, dans la seule commande qui écrit ce fichier.
+func TestImportRefusesArchivedDatabase(t *testing.T) {
+	withFakeNtn(t, "archived_database")
+	dir := writeImportFixture(t)
+
+	out, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
+	if err == nil {
+		t.Fatalf("une database archivée doit être refusée\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "archivée") {
+		t.Errorf("le message doit dire que la database est archivée: %v", err)
+	}
+
+	snap, err := state.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if _, ok := snap.Databases["tasks"]; ok {
+		t.Error("une database archivée ne doit pas être inscrite dans le state")
+	}
+}
+
+// Ronde de correction 1, point mineur : le refus de --skip-preflight n'avait
+// aucun test, alors qu'un refactor pourrait le faire régresser vers « masqué
+// mais accepté », ce qui ferait croire à un import hors ligne qui a en fait
+// appelé l'API.
+func TestImportRefusesSkipPreflight(t *testing.T) {
+	dir := writeImportFixture(t)
+
+	out, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir, "--skip-preflight")
+	if err == nil {
+		t.Fatalf("--skip-preflight doit être refusé par import\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "skip-preflight") {
+		t.Errorf("le message doit nommer le flag refusé: %v", err)
 	}
 }
