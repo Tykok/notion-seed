@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package diff calcule le plan de changements et le rend en texte.
 package diff
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package resources porte les types de ressources Notion gérés par
 // notion-seed. Le moteur de diff est écrit contre l'interface Resource :
 // ajouter un type ne doit pas le modifier.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package mapper traduit la configuration en payloads d'API Notion, et les
 // réponses d'API en états distants.
 package mapper

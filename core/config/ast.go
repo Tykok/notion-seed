@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package config charge et valide la configuration YAML de notion-seed.
 package config
 

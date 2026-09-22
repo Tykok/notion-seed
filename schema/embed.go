@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package schema porte le JSON Schema de validation de la configuration.
 package schema
 

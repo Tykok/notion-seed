@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Command fakentn imite `ntn` pour les tests. Le scénario est choisi par la
 // variable d'environnement FAKE_NTN_SCENARIO. Les sorties reproduisent des
 // captures réelles de ntn 0.22.11.

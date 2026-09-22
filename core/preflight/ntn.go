@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package preflight vérifie que l'environnement peut faire tourner
 // notion-seed : ntn présent, assez récent, et authentifié.
 package preflight
