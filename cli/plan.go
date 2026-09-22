@@ -134,8 +134,11 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 	if p.Blocked {
 		// Le rendu ci-dessus détaille déjà chaque raison de blocage avec son
 		// action corrective (section « Plan bloqué »). Cette erreur ne les
-		// répète pas : elle sert uniquement à faire sortir la commande en échec.
-		return fmt.Errorf("plan bloqué, voir les raisons ci-dessus")
+		// répète pas, mais porte quand même sa propre flèche : elle atteint
+		// l'utilisateur telle quelle sur stderr (cli/root.go l'imprime), et la
+		// contrainte du projet sur les messages d'erreur est inconditionnelle.
+		return fmt.Errorf("plan bloqué\n" +
+			"  → chaque blocage est détaillé ci-dessus, avec ce qui le lève")
 	}
 	return nil
 }
@@ -176,6 +179,13 @@ func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Sna
 	sort.Strings(keys)
 
 	for _, key := range keys {
+		if snap.Databases[key].ID == "" {
+			return nil, fmt.Errorf(
+				"database.%s n'a pas d'identifiant dans %s\n"+
+					"  → l'entrée est incomplète : restaurez le fichier depuis git, ou "+
+					"retirez cette entrée et ré-importez la database",
+				key, state.FileName)
+		}
 		remote, err := res.Read(ctx, snap.Databases[key].ID)
 		if err != nil {
 			var apiErr *transport.APIError
