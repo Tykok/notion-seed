@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tykok/notion-seed/core/state"
 )
 
 func writeConfigDir(t *testing.T, files map[string]string) string {
@@ -27,6 +29,19 @@ func writeConfigDir(t *testing.T, files map[string]string) string {
 		}
 	}
 	return dir
+}
+
+// runCmd exécute une commande racine et rend sa sortie, pour les tests qui
+// n'épinglent pas un golden.
+func runCmd(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewRootCmd()
+	var b bytes.Buffer
+	cmd.SetOut(&b)
+	cmd.SetErr(&b)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return b.String(), err
 }
 
 // testParentPageID est un UUID bien formé : le schéma impose ce motif sur
@@ -394,5 +409,83 @@ func TestPlanReportsExhaustedRateLimitWithAnAction(t *testing.T) {
 	// annoncée, et sur stderr pour ne pas polluer le plan.
 	if !strings.Contains(errOut.String(), "en attente") {
 		t.Errorf("stderr = %q, chaque attente de retry doit être annoncée", errOut.String())
+	}
+}
+
+// Le state ancre database.tasks sur db-1 : le refresh la lit, le comparateur
+// la retrouve identique au désiré, donc aucun changement ne ressort — alors
+// que sans state, la même config produirait une création.
+func TestPlanWithStateReportsNoChange(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml": `
+version: 1
+workspace:
+  parent_page_id: 33333333-3333-4333-8333-333333333333
+`,
+		"databases/tasks.yaml": `
+databases:
+  - key: tasks
+    name: Tasks
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: À faire
+            group: To-do
+          - key: done
+            name: Fait
+            group: Complete
+`,
+		state.FileName: `{
+  "version": 1,
+  "workspace_id": "33333333-3333-4333-8333-333333333333",
+  "databases": {
+    "tasks": {
+      "id": "db-1",
+      "data_source_id": "ds-1",
+      "name": "Tasks",
+      "properties": {
+        "Name": {"id": "title", "type": "title"},
+        "Statut": {"id": "p-statut", "type": "status", "options": [
+          {"id": "o-todo", "key": "todo", "name": "À faire", "color": "blue", "group": "To-do"},
+          {"id": "o-done", "key": "done", "name": "Fait", "color": "green", "group": "Complete"}
+        ]}
+      }
+    }
+  }
+}
+`,
+	})
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err != nil {
+		t.Fatalf("plan error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Aucun changement") {
+		t.Errorf("le state doit faire reconnaître la database:\n%s", out)
+	}
+}
+
+// Review Focus 5 : un state sans workspace_id ne peut pas être comparé. Ça ne
+// doit pas valoir « workspace différent ».
+func TestCheckWorkspaceMatchAcceptsEmptyWorkspaceID(t *testing.T) {
+	snap := &state.Snapshot{Version: state.Version}
+	if err := checkWorkspaceMatch(snap, "33333333-3333-4333-8333-333333333333"); err != nil {
+		t.Errorf("un workspace_id vide est inconnu, pas différent: %v", err)
+	}
+}
+
+func TestCheckWorkspaceMatchRejectsForeignWorkspace(t *testing.T) {
+	snap := &state.Snapshot{Version: state.Version, WorkspaceID: "44444444-4444-4444-8444-444444444444"}
+	err := checkWorkspaceMatch(snap, "33333333-3333-4333-8333-333333333333")
+	if err == nil {
+		t.Fatal("un state d'un autre workspace doit être refusé")
+	}
+	if !strings.Contains(err.Error(), "44444444") || !strings.Contains(err.Error(), "33333333") {
+		t.Errorf("le message doit nommer les deux workspaces: %v", err)
 	}
 }
