@@ -98,9 +98,12 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			Class:  change.ClassSafe,
 		})
 	}
-	if desired.Description != actual.Description {
+	if desired.Description != "" && desired.Description != actual.Description {
 		out = append(out, resources.Detail{
-			Op: "~", Target: "description", Class: change.ClassSafe,
+			Op:     "~",
+			Target: "description",
+			Note:   fmt.Sprintf("%q → %q", actual.Description, desired.Description),
+			Class:  change.ClassSafe,
 		})
 	}
 
@@ -114,7 +117,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			// type : très probablement un renommage. On ne DÉCIDE rien là-dessus
 			// (une propriété hors config n'est jamais touchée), on prévient, parce
 			// que l'utilisateur croit avoir renommé et va trouver une colonne vide.
-			if old := renamedFrom(name, want, desired, applied); old != "" {
+			if old := renamedFrom(name, want, desired, applied, actual); old != "" {
 				note = fmt.Sprintf(
 					"%q n'est pas renommée, elle reste hors config avec ses données", old)
 			}
@@ -161,45 +164,64 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		return nil
 	}
 
-	// key → nom actuel dans Notion, en passant par l'id.
-	nameByKey := map[string]string{}
-	nameByID := map[string]string{}
-	for _, o := range have.Options {
-		nameByID[o.ID] = o.Name
-	}
-	for _, o := range applied.Options {
-		if o.Key != "" {
-			if n, ok := nameByID[o.ID]; ok {
-				nameByKey[o.Key] = n
-			}
+	// Réclamation par POSITION dans have.Options, pas par nom : un renommage
+	// libère son ancien nom, et une réclamation par nom croirait ce nom encore
+	// occupé — une option déclarée sortirait alors du plan sans une ligne.
+	// L'index est aussi robuste à un id vide, qu'un state écrit à la main peut
+	// porter.
+	claimed := make([]bool, len(have.Options))
+
+	idxByID := make(map[string]int, len(have.Options))
+	idxByName := make(map[string]int, len(have.Options))
+	for i, o := range have.Options {
+		if o.ID != "" {
+			idxByID[o.ID] = i
+		}
+		if _, dup := idxByName[o.Name]; !dup {
+			idxByName[o.Name] = i
 		}
 	}
 
-	actualNames := map[string]bool{}
-	for _, o := range have.Options {
-		actualNames[o.Name] = true
+	// key de config → position de l'option distante, en passant par l'id
+	// Notion porté par le state. C'est la chaîne d'identité : applied ↔ actual
+	// par id, desired ↔ applied par key.
+	idxByKey := make(map[string]int)
+	for _, o := range applied.Options {
+		if o.Key == "" || o.ID == "" {
+			continue
+		}
+		if i, ok := idxByID[o.ID]; ok {
+			idxByKey[o.Key] = i
+		}
 	}
 
 	var out []resources.Detail
-	claimed := map[string]bool{} // noms distants couverts par une option désirée
 
+	// Passe 1 : les options à key, qui ont une identité stable. Une key que le
+	// réel ne connaît pas retombe sur l'appariement par nom.
+	var keyless []state.Option
 	for _, w := range want.Options {
-		if w.Key != "" {
-			if current, ok := nameByKey[w.Key]; ok {
-				claimed[current] = true
-				if current != w.Name {
-					out = append(out, resources.Detail{
-						Op:     "~",
-						Target: fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
-						Note:   "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer",
-						Class:  change.ClassMigration,
-					})
-				}
-				continue
-			}
+		i, ok := idxByKey[w.Key]
+		if w.Key == "" || !ok {
+			keyless = append(keyless, w)
+			continue
 		}
-		if actualNames[w.Name] {
-			claimed[w.Name] = true
+		claimed[i] = true
+		if current := have.Options[i].Name; current != w.Name {
+			out = append(out, resources.Detail{
+				Op:     "~",
+				Target: fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
+				Note:   "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer",
+				Class:  change.ClassMigration,
+			})
+		}
+	}
+
+	// Passe 2 : les options sans key, appariées par nom — mais seulement sur une
+	// position que la passe 1 n'a pas déjà prise.
+	for _, w := range keyless {
+		if i, ok := idxByName[w.Name]; ok && !claimed[i] {
+			claimed[i] = true
 			continue
 		}
 		out = append(out, resources.Detail{
@@ -209,11 +231,11 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		})
 	}
 
-	// Ce qui existe dans Notion et que le YAML ne réclame pas SERA détruit dès
-	// qu'on écrit cette propriété : l'API remplace la liste entière au lieu de
-	// la fusionner. C'est l'asymétrie avec les propriétés, et elle doit être dite.
-	for _, o := range have.Options {
-		if claimed[o.Name] {
+	// Passe 3 : ce qui existe dans Notion et que le YAML ne réclame pas SERA
+	// détruit dès qu'on écrit cette propriété — l'API remplace la liste entière
+	// au lieu de la fusionner. C'est l'asymétrie avec les propriétés.
+	for i, o := range have.Options {
+		if claimed[i] {
 			continue
 		}
 		out = append(out, resources.Detail{
@@ -247,11 +269,22 @@ func driftLines(applied, actual *state.Database) []string {
 				"~ propriété %q : type %s → %s hors de notion-seed", name, was.Type, is.Type))
 		}
 
+		// Une option sans id ne peut pas être suivie par id : ni retrait ni
+		// renommage ne peuvent être affirmés pour elle, donc on ne rend aucune
+		// ligne de dérive la concernant.
 		nameByID := map[string]string{}
 		for _, o := range is.Options {
+			if o.ID == "" {
+				continue
+			}
 			nameByID[o.ID] = o.Name
 		}
+		wasIDs := map[string]bool{}
 		for _, o := range was.Options {
+			if o.ID == "" {
+				continue
+			}
+			wasIDs[o.ID] = true
 			current, ok := nameByID[o.ID]
 			if !ok {
 				out = append(out, fmt.Sprintf(
@@ -264,7 +297,27 @@ func driftLines(applied, actual *state.Database) []string {
 					o.Name, name, current))
 			}
 		}
+
+		// Parcours inverse : ce qui a été ajouté à la main n'apparaît dans
+		// aucune option de `applied`.
+		for _, o := range is.Options {
+			if o.ID == "" || wasIDs[o.ID] {
+				continue
+			}
+			out = append(out, fmt.Sprintf(
+				"+ option %q de la propriété %q ajoutée hors de notion-seed", o.Name, name))
+		}
 	}
+
+	// Parcours inverse au niveau des propriétés : ce qui a été ajouté à la
+	// main n'apparaît pas dans `applied`.
+	for _, name := range sortedPropNames(actual.Properties) {
+		if _, declared := applied.Properties[name]; declared {
+			continue
+		}
+		out = append(out, fmt.Sprintf("+ propriété %q ajoutée hors de notre gestion", name))
+	}
+
 	return out
 }
 
@@ -285,9 +338,12 @@ func unmanagedLines(desired, actual *state.Database) []string {
 }
 
 // renamedFrom cherche la propriété du state, de même type, que le YAML ne
-// déclare plus : le signe d'un renommage. Heuristique d'AFFICHAGE, jamais de
-// décision d'écriture.
-func renamedFrom(newName string, want state.Property, desired, applied *state.Database) string {
+// déclare plus mais qui existe toujours dans le réel : le signe d'un
+// renommage. Heuristique d'AFFICHAGE, jamais de décision d'écriture. Si
+// plusieurs candidates existent, elle ne désigne personne : une heuristique
+// qui se trompe de colonne est pire que pas d'heuristique.
+func renamedFrom(newName string, want state.Property, desired, applied, actual *state.Database) string {
+	found := ""
 	for _, old := range sortedPropNames(applied.Properties) {
 		if old == newName {
 			continue
@@ -295,11 +351,18 @@ func renamedFrom(newName string, want state.Property, desired, applied *state.Da
 		if _, stillDeclared := desired.Properties[old]; stillDeclared {
 			continue
 		}
-		if applied.Properties[old].Type == want.Type {
-			return old
+		if _, stillInActual := actual.Properties[old]; !stillInActual {
+			continue
 		}
+		if applied.Properties[old].Type != want.Type {
+			continue
+		}
+		if found != "" {
+			return ""
+		}
+		found = old
 	}
-	return ""
+	return found
 }
 
 func sortedPropNames(m map[string]state.Property) []string {
