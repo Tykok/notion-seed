@@ -202,26 +202,53 @@ func TestComputeAllowDataLossUnblocksDestructiveOnly(t *testing.T) {
 	}
 }
 
+// Deux sous-cas : le premier couvre la ressource par prevent_destroy ET
+// allow_data_loss à la fois, ce qui ne distingue rien — avec allow_data_loss
+// qui couvre déjà la ressource, le case destructif de `absorb` ne matcherait
+// de toute façon jamais, quel que soit l'ordre des `case` dans le switch, donc
+// ce sous-cas seul passerait même si prevent_destroy et destructif étaient
+// permutés. Le second sous-cas couvre la ressource par prevent_destroy SEUL :
+// sous l'ordre inversé, le case destructif matcherait à la place (puisque
+// allow_data_loss ne couvre pas la ressource) et produirait le message
+// « changement destructif … allow_data_loss » sans jamais nommer
+// prevent_destroy — c'est ce sous-cas qui distingue vraiment les deux.
 func TestComputePreventDestroyBeatsAllowDataLoss(t *testing.T) {
-	cfg := &config.Config{
-		Lifecycle: config.Lifecycle{
-			PreventDestroy: []string{"database.tasks"},
-			AllowDataLoss:  []string{"database.tasks"},
+	tests := []struct {
+		name      string
+		lifecycle config.Lifecycle
+	}{
+		{
+			name: "prevent_destroy et allow_data_loss couvrent la même ressource",
+			lifecycle: config.Lifecycle{
+				PreventDestroy: []string{"database.tasks"},
+				AllowDataLoss:  []string{"database.tasks"},
+			},
+		},
+		{
+			name: "prevent_destroy seul, sans allow_data_loss",
+			lifecycle: config.Lifecycle{
+				PreventDestroy: []string{"database.tasks"},
+			},
 		},
 	}
-	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
-		"tasks": {ID: "db1", Name: "Tasks"},
-	}}
-	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db1", Name: "Tasks"}}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Lifecycle: tt.lifecycle}
+			applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
+				"tasks": {ID: "db1", Name: "Tasks"},
+			}}
+			actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db1", Name: "Tasks"}}}
 
-	p, err := Compute(cfg, applied, actual)
-	if err != nil {
-		t.Fatalf("Compute() error = %v", err)
-	}
-	if !p.Blocked {
-		t.Error("prevent_destroy doit bloquer la destruction malgré allow_data_loss")
-	}
-	if !strings.Contains(strings.Join(p.BlockedReasons, " "), "prevent_destroy") {
-		t.Errorf("la raison doit nommer prevent_destroy: %v", p.BlockedReasons)
+			p, err := Compute(cfg, applied, actual)
+			if err != nil {
+				t.Fatalf("Compute() error = %v", err)
+			}
+			if !p.Blocked {
+				t.Error("prevent_destroy doit bloquer la destruction malgré allow_data_loss")
+			}
+			if !strings.Contains(strings.Join(p.BlockedReasons, " "), "prevent_destroy") {
+				t.Errorf("la raison doit nommer prevent_destroy: %v", p.BlockedReasons)
+			}
+		})
 	}
 }

@@ -175,7 +175,7 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 				"%s : destruction interdite par lifecycle.prevent_destroy.\n"+
 					"  → retirez %s de prevent_destroy si la destruction est voulue",
 				resource, resource))
-		case d.Class == change.ClassDestructive && !allowDataLoss[resource]:
+		case d.Class.CoveredByAllowDataLoss() && !allowDataLoss[resource]:
 			p.block(fmt.Sprintf(
 				"%s : changement destructif (%s).\n"+
 					"  → ajoutez %s à lifecycle.allow_data_loss si la perte est acceptée",
