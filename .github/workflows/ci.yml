@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          # La version vient de go.mod : une seule source de vérité, pour que
+          # la CI ne compile jamais avec un toolchain que le dépôt n'exige pas.
+          go-version-file: go.mod
+
+      # gofmt -l ne sort rien quand tout est formaté et ne renvoie jamais un
+      # code non nul : le test sur la sortie est ce qui fait échouer le job.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "fichiers non formatés :"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: en-têtes de licence
+        run: ./scripts/check-spdx.sh
