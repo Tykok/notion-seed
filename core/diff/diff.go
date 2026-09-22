@@ -6,16 +6,45 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
+	"github.com/tykok/notion-seed/core/state"
 )
 
 // Change est un changement présenté à l'utilisateur.
 type Change struct {
 	Class    Class
-	Resource string   // "database.projects"
-	Detail   string   // libellé court, ex. "(new)"
-	Lines    []string // détail, une entrée par ligne affichée
+	Resource string
+	Detail   string
+	Lines    []string
+	// LineClasses porte la classe de chaque entrée de Lines, dans le même
+	// ordre : une database peut recevoir un ajout sûr et un retrait d'option en
+	// réécriture silencieuse.
+	LineClasses []Class
+}
+
+// Drift est un écart constaté entre le state et le réel.
+type Drift struct {
+	Resource string
+	Lines    []string
+}
+
+// Unmanaged liste ce qui existe dans Notion sans être déclaré.
+type Unmanaged struct {
+	Resource string
+	Lines    []string
+}
+
+// Refreshed est le résultat de la lecture d'une ressource du state.
+//
+// Missing distingue « lue et absente » de « pas lue » : sans cette distinction,
+// une ressource gérée disparue passerait pour une ressource jamais appliquée,
+// donc pour une création — exactement le contresens à éviter.
+type Refreshed struct {
+	Database state.Database
+	Missing  bool
+	Reason   string
 }
 
 // Plan est le résultat de la passe de diff.
@@ -24,67 +53,151 @@ type Plan struct {
 	ToChange  int
 	ToDestroy int
 	Changes   []Change
+	Drifts    []Drift
+	Unmanaged []Unmanaged
 
-	// Blocked vaut true si au moins un changement arrête le plan par défaut.
 	Blocked bool
+	// BlockedReasons nomme chaque blocage et son issue. « au moins un changement
+	// refusé » ne dit pas à l'utilisateur quoi faire.
+	BlockedReasons []string
 }
 
-// Compute compare la config désirée à l'état réel.
+// Compute compare la configuration désirée, le dernier état appliqué et le réel.
 //
-// Au MVP 0, remote est toujours vide : sans fichier de state, aucune ressource
-// n'est mise en correspondance avec une database existante. Le paramètre est
-// là parce que la signature ne changera pas au MVP 1, quand le state fournira
-// les identités.
-func Compute(cfg *config.Config, remote map[string]resources.RemoteState) (*Plan, error) {
+// applied peut être nil (aucun state) et actual peut être vide : on retombe
+// alors exactement sur le comportement d'avant l'existence du state, où tout
+// ressort en création.
+func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refreshed) (*Plan, error) {
 	p := &Plan{}
-
-	for _, db := range cfg.Databases {
-		// Fonction de paquet, pas méthode : plus de ressource construite à vide
-		// pour appeler un calcul pur. L'erreur reste dans la signature de Compute,
-		// que le MVP 1 remplira quand le refresh pourra échouer.
-		cs := resources.DatabaseChangeset(db, remote["database."+db.Key])
-		switch cs.Kind {
-		case resources.KindCreate:
-			p.ToAdd++
-			p.Changes = append(p.Changes, Change{
-				Class:    ClassSafe,
-				Resource: cs.Resource,
-				Detail:   "(new)",
-				Lines:    detailLines(cs.Details),
-			})
-		case resources.KindUpdate:
-			p.ToChange++
-			p.Changes = append(p.Changes, Change{
-				Class:    ClassSafe,
-				Resource: cs.Resource,
-				Lines:    detailLines(cs.Details),
-			})
-		}
+	appliedDBs := map[string]state.Database{}
+	if applied != nil {
+		appliedDBs = applied.Databases
 	}
 
-	for _, c := range p.Changes {
-		if c.Class.Blocking() {
-			p.Blocked = true
-			break
+	allowDataLoss := setOf(cfg.Lifecycle.AllowDataLoss)
+	preventDestroy := setOf(cfg.Lifecycle.PreventDestroy)
+
+	seen := map[string]bool{}
+	for _, db := range cfg.Databases {
+		seen[db.Key] = true
+		desired := state.FromConfig(db)
+
+		var appliedPtr, actualPtr *state.Database
+		if a, ok := appliedDBs[db.Key]; ok {
+			appliedPtr = &a
 		}
+		if r, ok := actual[db.Key]; ok {
+			if r.Missing {
+				p.Blocked = true
+				p.BlockedReasons = append(p.BlockedReasons, fmt.Sprintf(
+					"database.%s est dans le state mais %s dans Notion.\n"+
+						"  → restaurez-la dans Notion, ou retirez son entrée de %s pour "+
+						"assumer une recréation (la nouvelle database repartira vide)",
+					db.Key, r.Reason, state.FileName))
+				continue
+			}
+			d := r.Database
+			actualPtr = &d
+		}
+
+		p.absorb(db.Key, CompareDatabase(db.Key, &desired, appliedPtr, actualPtr),
+			allowDataLoss, preventDestroy)
+	}
+
+	// Les ressources du state que la configuration ne déclare plus.
+	orphans := make([]string, 0)
+	for key := range appliedDBs {
+		if !seen[key] {
+			orphans = append(orphans, key)
+		}
+	}
+	sort.Strings(orphans)
+	for _, key := range orphans {
+		a := appliedDBs[key]
+		p.absorb(key, CompareDatabase(key, nil, &a, nil), allowDataLoss, preventDestroy)
 	}
 	return p, nil
 }
 
-// detailLines rend une ligne par entrée, et le contrat « une ligne par entrée »
-// est tenu par l'échappement : Note passe par %q comme le nom dans Target, donc
-// un retour à la ligne dedans devient `\n` littéral au lieu de casser le rendu.
-// Note est inerte au MVP 0, ce qui est précisément pourquoi c'est gratuit à
-// faire maintenant : la première tâche qui le peuplera en héritera.
-func detailLines(details []resources.Detail) []string {
-	out := make([]string, 0, len(details))
-	for _, d := range details {
+// absorb verse le résultat d'une ressource dans le plan, en appliquant
+// lifecycle.
+func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[string]bool) {
+	resource := "database." + key
+
+	if len(res.Drift) > 0 {
+		p.Drifts = append(p.Drifts, Drift{Resource: resource, Lines: res.Drift})
+	}
+	if len(res.Unmanaged) > 0 {
+		p.Unmanaged = append(p.Unmanaged, Unmanaged{Resource: resource, Lines: res.Unmanaged})
+	}
+	if res.Changeset.Kind == resources.KindNone {
+		return
+	}
+
+	switch res.Changeset.Kind {
+	case resources.KindCreate:
+		p.ToAdd++
+	case resources.KindUpdate:
+		p.ToChange++
+	case resources.KindDestroy:
+		p.ToDestroy++
+	}
+
+	c := Change{Resource: resource, Class: worstClass(res.Changeset.Details)}
+	if res.Changeset.Kind == resources.KindCreate {
+		c.Detail = "(new)"
+	}
+	for _, d := range res.Changeset.Details {
 		line := d.Op + " " + d.Target
 		if d.Note != "" {
 			line += " : " + fmt.Sprintf("%q", d.Note)
 		}
-		out = append(out, line)
+		c.Lines = append(c.Lines, line)
+		c.LineClasses = append(c.LineClasses, d.Class)
 	}
-	sort.Strings(out)
+	p.Changes = append(p.Changes, c)
+
+	// lifecycle. prevent_destroy est absolu ; allow_data_loss ne couvre que le
+	// destructif ; la réécriture silencieuse n'est couverte par rien — consentir
+	// à perdre une donnée n'est pas consentir à ce qu'elle soit remplacée par
+	// une autre, plausible et fausse.
+	for _, d := range res.Changeset.Details {
+		switch {
+		case d.Class == change.ClassSilentRewrite:
+			p.block(fmt.Sprintf(
+				"%s : réécriture silencieuse (%s).\n"+
+					"  → retirer une option de status réassigne les lignes concernées à "+
+					"l'option par défaut, sans erreur ni avertissement. allow_data_loss ne "+
+					"débloque pas ce cas. Migrez les lignes dans Notion, puis retirez "+
+					"l'option du YAML", resource, d.Target))
+		case res.Changeset.Kind == resources.KindDestroy && preventDestroy[resource]:
+			p.block(fmt.Sprintf(
+				"%s : destruction interdite par lifecycle.prevent_destroy.\n"+
+					"  → retirez %s de prevent_destroy si la destruction est voulue",
+				resource, resource))
+		case d.Class == change.ClassDestructive && !allowDataLoss[resource]:
+			p.block(fmt.Sprintf(
+				"%s : changement destructif (%s).\n"+
+					"  → ajoutez %s à lifecycle.allow_data_loss si la perte est acceptée",
+				resource, d.Target, resource))
+		}
+	}
+}
+
+func (p *Plan) block(reason string) {
+	p.Blocked = true
+	for _, r := range p.BlockedReasons {
+		if r == reason {
+			return
+		}
+	}
+	p.BlockedReasons = append(p.BlockedReasons, reason)
+}
+
+func setOf(items []string) map[string]bool {
+	out := make(map[string]bool, len(items))
+	for _, i := range items {
+		out[i] = true
+	}
 	return out
 }
