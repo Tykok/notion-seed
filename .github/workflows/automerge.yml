@@ -1,0 +1,50 @@
+name: Fusion automatique Dependabot
+
+# Une PR Dependabot ne se juge pas à la lecture : ce que la relecture humaine
+# apporterait ici, la CI le dit déjà. On fusionne donc sur le vert, et on garde
+# la relecture pour les changements que quelqu'un a écrits.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    # workflow_run se déclenche aussi pour les push sur main et pour les CI
+    # rouges : les trois conditions réduisent le job aux PR Dependabot vertes.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: fusionner la PR verte
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # workflow_run ne porte pas le numéro de PR : on le retrouve par la
+          # branche. Le préfixe `dependabot/` est une convention de nommage,
+          # que n'importe qui peut reprendre ; l'auteur, lui, ne se falsifie
+          # pas, donc c'est lui qui décide.
+          number=$(gh api "repos/${REPO}/pulls" \
+            -X GET -f state=open -f "head=${REPO%%/*}:${BRANCH}" \
+            --jq '.[] | select(.user.login == "dependabot[bot]") | .number')
+
+          if [ -z "$number" ]; then
+            echo "aucune PR Dependabot ouverte sur ${BRANCH} : rien à fusionner."
+            exit 0
+          fi
+
+          # --match-head-commit refuse la fusion si la branche a bougé depuis :
+          # sans lui, un rebase de Dependabot arrivé entre la fin de la CI et
+          # ce job ferait fusionner du code que rien n'a testé.
+          gh pr merge "$number" --squash --match-head-commit "$SHA"

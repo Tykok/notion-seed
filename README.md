@@ -200,6 +200,11 @@ go vet ./...
 
 Les quatre tournent en CI sur chaque push et chaque pull request.
 
+Les mises à jour de dépendances arrivent par Dependabot, groupées une fois par
+semaine. Elles sont fusionnées automatiquement dès que la CI passe, sans
+relecture : ce sont les quatre commandes ci-dessus qui font office de revue. Une
+CI rouge laisse la PR ouverte.
+
 ## Licence
 
 GPL-3.0-or-later. Voir [`LICENSE`](LICENSE).
