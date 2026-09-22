@@ -1,0 +1,46 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: notion-seed
+    main: .
+    binary: notion-seed
+    # Aucune dépendance C : un binaire statique s'exécute sur une image
+    # distroless ou une Alpine, là où la CI des utilisateurs tourne.
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      # cli.Version vaut "0.0.0-dev" par défaut : sans cette injection, un
+      # binaire publié annoncerait une version qui n'existe pas.
+      - -s -w -X github.com/tykok/notion-seed/cli.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  footer: |
+    `notion-seed` délègue les appels à `ntn`, qui n'est pas embarqué :
+    `npm i -g ntn@0.22.11 && ntn login`.

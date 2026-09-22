@@ -51,9 +51,23 @@ sortie de `ntn` a été mesuré, et `notion-seed` refuse de tourner en dessous.
 
 ## Installation
 
+Binaire publié — Linux, macOS et Windows, en amd64 et arm64 — depuis la page
+[Releases](https://github.com/tykok/notion-seed/releases) :
+
+```sh
+# macOS arm64, à adapter à votre plateforme
+curl -fsSL https://github.com/tykok/notion-seed/releases/latest/download/notion-seed_<version>_darwin_arm64.tar.gz \
+  | tar -xz notion-seed
+```
+
+Ou depuis les sources :
+
 ```sh
 go install github.com/tykok/notion-seed@latest
 ```
+
+Le binaire installé par `go install` annonce `0.0.0-dev` : la version n'est
+injectée qu'au build de release.
 
 ## Démarrage
 
