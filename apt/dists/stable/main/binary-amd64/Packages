@@ -1,0 +1,14 @@
+Package: notion-seed
+Version: 0.1.0
+Architecture: amd64
+Maintainer: Tykok <treportelie12@gmail.com>
+Installed-Size: 4468
+Filename: pool/main/notion-seed_0.1.0_linux_amd64.deb
+Size: 1957376
+MD5sum: 1c58099bebd1ab3db0e53a0f14ffdfe8
+SHA1: e09eacd93efcf8b844b77bf3d256b01fe50b9823
+SHA256: a87d130821d856df17bf56839ac34c35770d55bcc0b15be9fc87dc5f7d91dba4
+Priority: optional
+Homepage: https://github.com/tykok/notion-seed
+Description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
+
