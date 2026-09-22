@@ -162,4 +162,86 @@ func TestRenderListsUnmanaged(t *testing.T) {
 	if !strings.Contains(out, "Hors config") || !strings.Contains(out, "Créé le") {
 		t.Errorf("hors config manquant:\n%s", out)
 	}
+	// Du hors config sans aucun changement n'est pas une absence de changement :
+	// il y a bien quelque chose à montrer. Verrouille ce choix, sinon un futur
+	// correctif pourrait faire réapparaître le message par effet de bord.
+	if strings.Contains(out, "Aucun changement") {
+		t.Errorf("le hors config est un changement à montrer, pas une absence de changement:\n%s", out)
+	}
+}
+
+// La classe d'une ligne est indépendante de la classe de la ressource : une
+// database qui reçoit un ajout sûr en même temps qu'un retrait d'option de
+// status ne doit pas faire porter l'étiquette dangereuse à la ligne sûre.
+// Sans ce test, une régression qui dériverait le suffixe de chaque ligne
+// depuis c.Class au lieu de c.LineClasses[i] passerait inaperçue : dans tous
+// les autres tests, Class et LineClasses portent la même valeur.
+func TestRenderLineClassIsIndependentOfResourceClass(t *testing.T) {
+	p := &Plan{
+		ToChange: 1,
+		Changes: []Change{{
+			Resource: "database.flows",
+			Class:    ClassSilentRewrite,
+			Lines: []string{
+				`+ property "Name" (title)`,
+				`- option "Annulé" (status "Étape")`,
+			},
+			LineClasses: []Class{ClassSafe, ClassSilentRewrite},
+		}},
+	}
+	var b strings.Builder
+	if err := Render(&b, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	out := b.String()
+
+	var safeLine, rewriteLine string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.Contains(line, `property "Name"`):
+			safeLine = line
+		case strings.Contains(line, `option "Annulé"`):
+			rewriteLine = line
+		}
+	}
+	if safeLine == "" || rewriteLine == "" {
+		t.Fatalf("lignes attendues absentes de la sortie:\n%s", out)
+	}
+	if strings.Contains(safeLine, "[") {
+		t.Errorf("une ligne sûre ne doit pas hériter de l'étiquette de la ressource: %q", safeLine)
+	}
+	if !strings.Contains(rewriteLine, "[réécriture silencieuse]") {
+		t.Errorf("la ligne dangereuse doit porter sa classe: %q", rewriteLine)
+	}
+}
+
+// L'ordre des sections est délibéré (voir le commentaire de Render) : le hors
+// config précède le blocage, sur le même modèle que TestRenderShowsDriftBeforePlan
+// pour dérive/plan.
+func TestRenderOrdersUnmanagedBeforeBlocked(t *testing.T) {
+	p := &Plan{
+		Blocked: true,
+		BlockedReasons: []string{
+			"database.flows : réécriture silencieuse (option \"Annulé\").\n  → migrez les lignes",
+		},
+		Unmanaged: []Unmanaged{{
+			Resource: "database.tasks", Lines: []string{`property "Créé le" (created_time)`},
+		}},
+		ToChange: 1,
+		Changes: []Change{{
+			Resource: "database.flows", Class: ClassSilentRewrite,
+			Lines: []string{`- option "Annulé"`}, LineClasses: []Class{ClassSilentRewrite},
+		}},
+	}
+	var b strings.Builder
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+
+	iUnmanaged := strings.Index(out, "Hors config")
+	iBlocked := strings.Index(out, "Plan bloqué")
+	if iUnmanaged < 0 || iBlocked < 0 || iUnmanaged > iBlocked {
+		t.Errorf("le hors config doit précéder le blocage:\n%s", out)
+	}
 }
