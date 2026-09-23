@@ -380,7 +380,7 @@ func driftLines(applied, actual *state.Database) []string {
 		if _, declared := applied.Properties[name]; declared {
 			continue
 		}
-		out = append(out, fmt.Sprintf("+ propriété %q ajoutée hors de notre gestion", name))
+		out = append(out, fmt.Sprintf("+ propriété %q ajoutée hors de notion-seed", name))
 	}
 
 	return out

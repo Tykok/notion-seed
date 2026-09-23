@@ -16,9 +16,3 @@ const (
 	ClassDestructive   = change.ClassDestructive
 	ClassSilentRewrite = change.ClassSilentRewrite
 )
-
-// ClassifyOptionRemoval donne la classe du retrait d'une option, selon le type
-// de la propriété.
-func ClassifyOptionRemoval(propertyType string) Class {
-	return change.ClassifyOptionRemoval(propertyType)
-}
