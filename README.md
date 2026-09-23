@@ -148,11 +148,18 @@ databases:
       Statut:
         type: status
         options:
-          - name: À faire
+          - key: todo
+            name: À faire
             group: To-do
-          - name: Fait
+          - key: done
+            name: Fait
             group: Complete
 ```
+
+La `key` est ce qui ancre l'identité d'une option à travers un renommage : sans
+elle, une option renommée dans le YAML ressort en retrait suivi d'un ajout —
+`destructif` ou `réécriture silencieuse` selon le type — faute de pouvoir la
+suivre à travers le changement de nom.
 
 Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
 
