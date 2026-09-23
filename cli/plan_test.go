@@ -649,6 +649,31 @@ func TestPlanBlocksAndSaysSoWhenStateDatabaseIsArchived(t *testing.T) {
 	}
 }
 
+// C2 : après import, plan --skip-preflight n'a fait aucun appel réseau — il
+// ne peut donc pas affirmer que la configuration correspond à l'état réel.
+// Une CI qui s'appuierait sur ce mode passerait au vert sur une réécriture
+// silencieuse sans cette garantie.
+func TestPlanSkipPreflightNamesResourceItDidNotCompare(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeImportFixture(t)
+
+	if out, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir); err != nil {
+		t.Fatalf("import error = %v\n%s", err, out)
+	}
+
+	out, err := runCmd(t, "plan", "--dir", dir, "--skip-preflight")
+	if err != nil {
+		t.Fatalf("plan error = %v\n%s", err, out)
+	}
+	if strings.Contains(out, "correspond à l'état réel") {
+		t.Errorf("--skip-preflight ne doit jamais affirmer la conformité:\n%s", out)
+	}
+	if !strings.Contains(out, "Non comparé") || !strings.Contains(out, "database.tasks") {
+		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", out)
+	}
+}
+
 // Review Focus 5 : un state sans workspace_id ne peut pas être comparé. Ça ne
 // doit pas valoir « workspace différent ».
 func TestCheckWorkspaceMatchAcceptsEmptyWorkspaceID(t *testing.T) {

@@ -56,6 +56,13 @@ type Plan struct {
 	Drifts    []Drift
 	Unmanaged []Unmanaged
 
+	// NotCompared nomme les ressources que le state ancre mais que le réel n'a
+	// pas lues (--skip-preflight, qui ne fait aucun appel). CompareDatabase rend
+	// alors un résultat vide « on ne sait rien, donc on ne dit rien » — mais un
+	// résultat vide n'est pas une conformité constatée, et Render doit pouvoir
+	// distinguer les deux.
+	NotCompared []string
+
 	Blocked bool
 	// BlockedReasons nomme chaque blocage et son issue. « au moins un changement
 	// refusé » ne dit pas à l'utilisateur quoi faire.
@@ -98,6 +105,12 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 			}
 			d := r.Database
 			actualPtr = &d
+		} else if appliedPtr != nil {
+			// Le state ancre cette ressource, mais actual n'a pas d'entrée : c'est
+			// --skip-preflight, qui ne lit jamais le réel (voir le commentaire de
+			// CompareDatabase sur ce même cas). Le plan ne doit pas laisser croire
+			// qu'il a vérifié une conformité qu'il n'a en fait jamais lue.
+			p.NotCompared = append(p.NotCompared, "database."+db.Key)
 		}
 
 		p.absorb(db.Key, CompareDatabase(db.Key, &desired, appliedPtr, actualPtr),

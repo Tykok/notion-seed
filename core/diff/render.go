@@ -13,8 +13,9 @@ import (
 //
 // L'ordre est délibéré : la dérive d'abord (ce que quelqu'un a fait), le plan
 // ensuite (ce qu'on ferait), le hors config après (ce qu'on ne touchera pas),
-// le blocage en dernier avec son issue. Chaque section disparaît si elle est
-// vide : sans state, la sortie est exactement celle d'avant.
+// le non comparé ensuite (ce qu'on n'a pas vérifié), le blocage en dernier
+// avec son issue. Chaque section disparaît si elle est vide : sans state, la
+// sortie est exactement celle d'avant.
 func Render(w io.Writer, p *Plan) error {
 	if len(p.Drifts) > 0 {
 		if _, err := fmt.Fprintln(w, "Dérive détectée hors de notion-seed"); err != nil {
@@ -42,7 +43,11 @@ func Render(w io.Writer, p *Plan) error {
 	// introuvable ou archivée ne produit ni Change ni Unmanaged, seulement une
 	// raison de blocage. Sortir ici afficherait la conformité tout en rendant
 	// un code d'erreur.
-	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && !p.Blocked {
+	//
+	// Une ressource non comparée (--skip-preflight) n'est pas non plus « aucun
+	// changement » : on ne sait rien d'elle, donc on ne peut pas affirmer
+	// qu'elle est conforme.
+	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && len(p.NotCompared) == 0 && !p.Blocked {
 		_, err := fmt.Fprintln(w, "Aucun changement. La configuration correspond à l'état réel.")
 		return err
 	}
@@ -108,6 +113,23 @@ func Render(w io.Writer, p *Plan) error {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}
+		}
+	}
+
+	if len(p.NotCompared) > 0 {
+		if _, err := fmt.Fprintln(w, "Non comparé — --skip-preflight ne lit pas l'état réel"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+		for _, r := range p.NotCompared {
+			if _, err := fmt.Fprintf(w, "  %s\n", r); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
 		}
 	}
 

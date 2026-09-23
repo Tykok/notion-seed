@@ -48,6 +48,27 @@ func TestRenderBlockedPlanNeverSaysNoChange(t *testing.T) {
 	}
 }
 
+// C2 : --skip-preflight ne lit jamais le réel pour une ressource que le state
+// ancre. Compute alimente alors NotCompared au lieu de laisser un Plan
+// entièrement vide passer pour une conformité constatée.
+func TestRenderNotComparedBlocksNoChangeMessage(t *testing.T) {
+	p := &Plan{NotCompared: []string{"database.tasks"}}
+	var buf bytes.Buffer
+	if err := Render(&buf, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "correspond à l'état réel") {
+		t.Errorf("une ressource non comparée ne doit jamais afficher la conformité:\n%s", got)
+	}
+	if !strings.Contains(got, "Non comparé") || !strings.Contains(got, "--skip-preflight") {
+		t.Errorf("sortie = %q, elle doit nommer le mode qui a empêché la comparaison", got)
+	}
+	if !strings.Contains(got, "database.tasks") {
+		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", got)
+	}
+}
+
 func TestRenderCreatePlan(t *testing.T) {
 	p := &Plan{
 		ToAdd: 1,
