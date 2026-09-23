@@ -38,7 +38,11 @@ func Render(w io.Writer, p *Plan) error {
 		}
 	}
 
-	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 {
+	// Un plan bloqué n'est jamais « aucun changement » : une ressource gérée
+	// introuvable ou archivée ne produit ni Change ni Unmanaged, seulement une
+	// raison de blocage. Sortir ici afficherait la conformité tout en rendant
+	// un code d'erreur.
+	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && !p.Blocked {
 		_, err := fmt.Fprintln(w, "Aucun changement. La configuration correspond à l'état réel.")
 		return err
 	}
