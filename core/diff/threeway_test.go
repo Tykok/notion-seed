@@ -149,6 +149,52 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "euro",
 		},
 		{
+			// I1 : color et group sont stockés dans le state et comparés nulle
+			// part avant cette correction — vérifié en inversant les deux groupes
+			// et en changeant les deux couleurs dans un YAML de test, qui
+			// ressortait alors en « Aucun changement ».
+			name: "option couleur déclarée et différente : ligne sûre",
+			desired: db("Statut", status(
+				state.Option{Key: "todo", Name: "À faire", Color: "red", Group: "To-do"})),
+			applied: db("Statut", status(
+				state.Option{ID: "o1", Key: "todo", Name: "À faire", Color: "blue", Group: "To-do"})),
+			actual: db("Statut", status(
+				state.Option{ID: "o1", Name: "À faire", Color: "blue", Group: "To-do"})),
+			wantKind:  resources.KindUpdate,
+			wantClass: change.ClassSafe,
+			wantLine:  "color blue → red",
+		},
+		{
+			// Symétrique du cas précédent : sans `color` dans le YAML, une couleur
+			// qui diffère côté réel n'est pas l'affaire de notion-seed — exactement
+			// comme une description omise n'écrase jamais celle de Notion.
+			name: "option couleur absente du YAML : aucune ligne",
+			desired: db("Statut", status(
+				state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
+			applied: db("Statut", status(
+				state.Option{ID: "o1", Key: "todo", Name: "À faire", Color: "blue", Group: "To-do"})),
+			actual: db("Statut", status(
+				state.Option{ID: "o1", Name: "À faire", Color: "blue", Group: "To-do"})),
+			wantKind:  resources.KindNone,
+			wantClass: change.ClassSafe,
+		},
+		{
+			// Le group d'une option déplacée à la main dans Notion doit ressortir
+			// à la fois en dérive (constat) et en plan (réconciliation vers le
+			// YAML) — même schéma que le renommage d'option testé plus haut.
+			name: "dérive : group d'une option changé dans Notion",
+			desired: db("Statut", status(
+				state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
+			applied: db("Statut", status(
+				state.Option{ID: "o1", Key: "todo", Name: "À faire", Group: "To-do"})),
+			actual: db("Statut", status(
+				state.Option{ID: "o1", Name: "À faire", Group: "In progress"})),
+			wantKind:  resources.KindUpdate,
+			wantClass: change.ClassSafe,
+			wantLine:  "group In progress → To-do",
+			wantDrift: "groupe To-do → In progress",
+		},
+		{
 			// La description n'est pas gardée comme le nom : une database sans
 			// `description` dans le YAML ne doit jamais proposer d'écraser celle que
 			// porte Notion — sinon chaque plan afficherait un changement fantôme.
