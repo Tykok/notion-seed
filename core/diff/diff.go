@@ -163,7 +163,12 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 	for _, d := range res.Changeset.Details {
 		line := d.Op + " " + d.Target
 		if d.Note != "" {
-			line += " : " + fmt.Sprintf("%q", d.Note)
+			// PAS de %q ici : Note porte déjà ses propres guillemets là où il en
+			// faut (un renommage rend `"Ancien" → "Nouveau"`). Un %q supplémentaire
+			// ré-échappe ces guillemets et l'ensemble de la note, jusqu'à rendre
+			// illisible la seule ligne censée éviter qu'on croie avoir renommé une
+			// propriété alors qu'elle reste hors config.
+			line += " — " + d.Note
 		}
 		c.Lines = append(c.Lines, line)
 		c.LineClasses = append(c.LineClasses, d.Class)
