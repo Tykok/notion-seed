@@ -142,6 +142,35 @@ func TestComputeBlocksWhenManagedResourceVanished(t *testing.T) {
 	}
 }
 
+// C2 : --skip-preflight passe un `actual` nil — refreshManaged n'a jamais
+// tourné. CompareDatabase rend alors un résultat vide pour database.tasks
+// (« on ne sait rien, donc on ne dit rien »), mais Compute doit quand même
+// nommer la ressource : un Plan vide de partout ne doit jamais être confondu
+// avec une conformité constatée.
+func TestComputeReportsNotComparedWhenActualWasNotRead(t *testing.T) {
+	cfg := &config.Config{Databases: []config.Database{{
+		Key: "tasks", Name: "Tasks",
+		Properties: map[string]config.Property{"Name": {Type: "title"}},
+	}}}
+	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
+		"tasks": {ID: "db1", Name: "Tasks"},
+	}}
+
+	p, err := Compute(cfg, applied, nil)
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+	if p.Blocked {
+		t.Error("Blocked = true, want false — --skip-preflight n'est pas une erreur")
+	}
+	if len(p.Changes) != 0 || len(p.Unmanaged) != 0 {
+		t.Errorf("Changes = %v, Unmanaged = %v, want les deux vides", p.Changes, p.Unmanaged)
+	}
+	if len(p.NotCompared) != 1 || p.NotCompared[0] != "database.tasks" {
+		t.Errorf("NotCompared = %v, want [database.tasks]", p.NotCompared)
+	}
+}
+
 func TestComputeAllowDataLossUnblocksDestructiveOnly(t *testing.T) {
 	// tasks perd une option de select (destructif), statuses perd une option de
 	// status (réécriture silencieuse). allow_data_loss couvre les deux

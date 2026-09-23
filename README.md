@@ -234,7 +234,7 @@ Un plan bloqué sort en code non nul.
 | Flag | Défaut | Rôle |
 |---|---|---|
 | `--dir` | `.` | dossier de configuration |
-| `--skip-preflight` | `false` | mode entièrement hors ligne : ni vérification de `ntn`, ni vérification de la page parente. Valide la configuration et rend le plan sans aucun appel réseau |
+| `--skip-preflight` | `false` | mode entièrement hors ligne : ni vérification de `ntn`, ni vérification de la page parente. Valide la configuration et rend le plan sans aucun appel réseau — les ressources déjà importées ne sont pas comparées au réel dans ce mode, et ressortent sous `Non comparé` plutôt que sous `Aucun changement` |
 | `--rate` | `5` | plafond d'appels API par seconde |
 | `--burst` | `10` | appels tolérés en rafale |
 
