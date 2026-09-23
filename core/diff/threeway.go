@@ -214,6 +214,14 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 				Note:   "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer",
 				Class:  change.ClassMigration,
 			})
+		} else {
+			// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
+			// place est libre pour comparer color et group, en classe sûre — comme
+			// le format de number. Sur une migration, la ligne porte déjà son
+			// propre changement ; superposer un second écart y sèmerait la
+			// confusion sans rien ajouter, puisque l'option va de toute façon être
+			// recréée.
+			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
 		}
 	}
 
@@ -222,6 +230,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 	for _, w := range keyless {
 		if i, ok := idxByName[w.Name]; ok && !claimed[i] {
 			claimed[i] = true
+			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
 			continue
 		}
 		out = append(out, resources.Detail{
@@ -248,6 +257,38 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 	return out
 }
 
+// optionAttrLines compare color et group d'une option appariée dont le nom
+// coïncide déjà — via key ou, à défaut, via nom. Classe sûre, comme le format
+// de number : la donnée n'est pas perdue, elle est juste réaffichée
+// autrement. Ne compare que ce que le YAML déclare : une couleur ou un group
+// absent du YAML ne doit jamais produire de changement fantôme, exactement
+// comme le nom de database et la description (gardés par un test de
+// non-vacuité).
+//
+// Les garder dans le state sans jamais les lire ici serait la seule façon de
+// faire diverger apply du plan le jour où apply existera : le plan promettrait
+// une couleur qu'il n'écrirait jamais.
+func optionAttrLines(propName string, want, have state.Option) []resources.Detail {
+	var out []resources.Detail
+	if want.Color != "" && want.Color != have.Color {
+		out = append(out, resources.Detail{
+			Op:     "~",
+			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
+			Note:   fmt.Sprintf("color %s → %s", have.Color, want.Color),
+			Class:  change.ClassSafe,
+		})
+	}
+	if want.Group != "" && want.Group != have.Group {
+		out = append(out, resources.Detail{
+			Op:     "~",
+			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
+			Note:   fmt.Sprintf("group %s → %s", have.Group, want.Group),
+			Class:  change.ClassSafe,
+		})
+	}
+	return out
+}
+
 // driftLines dit ce qui a bougé dans Notion depuis la dernière application.
 // C'est un constat, jamais une action : la réconciliation vers le YAML est
 // calculée séparément par planLines.
@@ -255,6 +296,13 @@ func driftLines(applied, actual *state.Database) []string {
 	var out []string
 	if applied.Name != "" && applied.Name != actual.Name {
 		out = append(out, fmt.Sprintf("~ nom %q → %q", applied.Name, actual.Name))
+	}
+	// Même garde de non-vacuité que pour le nom : un state qui n'a jamais
+	// capturé la description ne doit pas faire passer sa valeur réelle pour une
+	// dérive à chaque run.
+	if applied.Description != "" && applied.Description != actual.Description {
+		out = append(out, fmt.Sprintf(
+			"~ description %q → %q hors de notion-seed", applied.Description, actual.Description))
 	}
 
 	for _, name := range sortedPropNames(applied.Properties) {
@@ -268,16 +316,20 @@ func driftLines(applied, actual *state.Database) []string {
 			out = append(out, fmt.Sprintf(
 				"~ propriété %q : type %s → %s hors de notion-seed", name, was.Type, is.Type))
 		}
+		if was.Type == "number" && was.Format != "" && was.Format != is.Format {
+			out = append(out, fmt.Sprintf(
+				"~ propriété %q : format %s → %s hors de notion-seed", name, was.Format, is.Format))
+		}
 
-		// Une option sans id ne peut pas être suivie par id : ni retrait ni
-		// renommage ne peuvent être affirmés pour elle, donc on ne rend aucune
-		// ligne de dérive la concernant.
-		nameByID := map[string]string{}
+		// Une option sans id ne peut pas être suivie par id : ni retrait, ni
+		// renommage, ni changement d'attribut ne peuvent être affirmés pour elle,
+		// donc on ne rend aucune ligne de dérive la concernant.
+		byID := map[string]state.Option{}
 		for _, o := range is.Options {
 			if o.ID == "" {
 				continue
 			}
-			nameByID[o.ID] = o.Name
+			byID[o.ID] = o
 		}
 		wasIDs := map[string]bool{}
 		for _, o := range was.Options {
@@ -285,16 +337,29 @@ func driftLines(applied, actual *state.Database) []string {
 				continue
 			}
 			wasIDs[o.ID] = true
-			current, ok := nameByID[o.ID]
+			current, ok := byID[o.ID]
 			if !ok {
 				out = append(out, fmt.Sprintf(
 					"- option %q de la propriété %q retirée hors de notion-seed", o.Name, name))
 				continue
 			}
-			if current != o.Name {
+			if current.Name != o.Name {
 				out = append(out, fmt.Sprintf(
 					"~ option %q de la propriété %q renommée en %q hors de notion-seed",
-					o.Name, name, current))
+					o.Name, name, current.Name))
+			}
+			// Même garde de non-vacuité qu'ailleurs : une couleur ou un group que le
+			// state n'a jamais capturé ne doit pas faire passer sa valeur réelle
+			// pour une dérive.
+			if o.Color != "" && current.Color != o.Color {
+				out = append(out, fmt.Sprintf(
+					"~ option %q de la propriété %q : couleur %s → %s hors de notion-seed",
+					o.Name, name, o.Color, current.Color))
+			}
+			if o.Group != "" && current.Group != o.Group {
+				out = append(out, fmt.Sprintf(
+					"~ option %q de la propriété %q : groupe %s → %s hors de notion-seed",
+					o.Name, name, o.Group, current.Group))
 			}
 		}
 
