@@ -6,6 +6,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tykok/notion-seed/core/config"
+	"github.com/tykok/notion-seed/core/state"
 )
 
 func TestRenderEmptyPlan(t *testing.T) {
@@ -66,6 +69,49 @@ func TestRenderNotComparedBlocksNoChangeMessage(t *testing.T) {
 	}
 	if !strings.Contains(got, "database.tasks") {
 		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", got)
+	}
+}
+
+// I3 : Note porte déjà ses propres guillemets là où il en faut (un
+// renommage de propriété avertit avec `"Ancien" n'est pas renommée...`).
+// Avant correction, absorb ré-échappait toute la note avec %q, produisant des
+// antislashs illisibles — précisément sur la ligne censée éviter à
+// l'utilisateur de croire qu'il a renommé une propriété. Les autres tests de
+// rendu fabriquent des Lines déjà formatées : celui-ci seul, en passant par
+// Compute puis par Render, exerce la concaténation réelle de Note.
+func TestRenderNoteWithQuotesIsNotReEscaped(t *testing.T) {
+	cfg := &config.Config{Databases: []config.Database{{
+		Key: "tasks", Name: "Tasks",
+		Properties: map[string]config.Property{"Charge": {Type: "number"}},
+	}}}
+	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
+		"tasks": {ID: "db1", Name: "Tasks", Properties: map[string]state.Property{
+			"Estimate": {ID: "p1", Type: "number"},
+		}},
+	}}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{
+		ID: "db1", Name: "Tasks", Properties: map[string]state.Property{
+			"Estimate": {ID: "p1", Type: "number"},
+		},
+	}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, `\"`) {
+		t.Errorf("la note a été ré-échappée (antislashs) : %q", got)
+	}
+	if !strings.Contains(got, `"Estimate" n'est pas renommée`) {
+		t.Errorf("la note doit rester lisible avec ses guillemets d'origine:\n%s", got)
+	}
+	if !strings.Contains(got, " — ") {
+		t.Errorf("le séparateur doit être « — », pas « : »:\n%s", got)
 	}
 }
 
