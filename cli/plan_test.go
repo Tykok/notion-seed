@@ -599,6 +599,56 @@ func TestPlanRejectsStateEntryWithoutID(t *testing.T) {
 	}
 }
 
+// C1 : une database gérée disparue (404) doit bloquer le plan ET le dire sur
+// stdout. Avant correction, Render sortait « Aucun changement. La
+// configuration correspond à l'état réel. » alors même que la commande
+// rendait un code d'erreur — stdout affirmait l'inverse de stderr.
+func TestPlanBlocksAndSaysSoWhenStateDatabaseIs404(t *testing.T) {
+	withFakeNtn(t, "authenticated_database_404")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":       tasksWorkspaceYAML,
+		"databases/tasks.yaml": tasksConfigYAML,
+		state.FileName:         tasksStateJSON,
+	})
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un blocage sur une database introuvable\n%s", out)
+	}
+	if strings.Contains(out, "Aucun changement") {
+		t.Errorf("stdout affirme la conformité alors que la database a disparu:\n%s", out)
+	}
+	for _, want := range []string{"Plan bloqué", "introuvable", "database.tasks"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
+		}
+	}
+}
+
+// C1 : même défaut, côté archivage — jusqu'ici la seule branche de
+// refreshManaged sans aucun test de bout en bout.
+func TestPlanBlocksAndSaysSoWhenStateDatabaseIsArchived(t *testing.T) {
+	withFakeNtn(t, "archived_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":       tasksWorkspaceYAML,
+		"databases/tasks.yaml": tasksConfigYAML,
+		state.FileName:         tasksStateJSON,
+	})
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un blocage sur une database archivée\n%s", out)
+	}
+	if strings.Contains(out, "Aucun changement") {
+		t.Errorf("stdout affirme la conformité alors que la database est archivée:\n%s", out)
+	}
+	for _, want := range []string{"Plan bloqué", "archiv", "database.tasks"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
+		}
+	}
+}
+
 // Review Focus 5 : un state sans workspace_id ne peut pas être comparé. Ça ne
 // doit pas valoir « workspace différent ».
 func TestCheckWorkspaceMatchAcceptsEmptyWorkspaceID(t *testing.T) {

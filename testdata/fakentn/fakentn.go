@@ -128,6 +128,30 @@ func main() {
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
+	case "authenticated_database_404":
+		// ntn authentifié, page parente lisible, mais la database ancrée par le
+		// state a disparu (404) : couvre le blocage de bout en bout sur une
+		// ressource gérée introuvable — seul défaut resté sans test de bout en
+		// bout avant cette correction.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			if strings.HasPrefix(path, "/v1/databases/") {
+				fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+					"< 404 Not Found\n"+
+					"error: Public API request failed (404 Not Found object_not_found): "+
+					"Could not find database with ID: db-1.\n")
+				os.Exit(5)
+			}
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
 	case "archived_database":
 		// ntn authentifié, mais la database est archivée/en corbeille : couvre
 		// le refus d'import d'une ressource en corbeille, seul défaut à

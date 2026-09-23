@@ -19,6 +19,35 @@ func TestRenderEmptyPlan(t *testing.T) {
 	}
 }
 
+// C1 : une database gérée introuvable ou archivée empile une BlockedReason
+// sans jamais toucher Changes ni Unmanaged. Avant correction, Render sortait
+// ici « Aucun changement. La configuration correspond à l'état réel. » sur
+// stdout, en même temps qu'un code d'erreur — stdout affirmait l'inverse de
+// stderr.
+func TestRenderBlockedPlanNeverSaysNoChange(t *testing.T) {
+	p := &Plan{
+		Blocked: true,
+		BlockedReasons: []string{
+			"database.tasks est dans le state mais introuvable (404) dans Notion.\n" +
+				"  → restaurez-la dans Notion, ou retirez son entrée de notion-seed.state.json",
+		},
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "Aucun changement") {
+		t.Errorf("un plan bloqué ne doit jamais afficher « Aucun changement »:\n%s", got)
+	}
+	if !strings.Contains(got, "Plan bloqué") {
+		t.Errorf("sortie = %q, elle doit afficher la section de blocage", got)
+	}
+	if !strings.Contains(got, "introuvable (404)") {
+		t.Errorf("sortie = %q, elle doit nommer la raison du blocage", got)
+	}
+}
+
 func TestRenderCreatePlan(t *testing.T) {
 	p := &Plan{
 		ToAdd: 1,
