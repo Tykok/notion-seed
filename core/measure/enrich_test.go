@@ -173,3 +173,48 @@ func TestEnrichSkipsResourcesWithoutADataSourceID(t *testing.T) {
 		t.Errorf("Class = %v, want ClassUnknownImpact", d.Class)
 	}
 }
+
+// planWithTypeChange fabrique un changement de type : la mesure porte la
+// colonne entière (Option vide), pas une option.
+func planWithTypeChange() *diff.Plan {
+	return &diff.Plan{Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks",
+		Class: change.ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "~", Target: `property "Tags" — multi_select → select`,
+			Class: change.ClassSilentRewrite, Count: -1,
+			Measure: &resources.Measurement{Property: "Tags", PropertyType: "multi_select"},
+		}},
+	}}}
+}
+
+// Une colonne VIDE qui change de type ne coûte rien, exactement comme une
+// option que personne ne porte. Sans ce déclassement, la ligne se contredit
+// elle-même — « réécriture silencieuse » suivi de « 0 ligne concernée » — et
+// `plan --fail-on=silent-rewrite` sort en code non nul sur une colonne sans
+// aucune donnée à perdre.
+func TestEnrichMakesATypeChangeSafeWhenTheColumnIsEmpty(t *testing.T) {
+	p := planWithTypeChange()
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 0}, nil })
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if d := p.Changes[0].Details[0]; d.Count != 0 || d.Class != change.ClassSafe {
+		t.Errorf("Detail = {Count:%d Class:%v}, want {0 sûr}", d.Count, d.Class)
+	}
+	if got := p.Changes[0].Class; got != change.ClassSafe {
+		t.Errorf("Class d'en-tête = %v, want sûr", got)
+	}
+}
+
+// Un compte NON nul, lui, laisse la classe du changement de type intacte : le
+// compte dit l'ampleur, la table mesurée dit la nature. Rien dans « 12 lignes
+// non vides » ne rend une réécriture silencieuse moins silencieuse.
+func TestEnrichKeepsTheTableClassWhenATypeChangeHasRows(t *testing.T) {
+	p := planWithTypeChange()
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 12}, nil })
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if d := p.Changes[0].Details[0]; d.Count != 12 || d.Class != change.ClassSilentRewrite {
+		t.Errorf("Detail = {Count:%d Class:%v}, want {12 réécriture silencieuse}", d.Count, d.Class)
+	}
+}

@@ -65,11 +65,24 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 			d.Count = res.Count
 			d.Capped = res.Capped
 
-			// Seul le retrait d'option se reclasse avec le compte. Un changement
-			// de type tient sa classe de la table mesurée : le compte dit
-			// l'ampleur, pas la nature.
 			if d.Measure.Option != "" {
 				d.Class = change.ClassifyOptionRemoval(d.Measure.PropertyType, res.Count)
+			} else if res.Count == 0 {
+				// Le compte reclasse un changement de type DANS UN SEUL SENS, et
+				// l'asymétrie n'a rien d'évident :
+				//
+				// Zéro déclasse. Un couple destructeur sur une colonne vide ne coûte
+				// rien — il n'y a aucune valeur à appauvrir. Sans ce déclassement la
+				// ligne se contredit elle-même, « réécriture silencieuse » suivi de
+				// « 0 ligne concernée », et --fail-on=silent-rewrite arrête une CI sur
+				// une colonne sans aucune donnée. C'est la même règle que pour le
+				// retrait d'option, où un compte nul rend ClassSafe.
+				//
+				// Un compte non nul, lui, ne touche à rien : la classe vient de la
+				// table des couples de types, mesurée contre l'API. Le compte dit
+				// l'AMPLEUR, la table dit la NATURE, et rien dans « 12 lignes non
+				// vides » ne rend une réécriture silencieuse moins silencieuse.
+				d.Class = change.ClassSafe
 			}
 		}
 
