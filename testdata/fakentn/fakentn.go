@@ -43,8 +43,15 @@ const createdDataSource = `{"object":"data_source","id":"ds-new",` +
 // data source à une requête de comptage — un 200 parfaitement valide, sans
 // aucun `results`. Le comptage n'y verrait aucune ligne, donc « 0 ligne
 // concernée », donc « rien à perdre » : une affirmation fausse, pas une erreur.
-// Le cas `/query` passe donc TOUJOURS en premier, dans chaque scénario, et
-// TestFakeNtnAnswersQueryWithAListInEveryScenario le vérifie.
+// Le cas `/query` passe donc TOUJOURS avant le cas de préfixe
+// `/v1/data_sources/` — c'est ce recouvrement-là, et lui seul, qu'il faut
+// désarmer. Il ne passe pas forcément en tête du switch : `authenticated_database`
+// traite `/v1/databases/` avant lui, sans conséquence, puisque ce préfixe ne
+// recouvre aucun chemin de comptage.
+//
+// TestFakeNtnAnswersQueryWithAListInEveryScenario vérifie le résultat plutôt
+// que l'ordre : chaque scénario qui sert `/v1/data_sources/` doit rendre une
+// liste avec un `results` à une requête de comptage.
 //
 // Un compte non nul est délibéré : si un scénario reçoit une requête de
 // comptage qu'on n'avait pas prévue, il vaut mieux qu'elle produise un chiffre
