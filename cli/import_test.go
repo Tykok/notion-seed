@@ -228,3 +228,24 @@ func TestImportRefusesSkipPreflight(t *testing.T) {
 		t.Errorf("le message doit nommer le flag refusé: %v", err)
 	}
 }
+
+// import partage planOptions avec plan, mais il ne calcule aucun plan : il n'a
+// aucune classe à confronter à --fail-on. Le flag doit donc être refusé, pour
+// la même raison que --skip-preflight — l'accepter puis l'ignorer ferait croire
+// à une CI qu'elle est protégée sur la commande qui écrit le state.
+func TestImportRefusesFailOn(t *testing.T) {
+	dir := writeImportFixture(t)
+
+	out, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir, "--fail-on=destructive")
+	if err == nil {
+		t.Fatalf("--fail-on doit être refusé par import\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "fail-on") {
+		t.Errorf("le message doit nommer le flag refusé: %v", err)
+	}
+	// L'action corrective doit dire où le flag sert vraiment.
+	if !strings.Contains(err.Error(), "  → ") {
+		t.Errorf("le message doit porter une action corrective: %v", err)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/diff"
 	"github.com/tykok/notion-seed/core/measure"
@@ -25,6 +26,7 @@ type planOptions struct {
 	skipPreflight bool
 	ratePerSec    float64
 	burst         int
+	failOn        []string
 }
 
 func (o *planOptions) bind(cmd *cobra.Command) {
@@ -38,6 +40,9 @@ func (o *planOptions) bind(cmd *cobra.Command) {
 		"plafond d'appels API par seconde")
 	cmd.Flags().IntVar(&o.burst, "burst", transport.DefaultBurst,
 		"nombre d'appels tolérés en rafale")
+	cmd.Flags().StringSliceVar(&o.failOn, "fail-on", nil,
+		"classes de changement qui font sortir en code non nul : destructive, "+
+			"silent-rewrite, unknown, migration. Vide = rien ne fait échouer.")
 }
 
 // validate rejette les valeurs de flags que le rate limiter refuse. Sans ça,
@@ -49,6 +54,82 @@ func (o *planOptions) validate() error {
 	}
 	if o.burst <= 0 {
 		return fmt.Errorf("--burst doit être strictement positif, reçu %d", o.burst)
+	}
+	// La valeur de --fail-on est résolue ICI, donc avant config.Load et avant le
+	// moindre appel réseau. Un nom mal tapé qui ne serait refusé qu'après le
+	// plan laisserait une CI passer au vert en croyant se protéger : le flag ne
+	// protégerait pas, et personne ne le saurait.
+	if _, err := failOnClasses(o.failOn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// failOnClasses traduit les valeurs de --fail-on en classes.
+//
+// La liste est ÉNUMÉRÉE, pas un seuil : `sûr`, `destructif` et `réécriture
+// silencieuse` forment bien une échelle, mais un impact inconnu n'y a pas de
+// place — un couple de types non mesuré peut se révéler anodin comme
+// catastrophique. Le traiter comme « pire que destructif » serait aussi faux
+// que l'inverse.
+func failOnClasses(values []string) ([]change.Class, error) {
+	byName := map[string]change.Class{
+		"destructive":    change.ClassDestructive,
+		"silent-rewrite": change.ClassSilentRewrite,
+		"unknown":        change.ClassUnknownImpact,
+		"migration":      change.ClassMigration,
+	}
+	out := make([]change.Class, 0, len(values))
+	for _, v := range values {
+		c, ok := byName[v]
+		if !ok {
+			return nil, fmt.Errorf(
+				"--fail-on ne connaît pas %q\n"+
+					"  → valeurs acceptées : destructive, silent-rewrite, unknown, "+
+					"migration ; séparez-les par des virgules", v)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// firstMatchingClass rend la première classe du plan qui figure dans la liste,
+// ou ClassSafe si aucune ne correspond.
+//
+// La recherche porte sur les DÉTAILS, pas sur la classe agrégée de la
+// ressource : c'est le détail qui porte le coût mesuré, et l'agrégat d'une
+// ressource par ailleurs dangereuse ferait échouer sur une ligne qui ne coûte
+// rien.
+func firstMatchingClass(p *diff.Plan, classes []change.Class) change.Class {
+	for _, c := range p.Changes {
+		for _, d := range c.Details {
+			for _, want := range classes {
+				if d.Class == want {
+					return want
+				}
+			}
+		}
+	}
+	return change.ClassSafe
+}
+
+// checkFailOn fait sortir en code non nul si le plan porte une des classes
+// énumérées par --fail-on.
+//
+// plan, diff ET apply passent par ici : les trois commandes partagent
+// planOptions, donc les trois exposent le flag. Un flag affiché dans l'aide
+// d'apply mais ignoré par apply serait pire que pas de flag du tout — la CI
+// qui écrit est justement celle qui croit se protéger.
+func checkFailOn(p *diff.Plan, failOn []string) error {
+	classes, err := failOnClasses(failOn)
+	if err != nil {
+		return err
+	}
+	if hit := firstMatchingClass(p, classes); hit != change.ClassSafe {
+		return fmt.Errorf(
+			"le plan porte un changement de classe %q, refusé par --fail-on\n"+
+				"  → relisez le plan ci-dessus ; retirez cette classe de --fail-on "+
+				"si le changement est voulu", hit)
 	}
 	return nil
 }
@@ -221,7 +302,10 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		return fmt.Errorf("plan bloqué\n" +
 			"  → chaque blocage est détaillé ci-dessus, avec ce qui le lève")
 	}
-	return nil
+	// APRÈS le rendu : --fail-on fait sortir en code non nul, il ne prive pas
+	// l'utilisateur du plan qui explique pourquoi. Le message d'erreur renvoie
+	// à ce qui vient d'être écrit.
+	return checkFailOn(p, opts.failOn)
 }
 
 // checkWorkspaceMatch refuse un state venu d'un autre workspace.

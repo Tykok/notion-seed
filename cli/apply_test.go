@@ -415,3 +415,32 @@ func TestApplyNamesWhatItCannotWriteAndFails(t *testing.T) {
 		t.Errorf("la section ne nomme pas la ressource:\n%s", out)
 	}
 }
+
+// apply partage planOptions avec plan : --fail-on y apparaît donc dans l'aide.
+// Un flag affiché puis ignoré serait pire que pas de flag — la CI qui ÉCRIT est
+// justement celle qui croit se protéger. apply doit donc s'arrêter sur la
+// classe demandée, avant d'écrire quoi que ce soit.
+func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": statusWithoutFait,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve",
+		"--fail-on=silent-rewrite")
+	if err == nil {
+		t.Fatalf("apply error = nil, want un échec\n%s", out)
+	}
+	// Le message doit être celui de --fail-on, pas celui de la non-convergence :
+	// sinon rien ne prouve que le flag a servi à quelque chose.
+	if !strings.Contains(err.Error(), "--fail-on") {
+		t.Errorf("message = %q, il doit dire que --fail-on a déclenché", err.Error())
+	}
+	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+	}
+}

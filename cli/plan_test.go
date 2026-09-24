@@ -893,3 +893,126 @@ databases:
 		}
 	}
 }
+
+// statusWithoutFait déclare la database `tasks` SANS l'option "Fait" que le
+// faux ntn rend : son retrait est donc mesuré, et classé réécriture
+// silencieuse parce que des lignes la portent.
+const statusWithoutFait = `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+            color: blue
+            group: "To-do"
+`
+
+// Sans --fail-on, un plan qui réassigne des lignes reste en succès : plus rien
+// ne bloque, l'utilisateur est garant de sa base.
+func TestPlanSucceedsOnSilentRewriteWithoutFailOn(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": statusWithoutFait,
+	})
+	if _, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if out, err := runCmd(t, "plan", "--dir", dir); err != nil {
+		t.Fatalf("plan error = %v, want nil\n%s", err, out)
+	}
+}
+
+// Avec --fail-on, la CI attrape le changement. C'est le mécanisme qui remplace
+// le blocage, et il est choisi dans le workflow.
+func TestPlanFailsOnSilentRewriteWhenAsked(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": statusWithoutFait,
+	})
+	if _, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=silent-rewrite")
+	if err == nil {
+		t.Fatalf("plan error = nil, want un échec\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+	}
+}
+
+// Une classe qui n'existe pas doit être refusée AVANT tout appel réseau : sinon
+// une CI mal configurée passerait au vert en croyant se protéger.
+func TestPlanRejectsAnUnknownFailOnValue(t *testing.T) {
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+	_, err := runCmd(t, "plan", "--dir", dir, "--fail-on=dangereux")
+	if err == nil {
+		t.Fatal("plan error = nil, want un refus de la valeur")
+	}
+	for _, want := range []string{"dangereux", "destructive", "silent-rewrite", "unknown", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
+// diff partage planOptions avec plan, donc --fail-on y est disponible sans rien
+// de plus. C'est diff, pas plan, que la documentation conseille en CI : le flag
+// y serait inutile s'il ne marchait que sur plan, et personne ne le verrait
+// avant que la CI ne laisse passer une réécriture.
+func TestDiffFailsOnSilentRewriteWhenAsked(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": statusWithoutFait,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	out, err := runCmd(t, "diff", "--dir", dir, "--fail-on=silent-rewrite")
+	if err == nil {
+		t.Fatalf("diff error = nil, want un échec\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+	}
+	// Le plan est rendu quand même : --fail-on change le code de sortie, il ne
+	// prive pas de ce qui explique l'échec.
+	if !strings.Contains(out, `option "Fait"`) {
+		t.Errorf("le plan n'a pas été rendu avant l'échec:\n%s", out)
+	}
+}
+
+// --fail-on ne doit pas déclencher sur une classe qu'on ne lui a pas nommée.
+// La liste est énumérée, pas un seuil : demander `destructive` ne demande pas
+// « tout ce qui est au moins aussi grave », et faire échouer sur une réécriture
+// silencieuse ou un impact inconnu non demandés fabriquerait un ordre que le
+// produit refuse.
+func TestPlanFailOnIsEnumeratedNotAThreshold(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": statusWithoutFait,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// Le plan porte une réécriture silencieuse mesurée. Demander `destructive`
+	// et `migration` ne doit rien attraper.
+	if out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=destructive,migration"); err != nil {
+		t.Fatalf("plan error = %v, want nil : aucune classe demandée n'est au plan\n%s", err, out)
+	}
+}

@@ -39,6 +39,9 @@ func newImportCmd() *cobra.Command {
 	// de l'aide ET refusé s'il est passé — un flag accepté puis ignoré ferait
 	// croire à un import hors ligne qui a en fait appelé l'API.
 	_ = cmd.Flags().MarkHidden("skip-preflight")
+	// Même traitement pour --fail-on : import ne calcule aucun plan, donc il n'a
+	// aucune classe à lui confronter. Masqué de l'aide ET refusé s'il est passé.
+	_ = cmd.Flags().MarkHidden("fail-on")
 	return cmd
 }
 
@@ -53,6 +56,13 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 			"import n'accepte pas --skip-preflight\n" +
 				"  → la commande lit l'état réel de la database pour l'inscrire dans le " +
 				"state : elle n'a rien à faire hors ligne")
+	}
+	if cmd.Flags().Changed("fail-on") {
+		return fmt.Errorf(
+			"import n'accepte pas --fail-on\n" +
+				"  → import adopte le réel tel qu'il est, il ne calcule aucun plan et " +
+				"n'a donc aucune classe à refuser. Utilisez `notion-seed diff " +
+				"--fail-on=...` pour garder la CI sur l'écart qui suit")
 	}
 	key, err := parseResourceAddress(addr)
 	if err != nil {
