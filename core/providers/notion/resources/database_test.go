@@ -142,3 +142,130 @@ func TestDiffDelegatesToDatabaseChangeset(t *testing.T) {
 		t.Errorf("méthode = %+v, fonction = %+v : la délégation a divergé", viaMethod, viaFunc)
 	}
 }
+
+// transportFunc permet à un test de décider par MÉTHODE autant que par chemin,
+// et de rendre une erreur — ce que stubTransport ne sait pas faire.
+type transportFunc func(ctx context.Context, req transport.APIRequest) (transport.APIResponse, error)
+
+func (f transportFunc) Execute(ctx context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+	return f(ctx, req)
+}
+
+// decodeCreated est le décodeur des tests de création. Il est local au paquet :
+// utiliser mapper.RemoteDatabaseFromJSON créerait un cycle d'import, puisque
+// mapper importe resources. C'est la même raison qui impose que Create prenne
+// un []byte déjà sérialisé.
+func decodeCreated(dbBody, dsBody []byte) (RemoteDatabase, error) {
+	return RemoteDatabase{
+		ID:           "db-new",
+		DataSourceID: "ds-new",
+		Name:         "Tasks",
+		Found:        true,
+		Properties: map[string]RemoteProperty{
+			"Name": {ID: "title", Type: "title"},
+		},
+	}, nil
+}
+
+// Create doit POSTer puis RELIRE. La relecture n'est pas du zèle : elle
+// rapporte les ids d'options, sans lesquels le state est aveugle à la dérive,
+// et elle confronte le résultat à ce qui avait été annoncé.
+func TestCreatePostsThenReadsBack(t *testing.T) {
+	var seen []string
+	var sentBody []byte
+	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+		seen = append(seen, req.Method+" "+req.Path)
+		switch {
+		case req.Method == "POST":
+			sentBody = req.Body
+			return transport.APIResponse{Status: 200, Body: []byte(
+				`{"object":"database","id":"db-new","data_sources":[{"id":"ds-new"}]}`)}, nil
+		case strings.HasPrefix(req.Path, "/v1/databases/"):
+			return transport.APIResponse{Status: 200, Body: []byte(
+				`{"object":"database","id":"db-new","archived":false,` +
+					`"data_sources":[{"id":"ds-new","name":"Tasks"}]}`)}, nil
+		default:
+			return transport.APIResponse{Status: 200, Body: []byte(
+				`{"object":"data_source","id":"ds-new"}`)}, nil
+		}
+	})
+
+	r := NewDatabaseResource(tr, decodeCreated)
+	got, err := r.Create(context.Background(), []byte(`{"parent":{}}`))
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if got.ID != "db-new" || got.DataSourceID != "ds-new" {
+		t.Errorf("ids = %q/%q, want db-new/ds-new", got.ID, got.DataSourceID)
+	}
+	if got.ReadErr != nil {
+		t.Errorf("ReadErr = %v, want nil", got.ReadErr)
+	}
+	if got.Remote.Name != "Tasks" {
+		t.Errorf("Remote.Name = %q, want Tasks", got.Remote.Name)
+	}
+	if len(seen) != 3 || seen[0] != "POST /v1/databases" {
+		t.Errorf("appels = %v, want POST /v1/databases puis les deux lectures", seen)
+	}
+	if string(sentBody) != `{"parent":{}}` {
+		t.Errorf("body = %q, il doit partir tel quel", sentBody)
+	}
+}
+
+// Si la relecture échoue APRÈS un POST réussi, l'identité doit survivre : la
+// perdre coûterait un doublon au prochain apply. L'erreur est rapportée à part,
+// pas confondue avec un échec de création.
+func TestCreateKeepsIdentityWhenReadBackFails(t *testing.T) {
+	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+		if req.Method == "POST" {
+			return transport.APIResponse{Status: 200, Body: []byte(
+				`{"object":"database","id":"db-new","data_sources":[{"id":"ds-new"}]}`)}, nil
+		}
+		return transport.APIResponse{}, &transport.APIError{Status: 500, NotionCode: "internal_server_error"}
+	})
+
+	r := NewDatabaseResource(tr, decodeCreated)
+	got, err := r.Create(context.Background(), []byte(`{"parent":{}}`))
+	if err != nil {
+		t.Fatalf("Create() error = %v, want nil : la création a réussi", err)
+	}
+	if got.ID != "db-new" || got.DataSourceID != "ds-new" {
+		t.Errorf("ids = %q/%q : l'identité ne doit jamais être perdue", got.ID, got.DataSourceID)
+	}
+	if got.ReadErr == nil {
+		t.Error("ReadErr = nil, want l'échec de relecture")
+	}
+}
+
+// Un POST en échec est un échec de création : aucune identité à conserver.
+func TestCreateReturnsErrorWhenPostFails(t *testing.T) {
+	tr := transportFunc(func(_ context.Context, _ transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{}, &transport.APIError{Status: 400, NotionCode: "validation_error"}
+	})
+	r := NewDatabaseResource(tr, decodeCreated)
+	got, err := r.Create(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("Create() error = nil, want l'erreur de l'API")
+	}
+	if got.ID != "" {
+		t.Errorf("ID = %q, want vide : rien n'a été créé", got.ID)
+	}
+}
+
+// Une réponse sans identifiant ne doit pas passer pour un succès : on ne sait
+// pas ce qui a été créé, et le message doit envoyer vérifier.
+func TestCreateRefusesResponseWithoutID(t *testing.T) {
+	tr := transportFunc(func(_ context.Context, _ transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{Status: 200, Body: []byte(`{"object":"database"}`)}, nil
+	})
+	r := NewDatabaseResource(tr, decodeCreated)
+	_, err := r.Create(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("Create() error = nil, want un refus")
+	}
+	for _, want := range []string{"identifiant", "  → ", "page parente"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
