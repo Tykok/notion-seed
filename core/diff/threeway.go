@@ -29,11 +29,12 @@ type Result struct {
 	// chemin de la configuration vers l'API ne la contourne, et c'est ce qui
 	// rend impossible — plutôt que corrigée — une écriture non annoncée.
 	//
-	// Non nulle UNIQUEMENT là où apply sait écrire : une cible non nulle EST
-	// l'autorisation d'écrire. Tant qu'apply ne fait que des créations, seule la
-	// création en porte une. Le jour où update écrira, sa cible sera `actual`
-	// auquel on applique les seuls changements déclarés — ce qui préserve les
-	// propriétés hors config.
+	// Non nulle sur une création et sur un update. Sur un update, c'est
+	// `actual` auquel on applique les seuls changements déclarés — ce qui
+	// préserve les propriétés hors config — et elle porte les ids d'options
+	// distants (voir updateTarget). Une cible non nulle n'est donc PLUS à elle
+	// seule l'autorisation d'écrire : apply filtre aussi sur le Kind, et
+	// n'écrit aujourd'hui que les créations.
 	Target *state.Database
 }
 
@@ -98,8 +99,97 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 
 	if len(res.Changeset.Details) > 0 {
 		res.Changeset.Kind = resources.KindUpdate
+		t := updateTarget(desired, applied, actual)
+		res.Target = &t
 	}
 	return res
+}
+
+// updateTarget résout l'état exact qu'aura la database après écriture : c'est
+// `actual` auquel on applique les SEULS changements déclarés.
+//
+// Partir de `desired` — ce que faisait la version qui n'écrivait pas — ferait
+// disparaître tout ce que le YAML ne déclare pas. Partir d'`actual` est ce qui
+// donne son sens à « propriété non déclarée = non touchée », et c'est aussi ce
+// qui fait porter à la cible les ids d'options distants, sans lesquels le
+// premier PATCH détruirait chaque option qu'il croit modifier.
+func updateTarget(desired, applied, actual *state.Database) state.Database {
+	target := state.Database{
+		ID:           actual.ID,
+		DataSourceID: actual.DataSourceID,
+		Name:         actual.Name,
+		Description:  actual.Description,
+		Icon:         actual.Icon,
+		Properties:   make(map[string]state.Property, len(desired.Properties)),
+	}
+	// Même garde de non-vacuité que dans planLines : ce que le YAML ne déclare
+	// pas n'est pas écrit, donc n'entre pas dans la cible.
+	if desired.Name != "" {
+		target.Name = desired.Name
+	}
+	if desired.Description != "" {
+		target.Description = desired.Description
+	}
+	if desired.Icon != "" {
+		target.Icon = desired.Icon
+	}
+
+	for name, want := range desired.Properties {
+		have, exists := actual.Properties[name]
+		if !exists {
+			// Propriété neuve : la valeur du YAML, options toutes neuves.
+			target.Properties[name] = newProperty(want)
+			continue
+		}
+		if want.Type != have.Type {
+			// Mesuré le 2026-09-24 : un changement de type recrée les options et
+			// ignore les ids transmis. planLines s'arrête de la même façon sur ce
+			// cas, sans émettre de ligne d'option : les deux restent alignés.
+			p := newProperty(want)
+			p.ID = have.ID
+			target.Properties[name] = p
+			continue
+		}
+
+		p := state.Property{ID: have.ID, Type: have.Type, Format: have.Format}
+		if want.Format != "" {
+			p.Format = want.Format
+		}
+		pr := pairOptions(want, have, applied.Properties[name])
+		for wi, w := range want.Options {
+			o := state.Option{Key: w.Key, Name: w.Name, Color: w.Color, Group: w.Group}
+			if i := pr.At[wi]; i != -1 {
+				remote := have.Options[i]
+				o.ID = remote.ID
+				// Le nom et la couleur d'une option existante ne sont pas
+				// écrivables : un nom divergent rend 200 sans effet, une couleur
+				// divergente rend 400. Les deux cas retiennent la ressource
+				// entière, donc la cible ne sert pas — mais elle doit rester VRAIE
+				// plutôt que de promettre une écriture impossible.
+				o.Name = remote.Name
+				o.Color = remote.Color
+				if o.Group == "" {
+					o.Group = remote.Group
+				}
+			}
+			p.Options = append(p.Options, o)
+		}
+		target.Properties[name] = p
+	}
+	return target
+}
+
+// newProperty rend la valeur cible d'une propriété dont aucune option ne peut
+// hériter d'une identité distante : une propriété neuve, ou une propriété dont
+// le type change. Aucune option ne porte d'id.
+func newProperty(want state.Property) state.Property {
+	out := state.Property{Type: want.Type, Format: want.Format}
+	for _, o := range want.Options {
+		out.Options = append(out.Options, state.Option{
+			Key: o.Key, Name: o.Name, Color: o.Color, Group: o.Group,
+		})
+	}
+	return out
 }
 
 // createLines détaille une création depuis la cible résolue : propriétés ET
@@ -242,24 +332,39 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 	return out
 }
 
-// optionLines compare les options d'une propriété.
-//
-// L'appariement suit la chaîne d'identité : applied ↔ actual par id Notion,
-// desired ↔ applied par key si déclarée, sinon par nom. C'est elle qui rend un
-// renommage visible plutôt que de le faire passer pour un retrait suivi d'un
-// ajout — et un retrait d'option de status, lui, réassigne silencieusement les
-// lignes.
-func optionLines(propName string, want, have, applied state.Property) []resources.Detail {
-	if len(want.Options) == 0 && len(have.Options) == 0 {
-		return nil
-	}
+// pairing est le résultat de l'appariement des options déclarées aux options
+// distantes. Un seul exemplaire de cette règle existe : optionLines en dérive
+// les lignes du plan, updateTarget en dérive la cible écrite. Deux règles
+// d'identité divergentes feraient écrire une option que le plan aurait montrée
+// ailleurs.
+type pairing struct {
+	// At donne, pour chaque option déclarée, la position de l'option distante
+	// appariée, ou -1.
+	At []int
+	// ViaKey dit que l'appariement est passé par la key de config. Il sépare les
+	// deux passes de optionLines, dont l'ordre de sortie est visible.
+	ViaKey []bool
+	// Claimed dit quelles positions distantes ont été prises. Les autres seront
+	// détruites par l'écriture : l'API remplace la liste entière.
+	Claimed []bool
+}
 
-	// Réclamation par POSITION dans have.Options, pas par nom : un renommage
-	// libère son ancien nom, et une réclamation par nom croirait ce nom encore
-	// occupé — une option déclarée sortirait alors du plan sans une ligne.
-	// L'index est aussi robuste à un id vide, qu'un state écrit à la main peut
-	// porter.
-	claimed := make([]bool, len(have.Options))
+// pairOptions suit la chaîne d'identité : applied ↔ actual par id, desired ↔
+// applied par key, à défaut par nom.
+//
+// La réclamation se fait par POSITION dans have.Options, pas par nom : un
+// renommage libère son ancien nom, et une réclamation par nom croirait ce nom
+// encore occupé. L'index est aussi robuste à un id vide, qu'un state écrit à la
+// main peut porter.
+func pairOptions(want, have, applied state.Property) pairing {
+	p := pairing{
+		At:      make([]int, len(want.Options)),
+		ViaKey:  make([]bool, len(want.Options)),
+		Claimed: make([]bool, len(have.Options)),
+	}
+	for i := range p.At {
+		p.At[i] = -1
+	}
 
 	idxByID := make(map[string]int, len(have.Options))
 	idxByName := make(map[string]int, len(have.Options))
@@ -272,9 +377,6 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		}
 	}
 
-	// key de config → position de l'option distante, en passant par l'id
-	// Notion porté par le state. C'est la chaîne d'identité : applied ↔ actual
-	// par id, desired ↔ applied par key.
 	idxByKey := make(map[string]int)
 	for _, o := range applied.Options {
 		if o.Key == "" || o.ID == "" {
@@ -285,21 +387,55 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		}
 	}
 
-	var out []resources.Detail
-
-	// Passe 1 : les options à key, qui ont une identité stable. Une key que le
-	// réel ne connaît pas retombe sur l'appariement par nom.
-	var keyless []state.Option
-	for _, w := range want.Options {
-		i, ok := idxByKey[w.Key]
-		if w.Key == "" || !ok {
-			keyless = append(keyless, w)
+	// Passe 1 : les options à key, qui ont une identité stable.
+	for wi, w := range want.Options {
+		if w.Key == "" {
 			continue
 		}
-		claimed[i] = true
-		if current := have.Options[i].Name; current != w.Name {
+		i, ok := idxByKey[w.Key]
+		if !ok {
+			continue
+		}
+		p.At[wi], p.ViaKey[wi], p.Claimed[i] = i, true, true
+	}
+
+	// Passe 2 : les autres, appariées par nom — mais seulement sur une position
+	// que la passe 1 n'a pas déjà prise.
+	for wi, w := range want.Options {
+		if p.At[wi] != -1 {
+			continue
+		}
+		if i, ok := idxByName[w.Name]; ok && !p.Claimed[i] {
+			p.At[wi], p.Claimed[i] = i, true
+		}
+	}
+	return p
+}
+
+// optionLines compare les options d'une propriété.
+//
+// L'appariement suit la chaîne d'identité : applied ↔ actual par id Notion,
+// desired ↔ applied par key si déclarée, sinon par nom. C'est elle qui rend un
+// renommage visible plutôt que de le faire passer pour un retrait suivi d'un
+// ajout — et un retrait d'option de status, lui, réassigne silencieusement les
+// lignes.
+func optionLines(propName string, want, have, applied state.Property) []resources.Detail {
+	if len(want.Options) == 0 && len(have.Options) == 0 {
+		return nil
+	}
+	p := pairOptions(want, have, applied)
+
+	var out []resources.Detail
+
+	// Passe 1 : les options dont la key a résolu.
+	for wi, w := range want.Options {
+		if !p.ViaKey[wi] {
+			continue
+		}
+		current := have.Options[p.At[wi]]
+		if current.Name != w.Name {
 			d := resources.NewDetail("~",
-				fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
+				fmt.Sprintf("option %q → %q (propriété %q)", current.Name, w.Name, propName),
 				change.ClassMigration)
 			d.Property = propName
 			d.Note = "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer"
@@ -307,26 +443,24 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			// le nombre de lignes qui la portent, et c'est le nom ACTUEL qui sait
 			// les filtrer.
 			d.Measure = &resources.Measurement{
-				Property:     propName,
-				PropertyType: have.Type,
-				Option:       current,
+				Property: propName, PropertyType: have.Type, Option: current.Name,
 			}
 			out = append(out, d)
-		} else {
-			// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
-			// place est libre pour comparer color et group. Sur une migration, la
-			// ligne porte déjà son propre changement ; superposer un second écart y
-			// sèmerait la confusion sans rien ajouter, puisque l'option va de toute
-			// façon être recréée.
-			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
+			continue
 		}
+		// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
+		// place est libre pour comparer color et group. Sur une migration, la
+		// ligne porte déjà son propre changement ; superposer un second écart y
+		// sèmerait la confusion sans rien ajouter.
+		out = append(out, optionAttrLines(propName, have.Type, w, current)...)
 	}
 
-	// Passe 2 : les options sans key, appariées par nom — mais seulement sur une
-	// position que la passe 1 n'a pas déjà prise.
-	for _, w := range keyless {
-		if i, ok := idxByName[w.Name]; ok && !claimed[i] {
-			claimed[i] = true
+	// Passe 2 : les options sans key, ou dont la key n'a pas résolu.
+	for wi, w := range want.Options {
+		if p.ViaKey[wi] {
+			continue
+		}
+		if i := p.At[wi]; i != -1 {
 			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
 			continue
 		}
@@ -336,11 +470,10 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		out = append(out, d)
 	}
 
-	// Passe 3 : ce qui existe dans Notion et que le YAML ne réclame pas SERA
-	// détruit dès qu'on écrit cette propriété — l'API remplace la liste entière
-	// au lieu de la fusionner. C'est l'asymétrie avec les propriétés.
+	// Passe 3 : ce que le YAML ne réclame pas SERA détruit dès qu'on écrit cette
+	// propriété — l'API remplace la liste entière au lieu de la fusionner.
 	for i, o := range have.Options {
-		if claimed[i] {
+		if p.Claimed[i] {
 			continue
 		}
 		out = append(out, resources.Detail{
@@ -354,9 +487,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			Class: change.ClassifyOptionRemoval(have.Type, -1),
 			Count: -1,
 			Measure: &resources.Measurement{
-				Property:     propName,
-				PropertyType: have.Type,
-				Option:       o.Name,
+				Property: propName, PropertyType: have.Type, Option: o.Name,
 			},
 		})
 	}
