@@ -146,18 +146,30 @@ func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 	// que se pose l'utilisateur.
 	if req, isRequired := errKind.(*kind.Required); isRequired {
 		for _, missing := range req.Missing {
-			if missing != "group" {
-				continue
+			switch missing {
+			case "group":
+				name := ""
+				if opt, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+					name, _ = opt["name"].(string)
+				}
+				return fmt.Sprintf(
+					"`group` est obligatoire sur chaque option de status (ici %q) et n'accepte que %s. "+
+						"notion-seed ne choisit pas de groupe à votre place : une option envoyée sans "+
+						"group est rangée par l'API dans le premier groupe, sans erreur.",
+					name, quotedList(StatusGroups))
+
+			case "options":
+				// Ne vaut que pour status : c'est le seul type qui l'exige.
+				if prop, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+					if t, _ := prop["type"].(string); t != "status" {
+						continue
+					}
+				}
+				return "une propriété status doit déclarer ses `options`. Créée sans, " +
+					"l'API la peuple de ses propres options par défaut, que le plan n'aura " +
+					"pas affichées — et leur retrait ultérieur réassigne silencieusement les " +
+					"lignes, ce que `allow_data_loss` ne débloque pas."
 			}
-			name := ""
-			if opt, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
-				name, _ = opt["name"].(string)
-			}
-			return fmt.Sprintf(
-				"`group` est obligatoire sur chaque option de status (ici %q) et n'accepte que %s. "+
-					"notion-seed ne choisit pas de groupe à votre place : une option envoyée sans "+
-					"group est rangée par l'API dans le premier groupe, sans erreur.",
-				name, quotedList(StatusGroups))
 		}
 	}
 

@@ -337,6 +337,63 @@ databases:
 	}
 }
 
+// Une propriété status sans bloc `options` partirait vers l'API avec une liste
+// vide. Notion la peuplerait alors de ses propres options par défaut, que le
+// plan n'a jamais affichées — et dont le retrait ultérieur se classe en
+// réécriture silencieuse, que rien ne débloque. Déclarer un status sans dire ce
+// qu'il porte est la même abdication que de ne pas déclarer son group.
+func TestValidateRejectsStatusPropertyWithoutOptions(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Statut:
+        type: status
+`)
+	err := ValidateDocument("databases/tasks.yaml", doc)
+	if err == nil {
+		t.Fatal("ValidateDocument() = nil, want un refus du status sans options")
+	}
+	for _, want := range []string{"options", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
+// Une liste d'options vide n'est pas mieux qu'une absente.
+func TestValidateRejectsStatusPropertyWithEmptyOptions(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Statut:
+        type: status
+        options: []
+`)
+	if err := ValidateDocument("databases/tasks.yaml", doc); err == nil {
+		t.Fatal("ValidateDocument() = nil, want un refus de la liste vide")
+	}
+}
+
+// select et multi_select gardent leur liberté : leurs options peuvent être
+// gérées à la main dans Notion sans risque de réécriture silencieuse.
+func TestValidateAcceptsSelectWithoutOptions(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Priorité:
+        type: select
+`)
+	if err := ValidateDocument("databases/tasks.yaml", doc); err != nil {
+		t.Fatalf("ValidateDocument() = %v, want nil", err)
+	}
+}
+
 // Symétrique du traitement de `format` : `group` n'a de sens que sur status.
 func TestValidateRejectsGroupOnSelectOption(t *testing.T) {
 	doc := []byte(`
