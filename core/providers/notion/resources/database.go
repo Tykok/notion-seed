@@ -116,6 +116,82 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	return r.decode(dbResp.Body, dsResp.Body)
 }
 
+// CreatedDatabase porte le résultat d'une création.
+//
+// ID et DataSourceID sont renseignés dès que le POST a répondu, MÊME si la
+// relecture échoue ensuite : une identité perdue coûte une database recréée en
+// double au prochain apply, alors qu'un instantané incomplet ne coûte qu'une
+// dérive non détectable sur les options. ReadErr porte l'échec de relecture,
+// qui n'est pas un échec de création — les confondre ferait croire que rien
+// n'a été écrit.
+type CreatedDatabase struct {
+	ID           string
+	DataSourceID string
+	Remote       RemoteDatabase
+	ReadErr      error
+}
+
+// Create crée une database, puis relit le résultat.
+//
+// Le corps arrive déjà sérialisé : `resources` ne peut pas importer
+// `core/state`, qui l'importe déjà, donc la cible résolue est traduite en
+// payload par `mapper`, en amont.
+//
+// La relecture n'est pas du zèle. Elle rapporte les ids d'options, sans
+// lesquels le state est aveugle à la dérive, et elle permet à l'appelant de
+// confronter le réel à ce que le plan avait annoncé — sur notre propre
+// écriture.
+func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedDatabase, error) {
+	resp, err := r.tr.Execute(ctx, transport.APIRequest{
+		Method: "POST",
+		Path:   "/v1/databases",
+		Body:   body,
+	})
+	if err != nil {
+		return CreatedDatabase{}, err
+	}
+
+	var probe struct {
+		ID          string `json:"id"`
+		DataSources []struct {
+			ID string `json:"id"`
+		} `json:"data_sources"`
+	}
+	if err := json.Unmarshal(resp.Body, &probe); err != nil {
+		return CreatedDatabase{}, fmt.Errorf(
+			"réponse de POST /v1/databases illisible: %w\n"+
+				"  → la database a peut-être été créée : ouvrez la page parente dans "+
+				"Notion pour vérifier avant de relancer", err)
+	}
+	if probe.ID == "" {
+		return CreatedDatabase{}, fmt.Errorf(
+			"POST /v1/databases n'a rendu aucun identifiant\n" +
+				"  → la database a peut-être été créée : ouvrez la page parente dans " +
+				"Notion pour vérifier avant de relancer")
+	}
+
+	out := CreatedDatabase{ID: probe.ID}
+	if len(probe.DataSources) > 0 {
+		out.DataSourceID = probe.DataSources[0].ID
+	}
+
+	remote, err := r.Read(ctx, probe.ID)
+	if err != nil {
+		out.ReadErr = err
+		return out, nil
+	}
+	rd, ok := remote.(RemoteDatabase)
+	if !ok {
+		out.ReadErr = fmt.Errorf("relecture de %s : type inattendu %T", probe.ID, remote)
+		return out, nil
+	}
+	out.Remote = rd
+	if rd.DataSourceID != "" {
+		out.DataSourceID = rd.DataSourceID
+	}
+	return out, nil
+}
+
 // Diff compare une database désirée à son état distant. Au MVP 0, l'état
 // distant est toujours absent : tout ressort en création.
 func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, error) {

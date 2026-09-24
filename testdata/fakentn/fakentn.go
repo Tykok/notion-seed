@@ -21,6 +21,18 @@ const (
 		"22222222-2222-4222-8222-222222222222\tExample User\tperson\n"
 )
 
+// createdDatabase et createdDataSource sont ce que fakentn rend après une
+// création, et aussi ce qu'il rend à la relecture : les deux doivent coïncider,
+// sinon apply signalerait un écart entre la cible et le réel là où il n'y en a
+// pas. Le schéma correspond à la database `projects` des tests d'apply.
+const createdDatabase = `{"object":"database","id":"db-new",` +
+	`"archived":false,"in_trash":false,` +
+	`"data_sources":[{"id":"ds-new","name":"Projects"}]}`
+
+const createdDataSource = `{"object":"data_source","id":"ds-new",` +
+	`"title":[{"plain_text":"Projects"}],` +
+	`"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`
+
 // subcommand dit quelle sous-commande ntn a été invoquée. Les scénarios d'auth
 // doivent répondre différemment à --version et à whoami : dispatcher uniquement
 // sur la variable d'environnement ferait répondre la version à whoami, et
@@ -185,6 +197,51 @@ func main() {
 			default:
 				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
 			}
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
+	case "authenticated_create":
+		// ntn authentifié, page parente lisible, création acceptée : le chemin
+		// heureux d'apply de bout en bout. POST /v1/databases se distingue de
+		// GET /v1/databases/<id> par le chemin seul, pas besoin de la méthode.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			fmt.Fprint(os.Stderr, "> https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			switch {
+			case strings.HasPrefix(path, "/v1/databases"):
+				fmt.Fprint(os.Stdout, createdDatabase)
+			case strings.HasPrefix(path, "/v1/data_sources/"):
+				fmt.Fprint(os.Stdout, createdDataSource)
+			default:
+				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			}
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
+	case "authenticated_create_refused":
+		// La création est refusée par l'API (400). Couvre l'arrêt sans rollback,
+		// et le fait que le state ne retient rien.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			if path == "/v1/databases" {
+				fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
+					"< 400 Bad Request\n"+
+					"error: Public API request failed (400 Bad Request validation_error): "+
+					"Invalid property.\n")
+				os.Exit(5)
+			}
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
