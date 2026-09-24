@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -464,5 +465,412 @@ func TestRunSendsThePayloadBuiltFromTheTarget(t *testing.T) {
 	}
 	if !strings.Contains(sent, testParentPageID) {
 		t.Errorf("payload = %s, il doit viser la page parente", sent)
+	}
+}
+
+// fakeUpdater enregistre ce qu'on lui demande d'écrire.
+//
+// err survient à l'appel d'index failAt (les précédents réussissent). dbFails
+// dit si l'échec touche le PATCH database — sinon, c'est le PATCH data source
+// qui échoue, et la database est écrite si un corps lui était destiné.
+type fakeUpdater struct {
+	dbBodies [][]byte
+	dsBodies [][]byte
+	remote   resources.RemoteDatabase
+	readErr  error
+
+	err     error
+	failAt  int
+	dbFails bool
+
+	exists    bool
+	existsErr error
+	probes    int
+}
+
+func (f *fakeUpdater) Update(_ context.Context, _, _ string, dbBody, dsBody []byte) (resources.UpdatedDatabase, error) {
+	call := len(f.dbBodies)
+	f.dbBodies = append(f.dbBodies, dbBody)
+	f.dsBodies = append(f.dsBodies, dsBody)
+	if f.err != nil && call == f.failAt {
+		return resources.UpdatedDatabase{DatabaseWritten: !f.dbFails && len(dbBody) > 0}, f.err
+	}
+	return resources.UpdatedDatabase{
+		DatabaseWritten: len(dbBody) > 0, Remote: f.remote, ReadErr: f.readErr,
+	}, nil
+}
+
+func (f *fakeUpdater) DatabaseExists(_ context.Context, _ string) (bool, error) {
+	f.probes++
+	return f.exists, f.existsErr
+}
+
+func (f *fakeUpdater) calls() int { return len(f.dbBodies) + f.probes }
+
+func prioTarget() *state.Database {
+	return &state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio":  {Type: "select"},
+			"Notes": {Type: "rich_text"},
+		},
+	}
+}
+
+func prioRemote() resources.RemoteDatabase {
+	return resources.RemoteDatabase{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks", Found: true,
+		Properties: map[string]resources.RemoteProperty{
+			"Prio":  {ID: "p1", Type: "select"},
+			"Notes": {ID: "n1", Type: "rich_text"},
+		},
+	}
+}
+
+func updateChange(key string, target *state.Database, details ...resources.Detail) diff.Change {
+	return diff.Change{
+		Resource: "database." + key, Key: key,
+		Kind: resources.KindUpdate, Target: target, Details: details,
+	}
+}
+
+var (
+	prioDetail = resources.Detail{Op: "~", Target: `property "Prio"`, Property: "Prio"}
+	nameDetail = resources.Detail{Op: "~", Target: "name", Field: "name"}
+)
+
+func TestRunWritesOnlyThePropertiesThePlanShows(t *testing.T) {
+	dir := t.TempDir()
+	up := &fakeUpdater{remote: prioRemote()}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+
+	rep, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(rep.Updated) != 1 {
+		t.Fatalf("Updated = %v, want 1 ligne", rep.Updated)
+	}
+	body := string(up.dsBodies[0])
+	if !strings.Contains(body, "Prio") {
+		t.Errorf("payload = %s, want Prio", body)
+	}
+	if strings.Contains(body, "Notes") {
+		t.Errorf("payload = %s, want sans Notes : le plan ne la montre pas", body)
+	}
+	if up.dbBodies[0] != nil {
+		t.Errorf("dbBody = %s, want nil : aucun champ de database dans le plan", up.dbBodies[0])
+	}
+	if len(rep.Mismatches) != 0 {
+		t.Errorf("Mismatches = %v, want vide", rep.Mismatches)
+	}
+
+	// Le state est sauvé depuis la RELECTURE : l'id de propriété n'existe que là.
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if got := loaded.Databases["tasks"].Properties["Prio"].ID; got != "p1" {
+		t.Errorf("state Prio.ID = %q, want p1 (relu)", got)
+	}
+}
+
+// Review Focus #3 : un update qui ne touche qu'un champ n'appelle pas le data
+// source.
+func TestRunWritesOnlyTheDatabaseWhenNoPropertyChanges(t *testing.T) {
+	dir := t.TempDir()
+	target := &state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Tâches"}
+	up := &fakeUpdater{remote: resources.RemoteDatabase{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tâches", Found: true,
+	}}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", target, nameDetail)}}
+
+	if _, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(up.dbBodies) != 1 {
+		t.Fatalf("%d appel(s) Update, want 1", len(up.dbBodies))
+	}
+	if up.dsBodies[0] != nil {
+		t.Errorf("dsBody = %s, want nil", up.dsBodies[0])
+	}
+	if !strings.Contains(string(up.dbBodies[0]), "Tâches") {
+		t.Errorf("dbBody = %s, want le nouveau titre", up.dbBodies[0])
+	}
+}
+
+// L'équivalence « plan ≡ payload » a deux sens. Le test précédent couvre
+// l'inclusion : rien ne part qui ne soit dans le plan. Celui-ci couvre l'autre :
+// rien du plan ne reste au sol.
+func TestWriteSetCoversEveryDetail(t *testing.T) {
+	details := []resources.Detail{
+		{Op: "~", Target: "name", Field: "name"},
+		{Op: "~", Target: "icon", Field: "icon"},
+		{Op: "~", Target: `property "Prio"`, Property: "Prio"},
+		{Op: "-", Target: `option "Basse" (propriété "Prio")`, Property: "Prio"},
+		{Op: "+", Target: `property "Neuve"`, Property: "Neuve"},
+	}
+	fields, props := writeSet(details)
+
+	for _, d := range details {
+		switch {
+		case d.Field != "":
+			if !slices.Contains(fields, d.Field) {
+				t.Errorf("champ %q du plan absent du jeu d'écriture", d.Field)
+			}
+		case d.Property != "":
+			if !slices.Contains(props, d.Property) {
+				t.Errorf("propriété %q du plan absente du jeu d'écriture", d.Property)
+			}
+		default:
+			t.Errorf("détail %q sans Field ni Property : il ne peut pas être écrit", d.Target)
+		}
+	}
+	// Dédoublonné : "Prio" porte deux lignes, une seule écriture.
+	if len(props) != 2 {
+		t.Errorf("props = %v, want 2 (Prio dédoublonnée, Neuve)", props)
+	}
+}
+
+func TestRunSkipsAWithheldResourceWithoutCallingTheAPI(t *testing.T) {
+	dir := t.TempDir()
+	up := &fakeUpdater{}
+	c := updateChange("tasks", nil, prioDetail)
+	c.Withheld = "une option doit être migrée à la main"
+	p := &diff.Plan{Changes: []diff.Change{c}}
+
+	rep, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if up.calls() != 0 {
+		t.Error("un appel a eu lieu sur une ressource retenue")
+	}
+	if len(rep.Skipped) != 1 || rep.Skipped[0] != "database.tasks" {
+		t.Errorf("Skipped = %v, want [database.tasks]", rep.Skipped)
+	}
+}
+
+// Review Focus #2 : sans data_source_id, le PATCH viserait
+// "/v1/data_sources/", qui ne désigne rien. La cible vient toujours d'une
+// relecture fraîche : un id vide est un défaut interne, refusé avant tout appel.
+func TestRunRefusesAnUpdateWithoutADataSourceID(t *testing.T) {
+	dir := t.TempDir()
+	target := prioTarget()
+	target.DataSourceID = ""
+	up := &fakeUpdater{}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", target, prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
+	if err == nil {
+		t.Fatal("error = nil, want un refus avant tout appel")
+	}
+	if up.calls() != 0 {
+		t.Error("un appel a eu lieu malgré l'absence de data_source_id")
+	}
+	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}
+
+// La CLI ne branche l'Updater qu'à la tâche suivante : un update sans Updater
+// doit être un défaut nommé, pas un déréférencement nil.
+func TestRunRefusesAnUpdateWithoutAnUpdater(t *testing.T) {
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir()})
+	if err == nil {
+		t.Fatal("error = nil, want un défaut interne nommé")
+	}
+	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}
+
+// Le 404 du PATCH data source accuse le partage avec l'intégration, alors que la
+// cause peut être un ancêtre archivé. Sonder la database tranche.
+func TestRunDiagnosesAnArchivedAncestorOnA404(t *testing.T) {
+	up := &fakeUpdater{
+		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
+			Message: "Could not find data_source. Make sure the relevant pages and " +
+				"databases are shared with your integration"},
+		exists: true,
+	}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil, want une erreur diagnostiquée")
+	}
+	if up.probes != 1 {
+		t.Errorf("%d sonde(s), want 1", up.probes)
+	}
+	for _, want := range []string{"ancêtre", "corbeille", "restaurez la page parente", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+	for _, unwanted := range []string{"intégration", "integration"} {
+		if strings.Contains(err.Error(), unwanted) {
+			t.Errorf("erreur = %q, want SANS le conseil de partage, qui est faux ici", err)
+		}
+	}
+}
+
+func TestRunDiagnosesAVanishedDatabaseOnA404(t *testing.T) {
+	up := &fakeUpdater{
+		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
+			Message: "Could not find data_source"},
+		exists: false,
+	}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil, want une erreur diagnostiquée")
+	}
+	for _, want := range []string{"disparu", "partagée avec l'intégration", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "corbeille") {
+		t.Errorf("erreur = %q, want SANS le diagnostic d'ancêtre archivé", err)
+	}
+}
+
+// Si la sonde elle-même échoue, on ne tranche pas — mais on ne relaie pas
+// davantage le conseil de partage du 404, qui peut être faux.
+func TestRunFallsBackWhenTheProbeFails(t *testing.T) {
+	up := &fakeUpdater{
+		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
+			Message: "Make sure the relevant pages are shared with your integration"},
+		existsErr: errors.New("réseau coupé"),
+	}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil")
+	}
+	for _, want := range []string{"réseau coupé", "404", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "shared with your integration") {
+		t.Errorf("erreur = %q, want sans le texte brut du 404", err)
+	}
+}
+
+// Mesuré : sur un ancêtre archivé, le PATCH database échoue le premier, avec un
+// 400 qui nomme la cause. Le message dit le remède.
+func TestRunNamesAnArchivedAncestorOnTheDatabasePatch(t *testing.T) {
+	target := prioTarget()
+	up := &fakeUpdater{
+		err: &transport.APIError{Status: 400, NotionCode: "validation_error",
+			Message: "Can't edit page on block with an archived ancestor. You must " +
+				"unarchive the ancestor before editing page."},
+		dbFails: true,
+	}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", target, nameDetail, prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil")
+	}
+	for _, want := range []string{"restaurez la page parente", "rien n'a été écrit sur cette ressource"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}
+
+// Échec du second PATCH : le message nomme EXACTEMENT les champs écrits, dit
+// qu'aucune donnée n'est touchée, et liste ce qui était acquis avant.
+func TestRunNamesWhatPassedWhenTheSecondPatchFails(t *testing.T) {
+	dir := t.TempDir()
+	up := &fakeUpdater{
+		remote: prioRemote(),
+		err:    &transport.APIError{Status: 400, NotionCode: "validation_error", Message: "boom"},
+		failAt: 1,
+	}
+	other := prioTarget()
+	other.ID, other.DataSourceID = "db-2", "ds-2"
+	p := &diff.Plan{Changes: []diff.Change{
+		updateChange("tasks", prioTarget(), prioDetail),
+		updateChange("projects", other, nameDetail, prioDetail),
+	}}
+
+	rep, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
+	if err == nil {
+		t.Fatal("error = nil, want l'échec du second PATCH")
+	}
+	if len(rep.Updated) != 1 {
+		t.Errorf("Updated = %v, want la première modification acquise", rep.Updated)
+	}
+	msg := err.Error()
+	for _, want := range []string{"database.projects", "le nom", "aucune donnée", "database.tasks", "  → "} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("erreur = %q, want contenant %q", msg, want)
+		}
+	}
+	for _, unwanted := range []string{"icône", "description"} {
+		if strings.Contains(msg, unwanted) {
+			t.Errorf("erreur = %q : %q n'a pas été envoyé, il ne doit pas être nommé", msg, unwanted)
+		}
+	}
+}
+
+// Issue inconnue : arrêt net, sans enchaîner. `plan` suffit à voir le réel —
+// contrairement à la création, il n'y a pas d'identité à ré-adopter.
+func TestRunStopsOnAnUnknownOutcome(t *testing.T) {
+	up := &fakeUpdater{err: &transport.OutcomeUnknownError{Cause: errors.New("timeout")}}
+	other := prioTarget()
+	other.ID, other.DataSourceID = "db-2", "ds-2"
+	p := &diff.Plan{Changes: []diff.Change{
+		updateChange("tasks", prioTarget(), prioDetail),
+		updateChange("projects", other, prioDetail),
+	}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil")
+	}
+	if len(up.dbBodies) != 1 {
+		t.Errorf("%d appel(s) Update, want 1 : aucun enchaînement après une issue inconnue", len(up.dbBodies))
+	}
+	msg := err.Error()
+	for _, want := range []string{"issue inconnue", "notion-seed plan", "  → "} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("erreur = %q, want contenant %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "import") {
+		t.Errorf("erreur = %q, want sans import : il n'y a rien à ré-adopter", msg)
+	}
+}
+
+// Écrite mais pas relue : le state garde l'état d'avant, et l'erreur le dit.
+func TestRunReportsAnUpdateThatCouldNotBeReRead(t *testing.T) {
+	dir := t.TempDir()
+	up := &fakeUpdater{readErr: errors.New("relecture impossible")}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
+	snap := emptySnapshot()
+	snap.Databases["tasks"] = state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Avant"}
+
+	_, err := Run(context.Background(), p, snap, Options{Dir: dir, Updater: up})
+	if err == nil {
+		t.Fatal("error = nil")
+	}
+	if !strings.Contains(err.Error(), "relecture impossible") || !strings.Contains(err.Error(), "  → ") {
+		t.Errorf("erreur = %q", err)
+	}
+	if snap.Databases["tasks"].Name != "Avant" {
+		t.Error("le state a été écrit sans relecture")
 	}
 }
