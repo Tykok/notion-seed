@@ -29,13 +29,23 @@ type Result struct {
 	// chemin de la configuration vers l'API ne la contourne, et c'est ce qui
 	// rend impossible — plutôt que corrigée — une écriture non annoncée.
 	//
-	// Non nulle sur une création et sur un update. Sur un update, c'est
-	// `actual` auquel on applique les seuls changements déclarés — ce qui
-	// préserve les propriétés hors config — et elle porte les ids d'options
-	// distants (voir updateTarget). Une cible non nulle n'est donc PLUS à elle
-	// seule l'autorisation d'écrire : apply filtre aussi sur le Kind, et
-	// n'écrit aujourd'hui que les créations.
+	// Non nulle sur les chemins où il y a un état après écriture : la création et
+	// la mise à jour. Pour une mise à jour, c'est `actual` auquel on applique les
+	// SEULS changements déclarés — ce qui préserve les propriétés hors config, et
+	// ce qui fait porter à la cible les ids d'options distants.
+	//
+	// L'AUTORISATION d'écrire, elle, est portée par Withheld : une destruction
+	// n'a pas d'état après, donc elle ne pourrait pas être autorisée par une
+	// cible.
 	Target *state.Database
+
+	// Withheld dit POURQUOI cette ressource ne sera pas écrite, ou "" si elle
+	// peut l'être. C'est désormais l'autorisation d'écrire : `Target` dit ce
+	// qu'on écrit, `Withheld` dit si on a le droit.
+	//
+	// Une raison plutôt qu'un booléen : une ressource sautée sans motif renvoie
+	// l'utilisateur deviner, et notion-seed ne laisse jamais deviner.
+	Withheld string
 }
 
 // CompareDatabase compare les trois voies d'une database.
@@ -99,10 +109,36 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 
 	if len(res.Changeset.Details) > 0 {
 		res.Changeset.Kind = resources.KindUpdate
-		t := updateTarget(desired, applied, actual)
-		res.Target = &t
+		if res.Withheld = withheldReason(res.Changeset.Details); res.Withheld == "" {
+			t := updateTarget(desired, applied, actual)
+			res.Target = &t
+		}
 	}
 	return res
+}
+
+// withheldReason dit pourquoi une ressource ne peut pas être écrite, ou "" si
+// elle peut l'être.
+//
+// Une seule cause aujourd'hui, mesurée deux fois : une ligne `migration
+// requise` est inexprimable dans l'API. Un renommage d'option rend 200 sans
+// rien changer ; une couleur d'option rend 400 et fait échouer tout le PATCH.
+// Dans le premier cas, écrire inscrirait dans le state un nom que Notion ne
+// porte pas, et chaque run suivant afficherait une dérive fantôme.
+//
+// Ce n'est PAS un refus de sûreté : notion-seed ne refuse rien sur la foi d'une
+// classe, il mesure et il dit. C'est une limite de l'API, nommée comme telle,
+// avec sa procédure.
+func withheldReason(ds []resources.Detail) string {
+	for _, d := range ds {
+		if d.Class == change.ClassMigration {
+			return "une option doit être migrée à la main : l'API ne sait ni renommer " +
+				"une option ni changer sa couleur\n" +
+				"  → créez la nouvelle option dans Notion, déplacez-y les lignes " +
+				"comptées ci-dessus, retirez l'ancienne, puis relancez"
+		}
+	}
+	return ""
 }
 
 // updateTarget résout l'état exact qu'aura la database après écriture : c'est

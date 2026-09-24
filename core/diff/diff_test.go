@@ -11,6 +11,57 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
+// Un changement retenu par CompareDatabase (migration inexprimable) doit
+// porter son motif jusqu'au Change du plan : c'est lui que cli/apply lit pour
+// dire pourquoi il saute la ressource, sans redescendre dans Details.
+func TestPlanCarriesWithheldOnTheChange(t *testing.T) {
+	cfg := &config.Config{
+		Databases: []config.Database{{
+			Key: "tasks", Name: "Tasks",
+			Properties: map[string]config.Property{
+				"Statut": {Type: "status", Options: []config.Option{
+					// Même key, nom changé : l'API ne sait pas renommer.
+					{Key: "done", Name: "Terminé", Group: "Complete"},
+				}},
+			},
+		}},
+	}
+	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
+		"tasks": {ID: "db1", DataSourceID: "ds1", Name: "Tasks",
+			Properties: map[string]state.Property{
+				"Statut": {ID: "p1", Type: "status", Options: []state.Option{
+					{ID: "o-done", Key: "done", Name: "Fait", Color: "green", Group: "Complete"},
+				}},
+			}},
+	}}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{
+		ID: "db1", DataSourceID: "ds1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {ID: "p1", Type: "status", Options: []state.Option{
+				{ID: "o-done", Name: "Fait", Color: "green", Group: "Complete"},
+			}},
+		},
+	}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatalf("Compute() error = %v", err)
+	}
+	for _, c := range p.Changes {
+		if c.Resource != "database.tasks" {
+			continue
+		}
+		if c.Withheld == "" {
+			t.Fatal("Change.Withheld vide : cli/apply ne peut pas dire pourquoi il saute la ressource")
+		}
+		if c.Target != nil {
+			t.Error("Change.Target non nulle sur une ressource retenue")
+		}
+		return
+	}
+	t.Fatal("aucun changement pour database.tasks")
+}
+
 // Une database retirée du YAML et déjà supprimée à la main dans Notion ne doit
 // plus être annoncée « à détruire » : il n'y a plus rien à détruire. Ce qui
 // reste est une entrée de state obsolète, dont le nettoyage n'écrit rien dans
