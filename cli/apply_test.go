@@ -444,3 +444,40 @@ func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
 	}
 }
+
+// La ligne Impact agrège TOUT le plan. apply n'écrivant que les créations, la
+// lui faire afficher lui ferait annoncer une destruction qu'il ne fera pas —
+// contredite quatre lignes plus bas par sa propre section « Non appliqué ».
+// apply annonce lui-même ce qu'il va écrire, juste avant la confirmation.
+func TestApplyDoesNotAnnounceAnImpactItWillNotCause(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// La database sort du YAML : elle devient orpheline et existe toujours dans
+	// Notion, donc le plan porte une destruction qu'apply ne sait pas écrire.
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte("databases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	planOut, perr := runCmd(t, "plan", "--dir", dir)
+	if perr != nil {
+		t.Fatalf("plan: %v\n%s", perr, planOut)
+	}
+	if !strings.Contains(planOut, "Impact :") {
+		t.Fatalf("montage du test faux : le plan doit porter une ligne Impact\n%s", planOut)
+	}
+
+	applyOut, _ := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if strings.Contains(applyOut, "Impact :") {
+		t.Errorf("apply annonce un impact qu'il ne causera pas:\n%s", applyOut)
+	}
+	if !strings.Contains(applyOut, "Non appliqué par cette version") {
+		t.Errorf("apply doit toujours nommer ce qu'il ne sait pas écrire:\n%s", applyOut)
+	}
+}
