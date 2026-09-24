@@ -48,8 +48,8 @@ func newApplyCmd() *cobra.Command {
 			"state dont la ressource a déjà disparu. Tout le reste est nommé sous\n" +
 			"« Non appliqué » plutôt que tenté à moitié, et apply sort en code non nul\n" +
 			"tant qu'il reste du travail.\n\n" +
-			"La confirmation ne lève aucun garde-fou : un plan bloqué par lifecycle\n" +
-			"n'atteint jamais le prompt.",
+			"La confirmation ne lève aucun blocage : un plan bloqué par une ressource\n" +
+			"gérée que Notion ne connaît plus n'atteint jamais le prompt.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runApply(cmd, opts, autoApprove)

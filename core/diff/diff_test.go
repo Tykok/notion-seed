@@ -99,10 +99,10 @@ func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
 	}
 }
 
-// prevent_destroy protège la ressource la mieux gardée du fichier. La voir
-// disparaître hors de notion-seed est le fait le plus grave que le plan puisse
-// constater : on bloque au lieu de nettoyer en silence.
-func TestComputeBlocksWhenProtectedOrphanVanished(t *testing.T) {
+// prevent_destroy ne bloque plus le nettoyage d'une orpheline disparue hors de
+// notion-seed : l'entrée de state obsolète est nettoyée dans tous les cas, et
+// c'est le rendu de StaleState qui porte la mention, pas un blocage.
+func TestComputeMovesProtectedOrphanToStaleState(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
@@ -114,17 +114,80 @@ func TestComputeBlocksWhenProtectedOrphanVanished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if p.Blocked {
+		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
+	}
+	if got := p.StaleState; len(got) != 1 || got[0] != "database.tasks" {
+		t.Errorf("StaleState = %v, want [database.tasks]", got)
+	}
+}
+
+// prevent_destroy ne bloque plus : il est noté sur la ressource, et c'est au
+// rendu de le dire fort.
+func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db-1", Name: "Tasks"}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Blocked {
+		t.Errorf("Blocked = true, want false : plus rien ne bloque sur une classe : %v", p.BlockedReasons)
+	}
+	if p.ToDestroy != 1 {
+		t.Errorf("ToDestroy = %d, want 1", p.ToDestroy)
+	}
+	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "prevent_destroy" {
+		t.Errorf("Acknowledged = %v, want [prevent_destroy]", got)
+	}
+}
+
+// allow_data_loss devient un accusé de lecture : sa présence est notée, son
+// absence ne bloque plus rien.
+func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{AllowDataLoss: []string{"database.tasks"}}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db-1", Name: "Tasks"}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Blocked {
+		t.Errorf("Blocked = true, want false")
+	}
+	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "allow_data_loss" {
+		t.Errorf("Acknowledged = %v, want [allow_data_loss]", got)
+	}
+}
+
+// Blocked survit pour ce qui n'est PAS une classification de risque : une
+// ressource que le state ancre et que Notion ne connaît plus rend le plan
+// incalculable, ce qui reste une erreur.
+func TestComputeStillBlocksWhenAManagedResourceVanished(t *testing.T) {
+	cfg := &config.Config{Databases: []config.Database{
+		{Key: "tasks", Name: "Tasks", Properties: map[string]config.Property{"Name": {Type: "title"}}},
+	}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !p.Blocked {
-		t.Fatal("Blocked = false, want true")
-	}
-	if len(p.StaleState) != 0 {
-		t.Errorf("StaleState = %v, want vide : rien ne doit être nettoyé sous prevent_destroy", p.StaleState)
-	}
-	joined := strings.Join(p.BlockedReasons, "\n")
-	for _, want := range []string{"prevent_destroy", "hors de notion-seed", "  → "} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("raisons =\n%s\nil manque %q", joined, want)
-		}
+		t.Error("Blocked = false : une ressource gérée disparue reste une erreur")
 	}
 }
 
@@ -368,56 +431,5 @@ func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 	}
 	if p.ToChange != 2 {
 		t.Errorf("ToChange = %d, want 2 : les deux retraits d'option sont mesurés, pas refusés", p.ToChange)
-	}
-}
-
-// Deux sous-cas : le premier couvre la ressource par prevent_destroy ET
-// allow_data_loss à la fois, ce qui ne distingue rien — avec allow_data_loss
-// qui couvre déjà la ressource, le case destructif de `absorb` ne matcherait
-// de toute façon jamais, quel que soit l'ordre des `case` dans le switch, donc
-// ce sous-cas seul passerait même si prevent_destroy et destructif étaient
-// permutés. Le second sous-cas couvre la ressource par prevent_destroy SEUL :
-// sous l'ordre inversé, le case destructif matcherait à la place (puisque
-// allow_data_loss ne couvre pas la ressource) et produirait le message
-// « changement destructif … allow_data_loss » sans jamais nommer
-// prevent_destroy — c'est ce sous-cas qui distingue vraiment les deux.
-func TestComputePreventDestroyBeatsAllowDataLoss(t *testing.T) {
-	tests := []struct {
-		name      string
-		lifecycle config.Lifecycle
-	}{
-		{
-			name: "prevent_destroy et allow_data_loss couvrent la même ressource",
-			lifecycle: config.Lifecycle{
-				PreventDestroy: []string{"database.tasks"},
-				AllowDataLoss:  []string{"database.tasks"},
-			},
-		},
-		{
-			name: "prevent_destroy seul, sans allow_data_loss",
-			lifecycle: config.Lifecycle{
-				PreventDestroy: []string{"database.tasks"},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{Lifecycle: tt.lifecycle}
-			applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
-				"tasks": {ID: "db1", Name: "Tasks"},
-			}}
-			actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db1", Name: "Tasks"}}}
-
-			p, err := Compute(cfg, applied, actual)
-			if err != nil {
-				t.Fatalf("Compute() error = %v", err)
-			}
-			if !p.Blocked {
-				t.Error("prevent_destroy doit bloquer la destruction malgré allow_data_loss")
-			}
-			if !strings.Contains(strings.Join(p.BlockedReasons, " "), "prevent_destroy") {
-				t.Errorf("la raison doit nommer prevent_destroy: %v", p.BlockedReasons)
-			}
-		})
 	}
 }
