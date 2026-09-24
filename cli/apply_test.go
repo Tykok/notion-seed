@@ -106,6 +106,109 @@ func TestApplyCreatesDatabaseAndWritesState(t *testing.T) {
 	}
 }
 
+// apply est souvent la PREMIÈRE commande qui écrit le state. S'il n'y inscrit
+// pas le workspace, checkWorkspaceMatch reste désarmé pour toujours : un state
+// sans workspace_id est traité comme « on ne peut pas vérifier ». Le projet
+// serait alors jouable contre n'importe quel workspace, et un 404 venu du
+// mauvais workspace ferait jeter une identité parfaitement valide.
+func TestApplyRecordsTheWorkspaceInTheStateItCreates(t *testing.T) {
+	withFakeNtn(t, "authenticated_create")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": oneDatabase,
+	})
+
+	if out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve"); err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	snap, err := state.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// L'id que le faux ntn annonce dans whoami.
+	if snap.WorkspaceID != "33333333-3333-4333-8333-333333333333" {
+		t.Errorf("WorkspaceID = %q, want celui sur lequel ntn est authentifié", snap.WorkspaceID)
+	}
+}
+
+// Une destruction en attente ne doit pas être présentée comme une modification
+// de propriétés : c'est l'opération la plus destructrice du produit, et le
+// message enverrait l'utilisateur faire la mauvaise chose.
+func TestApplyNamesAPendingDestroyAsADestroy(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// La database sort du YAML : elle devient orpheline, et existe toujours dans
+	// Notion. allow_data_loss évite que le plan soit bloqué avant la section.
+	writeConfigDir(t, map[string]string{})
+	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
+		[]byte(workspaceYAML+"lifecycle:\n  allow_data_loss:\n    - database.tasks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte("databases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
+	}
+	if !strings.Contains(out, "Non appliqué par cette version") {
+		t.Fatalf("sortie:\n%s", out)
+	}
+	if strings.Contains(out, "modifications de propriétés arrivent") {
+		t.Errorf("une destruction est annoncée comme une modification de propriétés:\n%s", out)
+	}
+	if !strings.Contains(out, "destruction") {
+		t.Errorf("la section ne dit pas qu'une destruction est en attente:\n%s", out)
+	}
+}
+
+// Le nettoyage d'une entrée de state obsolète n'écrit RIEN dans Notion. La
+// confirmation ne doit pas annoncer le contraire : c'est le seul moment où
+// l'utilisateur décide, sur la foi de ce qui est écrit à l'écran.
+func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// La database sort du YAML ET disparaît de Notion : entrée obsolète pure.
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte("databases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withFakeNtn(t, "authenticated_database_404")
+	forceInteractive(t)
+
+	out, err := runCmdWithStdin(t, "apply\n", "apply", "--dir", dir)
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	if strings.Contains(out, "vont partir dans la page") {
+		t.Errorf("la confirmation annonce une écriture Notion pour un nettoyage local:\n%s", out)
+	}
+	if !strings.Contains(out, "state") {
+		t.Errorf("la confirmation ne dit pas ce qui va être touché:\n%s", out)
+	}
+	snap, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, ok := snap.Databases["tasks"]; ok {
+		t.Error("l'entrée obsolète n'a pas été retirée")
+	}
+}
+
 // Un plan bloqué gagne sur --auto-approve : le consentement est déclaratif, et
 // la confirmation ne lève rien. Aucune écriture.
 func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {

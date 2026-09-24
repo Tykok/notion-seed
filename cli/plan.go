@@ -77,6 +77,11 @@ type prepared struct {
 	plan *diff.Plan
 	// tr est nil sous --skip-preflight : aucun appel n'a été émis.
 	tr transport.Transport
+	// workspaceID est celui sur lequel ntn est authentifié. Vide sous
+	// --skip-preflight, où aucun whoami n'a été fait. apply l'inscrit dans le
+	// state qu'il crée : sans lui, checkWorkspaceMatch reste désarmé à vie pour
+	// un projet amorcé par apply plutôt que par import.
+	workspaceID string
 }
 
 func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
@@ -119,6 +124,7 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 		if err := checkWorkspaceMatch(snap, info.WorkspaceID); err != nil {
 			return nil, err
 		}
+		out.workspaceID = info.WorkspaceID
 
 		out.tr = newTransport(cmd, opts)
 		if err := checkParentPage(ctx, out.tr, cfg.Workspace.ParentPageID, opts.ratePerSec); err != nil {
