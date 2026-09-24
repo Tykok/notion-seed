@@ -146,6 +146,85 @@ func multiSel(opts ...state.Option) state.Property {
 	return state.Property{ID: "p1", Type: "multi_select", Options: opts}
 }
 
+// fixtureTasks rend un triplet qui produit au moins une ligne de chaque forme :
+// un champ de database, une propriété neuve, un changement de type, une option
+// neuve, une option retirée. Les tests de ce fichier s'en servent plutôt que de
+// remonter un triplet chacun.
+func fixtureTasks() (desired, applied, actual state.Database) {
+	actual = state.Database{
+		ID: "db-1", DataSourceID: "ds-1",
+		Name: "Tasks", Description: "ancienne", Icon: "🔵",
+		Properties: map[string]state.Property{
+			"Name":  {ID: "title", Type: "title"},
+			"Notes": {ID: "n1", Type: "rich_text"},
+			"Libre": {ID: "l1", Type: "rich_text"},
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Name: "Basse", Color: "blue"},
+			}},
+		},
+	}
+	applied = state.Database{
+		ID: "db-1", DataSourceID: "ds-1",
+		Name: "Tasks", Description: "ancienne", Icon: "🔵",
+		Properties: map[string]state.Property{
+			"Name":  {ID: "title", Type: "title"},
+			"Notes": {ID: "n1", Type: "rich_text"},
+			"Libre": {ID: "l1", Type: "rich_text"},
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Key: "haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Key: "basse", Name: "Basse", Color: "blue"},
+			}},
+		},
+	}
+	desired = state.Database{
+		Name: "Tâches", Description: "nouvelle", Icon: "🟢",
+		Properties: map[string]state.Property{
+			"Name":  {Type: "title"},
+			"Notes": {Type: "number", Format: "number"},
+			"Neuve": {Type: "rich_text"},
+			"Prio": {Type: "select", Options: []state.Option{
+				{Key: "haute", Name: "Haute", Color: "red"},
+				{Key: "moyenne", Name: "Moyenne", Color: "orange"},
+			}},
+		},
+	}
+	return desired, applied, actual
+}
+
+func TestUpdateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if res.Changeset.Kind != resources.KindUpdate {
+		t.Fatalf("Kind = %v, want KindUpdate", res.Changeset.Kind)
+	}
+	if len(res.Changeset.Details) == 0 {
+		t.Fatal("aucun détail : la fixture ne teste rien")
+	}
+	for _, d := range res.Changeset.Details {
+		hasProp, hasField := d.Property != "", d.Field != ""
+		if hasProp == hasField {
+			t.Errorf("détail %q %q : Property=%q Field=%q — il en faut exactement un",
+				d.Op, d.Target, d.Property, d.Field)
+		}
+	}
+}
+
+func TestCreateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
+	desired, _, _ := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, nil, nil)
+	if res.Changeset.Kind != resources.KindCreate {
+		t.Fatalf("Kind = %v, want KindCreate", res.Changeset.Kind)
+	}
+	for _, d := range res.Changeset.Details {
+		hasProp, hasField := d.Property != "", d.Field != ""
+		if hasProp == hasField {
+			t.Errorf("détail %q %q : Property=%q Field=%q — il en faut exactement un",
+				d.Op, d.Target, d.Property, d.Field)
+		}
+	}
+}
+
 func TestCompareDatabase(t *testing.T) {
 	cases := []struct {
 		name      string
