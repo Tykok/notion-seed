@@ -25,16 +25,18 @@ remplacée par une autre.
 
 ## État actuel
 
-MVP 1 : lecture et adoption. `import` inscrit une database existante dans le
-state ; `plan` et `diff` comparent la configuration, le state et le réel, et
-nomment la dérive. Rien n'est jamais écrit dans Notion.
+MVP 2 : première écriture. `apply` crée les databases déclarées et absentes de
+Notion, et inscrit leur identité dans le state après chaque création. Les
+modifications de propriétés et les destructions ne sont pas encore écrites :
+elles sont affichées, nommées, et `apply` sort en code non nul tant qu'elles
+restent.
 
 | | |
 |---|---|
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
-| fichier de state | `notion-seed.state.json`, écrit par `import` seul |
+| `apply` | créations uniquement — voir [Appliquer](#appliquer) |
+| fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
 | `lifecycle.prevent_destroy` / `allow_data_loss` | appliqués au plan |
-| `apply` | pas encore |
 
 ## Prérequis
 
@@ -156,6 +158,13 @@ databases:
             group: Complete
 ```
 
+`group` est **obligatoire** sur chaque option de `status`, et n'accepte que
+`To-do`, `In progress` ou `Complete`. notion-seed ne choisit pas de groupe à
+votre place : une option envoyée sans `group` est rangée par l'API dans le
+premier groupe, sans erreur — donc une écriture que le plan n'aurait pas
+annoncée. Sur les autres types, `group` est refusé, comme `format` hors
+`number`.
+
 La `key` est ce qui ancre l'identité d'une option à travers un renommage : sans
 elle, une option renommée dans le YAML ressort en retrait suivi d'un ajout —
 `destructif` ou `réécriture silencieuse` selon le type — faute de pouvoir la
@@ -177,9 +186,9 @@ C'est ce fichier qui permet de distinguer « le YAML a changé » de « quelqu'u
 changé Notion à la main ». Le second cas s'affiche sous la section `Dérive
 détectée hors de notion-seed`, avant le plan qui ramène le réel vers le YAML.
 
-Seule la commande `import` l'écrit. `plan` et `diff` lisent le réel mais n'y
-touchent jamais : un `plan` en CI ne peut donc pas produire un diff git
-surprise, et une dérive ne s'efface pas d'elle-même.
+Seules les commandes `import` et `apply` l'écrivent. `plan` et `diff` lisent le
+réel mais n'y touchent jamais : un `plan` en CI ne peut donc pas produire un
+diff git surprise, et une dérive ne s'efface pas d'elle-même.
 
 ## Adopter une database existante
 
@@ -214,6 +223,69 @@ de la fusionner. Le plan la fait donc ressortir en retrait, `destructif` pour
 Autrement dit, « non déclaré = non touché » est vrai pour les propriétés et faux
 pour les options. C'est exactement le genre d'écart que cet outil existe pour
 rendre visible.
+
+## Appliquer
+
+```sh
+notion-seed apply
+```
+
+`apply` recalcule le plan, l'affiche, demande confirmation, puis écrit. Il ne
+prend aucun argument : il n'y a pas de fichier de plan à rejouer, donc pas de
+plan périmé à appliquer par mégarde.
+
+### Ce qu'il écrit
+
+Les **créations**. Une database déclarée dans le YAML et absente du state est
+créée dans la page parente, relue, puis inscrite dans le state. Le state est
+sauvegardé après *chaque* création : une interruption laisse un fichier
+exactement vrai, jamais une database créée sans ancre — donc jamais un doublon
+au run suivant.
+
+La relecture n'est pas du zèle. Elle rapporte les ids d'options, sans lesquels
+le state est aveugle à la dérive, et elle confronte le réel à ce qui avait été
+annoncé. Si l'API n'a pas écrit ce que le plan promettait, `apply` le dit — sur
+sa propre écriture.
+
+Il retire aussi les **entrées de state obsolètes** : une ressource que le YAML
+ne déclare plus et qui a déjà été supprimée dans Notion. C'est un nettoyage
+local, rien n'est écrit dans Notion.
+
+### Ce qu'il n'écrit pas encore
+
+Les modifications de propriétés et les destructions. Elles ressortent sous
+`Non appliqué par cette version`, et `apply` sort en code non nul tant qu'il
+reste du travail — un apply qui ne converge pas doit être bruyant en CI.
+
+Une ressource est entièrement écrite ou pas touchée du tout. Il n'y a pas
+d'exécution partielle silencieuse.
+
+### La confirmation
+
+Le mot `apply`, tapé en entier. Elle ne lève aucun garde-fou : un plan bloqué
+par `lifecycle` ou par une réécriture silencieuse n'atteint jamais le prompt. Le
+consentement se déclare dans `workspace.yaml`, où il se relit en revue — pas
+devant un terminal, où il ne survit ni à un pipeline ni à une touche entrée.
+
+Hors terminal, `apply` exige `--auto-approve` plutôt que de s'exécuter parce que
+personne ne répondait.
+
+| Flag | Défaut | Rôle |
+|---|---|---|
+| `--auto-approve` | `false` | applique sans demander confirmation (mode CI) |
+
+`apply` partage `--dir`, `--rate` et `--burst` avec `plan`, et refuse
+`--skip-preflight` : écrire hors ligne n'a pas de sens.
+
+### En cas d'échec
+
+Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
+personne n'a demandée. Ce qui a été créé reste créé, et reste dans le state.
+
+Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
+a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
+database, la page parente et la marche à suivre : vérifier dans Notion, puis
+`notion-seed import` si elle existe.
 
 ## Sortie
 
