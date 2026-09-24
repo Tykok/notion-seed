@@ -1,27 +1,50 @@
 # notion-seed
 
-Déclare la structure d'un workspace Notion en YAML, et refuse par défaut les
-changements que l'API applique sans broncher mais qu'on ne voulait pas.
+Déclare la structure d'un workspace Notion en YAML, et mesure contre l'API, en
+nombre de lignes, ce que chaque changement va coûter à vos données.
 
 ## Pourquoi
 
 Déclarer un workspace Notion en fichiers n'est pas le problème difficile. Le
-problème difficile, c'est ce que l'API fait quand la déclaration change.
+problème difficile, c'est de savoir ce que l'API va faire de vos données quand
+la déclaration change.
 
-Trois comportements mesurés contre l'API, qu'un outil qui se contente
-d'envoyer la requête ne vous signale pas :
+Quatre comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
+la requête ne vous signale pas :
 
-| Changement | Ce que fait l'API | Classe |
-|---|---|---|
-| Renommer une option de `select` | Répond `200`, ne change rien | `migration requise` |
-| Retirer une option de `select` / `multi_select` | Perd la valeur des lignes concernées | `destructif` |
-| Retirer une option de `status` | **Réassigne les lignes à l'option par défaut**, sans erreur ni avertissement | `réécriture silencieuse` |
+| Changement | Ce que fait l'API |
+|---|---|
+| Renommer une option (avec son id) | Répond `200`, ne change rien |
+| Retirer une option de `select` / `multi_select` | Les lignes concernées passent à vide |
+| Retirer une option de `status` | **Réassigne les lignes à une autre option**, sans erreur |
+| `multi_select` → `select` | **Ne garde qu'une valeur** sur les lignes qui en portaient plusieurs |
 
-Le dernier cas est celui qui justifie l'outil. La donnée n'est pas perdue :
-elle est remplacée par une valeur plausible et fausse, indistinguable après
-coup. `notion-seed` bloque le plan dessus, et `allow_data_loss` ne le débloque
-pas — consentir à perdre une donnée n'est pas consentir à ce qu'elle soit
-remplacée par une autre.
+Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies.
+
+Les deux derniers sont ceux qui justifient l'outil : la donnée n'est pas perdue,
+elle est remplacée par une valeur plausible et fausse, indistinguable après coup.
+
+`notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
+de lignes sont concernées :
+
+```
+  ~ database.tasks  [réécriture silencieuse]
+      - option "Annulé" (propriété "Statut")  [réécriture silencieuse]
+          → 47 lignes seront réassignées à une autre option, sans trace.
+      - option "Legacy" (propriété "Priorité")
+          → 0 ligne concernée.
+
+Impact : 47 valeurs réassignées sans trace.
+```
+
+Une option que personne n'utilise ne coûte rien à retirer, quel que soit son
+type : c'est ce qu'un refus par principe ne savait pas voir, et pourquoi il a
+été remplacé par une mesure. Ce qui n'a pas pu être compté — hors ligne, ou
+quand la requête échoue — ressort en `impact inconnu`, jamais en « rien à
+perdre ».
+
+Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
+appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
 
 ## État actuel
 
@@ -36,7 +59,8 @@ restent.
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
 | `apply` | créations uniquement — voir [Appliquer](#appliquer) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | appliqués au plan |
+| `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
+| `--fail-on` | le garde-fou de CI — voir [En CI](#en-ci) |
 
 ## Prérequis
 
@@ -124,7 +148,7 @@ Un dossier, un fichier de workspace, un fichier YAML par database :
 `workspace.yaml` porte les sections globales — `version`, `workspace`,
 `lifecycle`. Un fichier de `databases/` ne déclare que des databases : sans
 cette règle, un fichier quelconque pourrait détourner la cible d'écriture ou
-effacer un garde-fou, et le dernier chargé gagnerait.
+effacer une déclaration, et le dernier chargé gagnerait.
 
 ```yaml
 # workspace.yaml
@@ -174,10 +198,30 @@ annoncée. Sur les autres types, `group` est refusé, comme `format` hors
 
 La `key` est ce qui ancre l'identité d'une option à travers un renommage : sans
 elle, une option renommée dans le YAML ressort en retrait suivi d'un ajout —
-`destructif` ou `réécriture silencieuse` selon le type — faute de pouvoir la
-suivre à travers le changement de nom.
+`destructif` ou `réécriture silencieuse` selon le type et le nombre de lignes
+concernées — faute de pouvoir la suivre à travers le changement de nom.
 
 Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
+
+### `lifecycle` — des accusés de lecture
+
+`prevent_destroy` et `allow_data_loss` ne bloquent **plus rien**. Malgré son
+nom, `prevent_destroy` n'empêche pas la destruction : ces deux clés ne sont que
+des accusés de lecture, affichés sous la ressource qu'elles nomment.
+
+```
+  - database.archive  [destructif]
+      → déclarée dans lifecycle.prevent_destroy.
+```
+
+Elles disent « je sais ce que cette ressource porte », et rien de plus. C'est
+écrit noir sur blanc parce qu'une clé nommée `prevent_destroy` qu'on croirait
+bloquante serait un piège : vous compteriez sur elle, et elle ne vous
+retiendrait pas.
+
+Ce qui arrête une commande, désormais, c'est ce que vous demandez dans votre
+workflow : [`--fail-on`](#en-ci). Ce qui informe, c'est la mesure. Ce qui
+décide, c'est vous.
 
 ## State
 
@@ -224,8 +268,9 @@ toucher.
 
 Une **option** présente dans Notion et absente du YAML, elle, sera détruite dès
 qu'on écrit sa propriété : l'API remplace la liste entière des options au lieu
-de la fusionner. Le plan la fait donc ressortir en retrait, `destructif` pour
-`select` et `multi_select`, `réécriture silencieuse` pour `status`.
+de la fusionner. Le plan la fait donc ressortir en retrait, avec le nombre de
+lignes qui la portent : `destructif` pour `select` et `multi_select`,
+`réécriture silencieuse` pour `status` — et `sûr` si ce nombre est nul.
 
 Autrement dit, « non déclaré = non touché » est vrai pour les propriétés et faux
 pour les options. C'est exactement le genre d'écart que cet outil existe pour
@@ -269,10 +314,10 @@ d'exécution partielle silencieuse.
 
 ### La confirmation
 
-Le mot `apply`, tapé en entier. Elle ne lève aucun garde-fou : un plan bloqué
-par `lifecycle` ou par une réécriture silencieuse n'atteint jamais le prompt. Le
-consentement se déclare dans `workspace.yaml`, où il se relit en revue — pas
-devant un terminal, où il ne survit ni à un pipeline ni à une touche entrée.
+Le mot `apply`, tapé en entier, après le plan et son impact mesuré. Elle ne
+lève rien de ce qui arrête la commande : un plan bloqué — une ressource gérée
+que Notion ne connaît plus — ou une classe refusée par `--fail-on` n'atteint
+jamais le prompt.
 
 Hors terminal, `apply` exige `--auto-approve` plutôt que de s'exécuter parce que
 personne ne répondait.
@@ -281,8 +326,9 @@ personne ne répondait.
 |---|---|---|
 | `--auto-approve` | `false` | applique sans demander confirmation (mode CI) |
 
-`apply` partage `--dir`, `--rate` et `--burst` avec `plan`, et refuse
-`--skip-preflight` : écrire hors ligne n'a pas de sens.
+`apply` partage `--dir`, `--rate`, `--burst` et `--fail-on` avec `plan`, et
+refuse `--skip-preflight` : écrire hors ligne n'a pas de sens. `--fail-on` y
+est vérifié **avant** la confirmation et avant la moindre écriture.
 
 ### En cas d'échec
 
@@ -313,7 +359,9 @@ Texte brut, sans couleur : la sortie doit rester lisible dans un pipe et en
 CI. Le plan part sur stdout, les attentes de retry sur stderr — stdout ne
 porte que le plan, pour qu'il reste identique entre deux runs.
 
-Un plan bloqué sort en code non nul.
+Un plan bloqué sort en code non nul — une ressource gérée que Notion ne connaît
+plus, par exemple. Le coût mesuré, lui, ne fait sortir en erreur que si vous
+l'avez demandé avec [`--fail-on`](#en-ci).
 
 ## Flags de `plan` et `diff`
 
@@ -323,13 +371,54 @@ Un plan bloqué sort en code non nul.
 | `--skip-preflight` | `false` | mode entièrement hors ligne : ni vérification de `ntn`, ni vérification de la page parente. Valide la configuration et rend le plan sans aucun appel réseau — les ressources déjà importées ne sont pas comparées au réel dans ce mode, et ressortent sous `Non comparé` plutôt que sous `Aucun changement` |
 | `--rate` | `5` | plafond d'appels API par seconde |
 | `--burst` | `10` | appels tolérés en rafale |
+| `--fail-on` | vide | classes de changement qui font sortir en code non nul — voir [En CI](#en-ci). Vide : rien ne fait échouer |
 
-`import` prend `--dir`, `--rate` et `--burst`, mais pas `--skip-preflight` :
-la commande lit l'état réel, elle n'a aucun sens hors ligne.
+`import` prend `--dir`, `--rate` et `--burst`, mais refuse `--skip-preflight` —
+la commande lit l'état réel, elle n'a aucun sens hors ligne — et `--fail-on`,
+puisqu'elle ne calcule aucun plan.
 
 `diff` est aujourd'hui identique à `plan`, puisque `plan` n'écrit pas encore
 de state. Les deux restent distinctes pour que l'usage en CI soit stable le
 jour où `plan` y touchera.
+
+## En CI
+
+Par défaut, un plan qui coûte cher s'affiche et sort en `0` : notion-seed
+mesure, il ne décide pas. `--fail-on` énumère les classes sur lesquelles
+*votre* workflow, lui, veut s'arrêter.
+
+```sh
+notion-seed diff --fail-on=silent-rewrite,destructive
+```
+
+| Valeur | Ce qu'elle attrape |
+|---|---|
+| `destructive` | une donnée est perdue, sans qu'aucune fausse valeur soit écrite |
+| `silent-rewrite` | une donnée est remplacée par une autre, sans trace |
+| `unknown` | l'impact n'a pas pu être mesuré : type hors table, comptage en échec, ou hors ligne |
+| `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |
+
+Quatre choses à savoir :
+
+- La liste est **énumérée, pas un seuil**. `sûr`, `destructif` et `réécriture
+  silencieuse` forment bien une échelle, mais `impact inconnu` n'y a pas de
+  place : un changement non mesuré peut se révéler anodin comme catastrophique.
+  Demander `destructive` ne demande donc pas « tout ce qui est au moins aussi
+  grave » — nommez chaque classe que vous voulez attraper.
+- Une valeur inconnue — une faute de frappe dans un nom de classe — est refusée
+  **avant le moindre appel réseau**, et le message liste les valeurs acceptées.
+  Sinon une CI mal configurée passerait au vert en croyant se protéger, ce qui
+  est le pire mode d'échec possible pour ce flag.
+- Le plan est **rendu quand même** avant la sortie en erreur : le code de retour
+  dit qu'il faut regarder, la sortie dit quoi.
+- Le déclenchement se fait sur les lignes de détail, avec leur classe mesurée.
+  Une option que personne n'utilise est classée `sûr` et n'attrape rien, même
+  sur une propriété `status` — c'est tout l'intérêt d'avoir compté.
+
+`--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
+Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne
+qui aurait pu coûter ressort en `impact inconnu` — un `--fail-on=destructive`
+n'y attrape donc plus rien, alors que `--fail-on=unknown` les attrape toutes.
 
 ## Développement
 

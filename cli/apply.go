@@ -97,6 +97,14 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 			"  → chaque blocage est détaillé ci-dessus, avec ce qui le lève")
 	}
 
+	// --fail-on avant toute écriture, et avant la confirmation : la CI qui écrit
+	// est celle qui a le plus besoin du garde-fou qu'elle a choisi. Le flag vient
+	// de planOptions, donc il est affiché dans l'aide d'apply — l'accepter puis
+	// l'ignorer serait pire que ne pas l'offrir.
+	if err := checkFailOn(prep.plan, opts.failOn); err != nil {
+		return err
+	}
+
 	if toCreate == 0 && toClean == 0 && len(skipped) == 0 {
 		// Plan convergé. Un prompt de cérémonie sur un plan vide apprendrait à
 		// taper « apply » sans lire.
