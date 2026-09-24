@@ -192,6 +192,49 @@ func fixtureTasks() (desired, applied, actual state.Database) {
 	return desired, applied, actual
 }
 
+func TestPlanLinesComparesIcon(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	var found *resources.Detail
+	for i, d := range res.Changeset.Details {
+		if d.Field == "icon" {
+			found = &res.Changeset.Details[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("aucune ligne d'icône alors que 🔵 → 🟢")
+	}
+	if found.Op != "~" {
+		t.Errorf("Op = %q, want %q", found.Op, "~")
+	}
+}
+
+// Même garde de non-vacuité que pour le nom : une icône que le YAML ne déclare
+// pas ne doit produire aucune ligne.
+func TestPlanLinesIgnoresUndeclaredIcon(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Icon = ""
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	for _, d := range res.Changeset.Details {
+		if d.Field == "icon" {
+			t.Errorf("ligne d'icône %q alors que le YAML n'en déclare pas", d.Target)
+		}
+	}
+}
+
+func TestDriftLinesNamesIconChangedOutside(t *testing.T) {
+	_, applied, actual := fixtureTasks()
+	actual.Icon = "🟣"
+	desired := applied // le YAML colle au dernier état appliqué
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	joined := strings.Join(res.Drift, "\n")
+	if !strings.Contains(joined, "icône") {
+		t.Errorf("dérive = %q, want une ligne nommant l'icône", joined)
+	}
+}
+
 func TestUpdateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)

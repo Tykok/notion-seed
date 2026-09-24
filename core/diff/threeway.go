@@ -180,6 +180,12 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		d.Note = fmt.Sprintf("%q → %q", actual.Description, desired.Description)
 		out = append(out, d)
 	}
+	if desired.Icon != "" && desired.Icon != actual.Icon {
+		d := resources.NewDetail("~", "icon", change.ClassSafe)
+		d.Field = "icon"
+		d.Note = fmt.Sprintf("%q → %q", actual.Icon, desired.Icon)
+		out = append(out, d)
+	}
 
 	for _, name := range sortedPropNames(desired.Properties) {
 		want := desired.Properties[name]
@@ -393,6 +399,12 @@ func driftLines(applied, actual *state.Database) []string {
 	if applied.Description != "" && applied.Description != actual.Description {
 		out = append(out, fmt.Sprintf(
 			"~ description %q → %q hors de notion-seed", applied.Description, actual.Description))
+	}
+	// Même garde de non-vacuité : un state qui n'a jamais capturé l'icône ne
+	// doit pas faire passer sa valeur réelle pour une dérive à chaque run.
+	if applied.Icon != "" && applied.Icon != actual.Icon {
+		out = append(out, fmt.Sprintf(
+			"~ icône %q → %q hors de notion-seed", applied.Icon, actual.Icon))
 	}
 
 	for _, name := range sortedPropNames(applied.Properties) {

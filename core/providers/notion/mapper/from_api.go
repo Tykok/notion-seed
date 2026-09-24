@@ -14,9 +14,13 @@ import (
 // besoin. Les champs ignorés ne sont pas une omission : ce qui n'est pas
 // déclaré dans la config n'est pas touché.
 type rawDatabase struct {
-	ID          string `json:"id"`
-	Archived    bool   `json:"archived"`
-	InTrash     bool   `json:"in_trash"`
+	ID       string `json:"id"`
+	Archived bool   `json:"archived"`
+	InTrash  bool   `json:"in_trash"`
+	Icon     struct {
+		Type  string `json:"type"`
+		Emoji string `json:"emoji"`
+	} `json:"icon"`
 	DataSources []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -97,6 +101,11 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 		if out.Name == "" {
 			out.Name = db.DataSources[0].Name
 		}
+	}
+	// Seul l'emoji est exprimable dans le YAML. Les autres formes restent "",
+	// ce qui vaut « rien de comparable », pas « pas d'icône ».
+	if db.Icon.Type == "emoji" {
+		out.Icon = db.Icon.Emoji
 	}
 
 	for name, p := range ds.Properties {

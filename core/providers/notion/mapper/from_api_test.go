@@ -203,3 +203,38 @@ func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
 			st.calls[1], db.DataSourceID)
 	}
 }
+
+func TestRemoteDatabaseFromJSONReadsEmojiIcon(t *testing.T) {
+	dbBody := []byte(`{"id":"db-1","icon":{"type":"emoji","emoji":"🔵"},
+		"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
+	dsBody := []byte(`{"id":"ds-1","title":[{"plain_text":"Tasks"}],"properties":{}}`)
+
+	got, err := RemoteDatabaseFromJSON(dbBody, dsBody)
+	if err != nil {
+		t.Fatalf("RemoteDatabaseFromJSON() error = %v", err)
+	}
+	if got.Icon != "🔵" {
+		t.Errorf("Icon = %q, want %q", got.Icon, "🔵")
+	}
+}
+
+// Une icône de type file ou external n'est PAS exprimable dans le YAML, qui ne
+// déclare qu'un emoji. La décoder en autre chose que "" produirait une
+// différence que le plan afficherait à chaque run sans jamais pouvoir la
+// résoudre.
+func TestRemoteDatabaseFromJSONIgnoresNonEmojiIcon(t *testing.T) {
+	for _, body := range []string{
+		`{"id":"db-1","icon":{"type":"external","external":{"url":"https://e/i.png"}},
+			"data_sources":[{"id":"ds-1","name":"Tasks"}]}`,
+		`{"id":"db-1","icon":null,"data_sources":[{"id":"ds-1","name":"Tasks"}]}`,
+	} {
+		dsBody := []byte(`{"id":"ds-1","title":[{"plain_text":"Tasks"}],"properties":{}}`)
+		got, err := RemoteDatabaseFromJSON([]byte(body), dsBody)
+		if err != nil {
+			t.Fatalf("RemoteDatabaseFromJSON() error = %v", err)
+		}
+		if got.Icon != "" {
+			t.Errorf("Icon = %q, want \"\" pour %s", got.Icon, body)
+		}
+	}
+}

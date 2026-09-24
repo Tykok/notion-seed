@@ -40,9 +40,18 @@ type RemoteDatabase struct {
 	DataSourceID string
 	Name         string
 	Description  string
-	Properties   map[string]RemoteProperty
-	Archived     bool
-	Found        bool
+	// Icon est l'emoji de la database, ou "" pour toute autre forme d'icône.
+	// Le YAML ne déclare qu'un emoji : décoder un fichier ou une URL ici
+	// produirait une différence que le plan afficherait à chaque run sans
+	// jamais pouvoir la résoudre.
+	//
+	// Mesuré le 2026-09-24 : l'icône n'est PAS partagée entre la database et son
+	// data source. PATCH sur la database met les deux à jour, PATCH sur le data
+	// source ne touche que lui. notion-seed lit et écrit celle de la database.
+	Icon       string
+	Properties map[string]RemoteProperty
+	Archived   bool
+	Found      bool
 }
 
 func (d RemoteDatabase) Exists() bool { return d.Found }
