@@ -5,6 +5,7 @@ package resources
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -124,6 +125,28 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 		return RemoteDatabase{}, err
 	}
 	return r.decode(dbResp.Body, dsResp.Body)
+}
+
+// DatabaseExists sonde l'EXISTENCE d'une database, sans rien lire d'autre.
+//
+// Contrairement à Read, elle n'atteint PAS le data source : Task 8 s'en sert
+// pour diagnostiquer un ancêtre archivé après l'échec du PATCH du data source
+// avec un 404. Sous un ancêtre à la corbeille, GET database répond 200 alors
+// que le data source, lui, est inatteignable — un Read complet échouerait ici
+// et cacherait le diagnostic derrière l'échec de la seconde requête.
+func (r *DatabaseResource) DatabaseExists(ctx context.Context, id string) (bool, error) {
+	_, err := r.tr.Execute(ctx, transport.APIRequest{
+		Method: "GET",
+		Path:   "/v1/databases/" + id,
+	})
+	if err == nil {
+		return true, nil
+	}
+	var apiErr *transport.APIError
+	if errors.As(err, &apiErr) && apiErr.Status == 404 {
+		return false, nil
+	}
+	return false, err
 }
 
 // CreatedDatabase porte le résultat d'une création.

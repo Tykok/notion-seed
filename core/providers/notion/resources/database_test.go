@@ -402,3 +402,61 @@ func TestDatabaseResourceUpdateReportsDatabaseWrittenWhenDataSourcePatchFails(t 
 		t.Errorf("appels = %v, want %v", st.calls, want)
 	}
 }
+
+// DatabaseExists ne lit QUE la database, jamais son data source : Task 8 s'en
+// sert pour diagnostiquer un ancêtre archivé après un 404 sur le PATCH du data
+// source, où GET database répond 200 alors que le data source, lui, est
+// inatteignable — un Read complet échouerait ici et cacherait le diagnostic.
+func TestDatabaseResourceDatabaseExistsOnSuccessIsTrue(t *testing.T) {
+	st := &stubTransport{byPath: map[string]string{
+		"/v1/databases/db1": `{"id":"db1"}`,
+	}}
+	r := NewDatabaseResource(st, nil)
+
+	got, err := r.DatabaseExists(context.Background(), "db1")
+	if err != nil {
+		t.Fatalf("DatabaseExists() error = %v", err)
+	}
+	if !got {
+		t.Error("DatabaseExists() = false, want true")
+	}
+	want := []string{"GET /v1/databases/db1"}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Errorf("appels = %v, want %v : ne doit lire QUE la database", st.calls, want)
+	}
+}
+
+func TestDatabaseResourceDatabaseExistsOn404IsFalseWithoutError(t *testing.T) {
+	st := &stubTransport{
+		errs: map[string]error{
+			"GET /v1/databases/db1": &transport.APIError{Status: 404, NotionCode: "object_not_found"},
+		},
+	}
+	r := NewDatabaseResource(st, nil)
+
+	got, err := r.DatabaseExists(context.Background(), "db1")
+	if err != nil {
+		t.Fatalf("DatabaseExists() error = %v, want nil : un 404 dit juste « absente »", err)
+	}
+	if got {
+		t.Error("DatabaseExists() = true, want false")
+	}
+}
+
+func TestDatabaseResourceDatabaseExistsOnOtherErrorReturnsIt(t *testing.T) {
+	wantErr := &transport.APIError{Status: 500, NotionCode: "internal_server_error"}
+	st := &stubTransport{
+		errs: map[string]error{
+			"GET /v1/databases/db1": wantErr,
+		},
+	}
+	r := NewDatabaseResource(st, nil)
+
+	got, err := r.DatabaseExists(context.Background(), "db1")
+	if err == nil {
+		t.Fatal("DatabaseExists() error = nil, want l'erreur remontée : ce n'est pas un 404")
+	}
+	if got {
+		t.Error("DatabaseExists() = true, want false")
+	}
+}
