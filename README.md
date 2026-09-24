@@ -47,6 +47,33 @@ par principe ne savait pas voir, et pourquoi il a été remplacé par une mesure
 Ce qui n'a pas pu être compté — hors ligne, ou quand la requête échoue —
 ressort en `impact inconnu`, jamais en « rien à perdre ».
 
+### Ce qui peut être compté, et ce qui ne peut pas
+
+Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
+`select`, `status` et `multi_select`.
+
+Un **retrait d'option** est donc toujours chiffré : les options n'existent que
+sur ces trois types.
+
+Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
+d'eux. Des trois couples dangereux mesurés plus haut, un seul l'est :
+
+| Couple | Chiffré ? |
+|---|---|
+| `multi_select` → `select` | oui — la colonne de départ est filtrable |
+| `rich_text` → `number` | non |
+| `checkbox` → `number` | non |
+
+Dans les deux derniers cas, la ligne ne porte pas de chiffre mais le dit :
+
+```
+      ~ property "Notes" — rich_text → number  [réécriture silencieuse]
+          → impact réel inconnu : notion-seed ne sait pas compter les lignes d'une propriété rich_text.
+```
+
+La classe reste celle de la mesure — vous savez que le changement est dangereux,
+vous ne savez pas sur combien de lignes. Et `--fail-on=unknown` les attrape.
+
 Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
 appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
 
