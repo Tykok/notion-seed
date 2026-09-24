@@ -29,8 +29,8 @@ type Change struct {
 	// destruction. apply n'écrit aujourd'hui que les créations, et doit pouvoir
 	// le décider sans relire le texte des lignes.
 	Kind resources.ChangeKind
-	// Target est la cible résolue, non nulle seulement là où apply sait
-	// écrire. Voir Result.Target.
+	// Target est la cible résolue, non nulle sur une création et sur un
+	// update. Voir Result.Target.
 	Target *state.Database
 
 	// Acknowledged nomme les clés de lifecycle qui couvrent cette ressource.

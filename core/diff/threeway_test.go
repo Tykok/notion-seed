@@ -102,30 +102,6 @@ func TestCompareDatabaseResolvesTargetOnCreation(t *testing.T) {
 	}
 }
 
-// Une ressource qu'apply ne sait pas encore écrire ne doit pas porter de
-// cible : une cible non nulle est une autorisation d'écrire.
-func TestCompareDatabaseLeavesTargetNilOnUpdate(t *testing.T) {
-	desired := state.Database{
-		Name: "Tasks",
-		Properties: map[string]state.Property{
-			"Name":     {Type: "title"},
-			"Estimate": {Type: "number"},
-		},
-	}
-	applied := state.Database{
-		ID:         "db-1",
-		Name:       "Tasks",
-		Properties: map[string]state.Property{"Name": {ID: "title", Type: "title"}},
-	}
-	res := CompareDatabase("tasks", &desired, &applied, &applied)
-	if res.Changeset.Kind != resources.KindUpdate {
-		t.Fatalf("Kind = %v, want KindUpdate", res.Changeset.Kind)
-	}
-	if res.Target != nil {
-		t.Errorf("Target = %+v, want nil tant qu'apply n'écrit pas les updates", res.Target)
-	}
-}
-
 // db construit une database pivot à une seule propriété, pour alléger la table.
 func db(propName string, p state.Property) *state.Database {
 	return &state.Database{
@@ -190,6 +166,94 @@ func fixtureTasks() (desired, applied, actual state.Database) {
 		},
 	}
 	return desired, applied, actual
+}
+
+func TestUpdateTargetCarriesRemoteOptionIDs(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if res.Target == nil {
+		t.Fatal("Target = nil sur un update")
+	}
+
+	prio := res.Target.Properties["Prio"]
+	if len(prio.Options) != 2 {
+		t.Fatalf("options = %d, want 2", len(prio.Options))
+	}
+	// "Haute" existe dans Notion : la cible DOIT porter son id, sinon le PATCH
+	// la détruit et la recrée, et les lignes qui la portaient perdent leur
+	// valeur.
+	if prio.Options[0].Name != "Haute" || prio.Options[0].ID != "o-haute" {
+		t.Errorf("option[0] = %+v, want Haute / o-haute", prio.Options[0])
+	}
+	// "Moyenne" est neuve : pas d'id, l'API lui en crée un.
+	if prio.Options[1].Name != "Moyenne" || prio.Options[1].ID != "" {
+		t.Errorf("option[1] = %+v, want Moyenne sans id", prio.Options[1])
+	}
+	// "Basse" n'est plus réclamée : son absence de la cible EST ce qui la
+	// détruit, et le plan l'annonce déjà par une ligne "-".
+	for _, o := range prio.Options {
+		if o.Name == "Basse" {
+			t.Error("l'option Basse est dans la cible alors que le YAML ne la réclame plus")
+		}
+	}
+}
+
+func TestUpdateTargetKeepsUndeclaredPropertiesOut(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if _, present := res.Target.Properties["Libre"]; present {
+		t.Error("la propriété hors config est dans la cible : elle partirait dans un payload")
+	}
+}
+
+func TestUpdateTargetDoesNotOverwriteUndeclaredFields(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Name, desired.Description, desired.Icon = "", "", ""
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if res.Target.Name != "Tasks" || res.Target.Description != "ancienne" || res.Target.Icon != "🔵" {
+		t.Errorf("cible = %q / %q / %q, want les valeurs réelles intactes",
+			res.Target.Name, res.Target.Description, res.Target.Icon)
+	}
+}
+
+// Mesuré le 2026-09-24 : un changement de type RECRÉE les options, et l'API
+// ignore les ids transmis (envoyés 6993c61f/36af0279, rendus fba2569a/f62f86cf).
+// Les porter ferait croire à une continuité d'identité qui n'existe pas.
+func TestUpdateTargetDropsOptionIDsOnTypeChange(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Prio"] = state.Property{Type: "multi_select", Options: []state.Option{
+		{Key: "haute", Name: "Haute", Color: "red"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	prio := res.Target.Properties["Prio"]
+	if prio.Type != "multi_select" {
+		t.Fatalf("Type = %q, want multi_select", prio.Type)
+	}
+	for _, o := range prio.Options {
+		if o.ID != "" {
+			t.Errorf("option %q porte l'id %q alors que le type change", o.Name, o.ID)
+		}
+	}
+}
+
+// Review Focus #5 : une option dont ni la key ni le nom ne résolvent est
+// NEUVE. Lui donner l'id d'une autre option en ferait un renommage silencieux,
+// exactement ce que ce produit existe pour rendre impossible.
+func TestUpdateTargetGivesNoIDToAnUnresolvedOption(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
+		{Key: "inconnue", Name: "Inconnue", Color: "gray"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	prio := res.Target.Properties["Prio"]
+	if len(prio.Options) != 1 {
+		t.Fatalf("options = %d, want 1", len(prio.Options))
+	}
+	if prio.Options[0].ID != "" {
+		t.Errorf("ID = %q, want vide : ni la key ni le nom ne résolvent", prio.Options[0].ID)
+	}
 }
 
 func TestPlanLinesComparesIcon(t *testing.T) {
