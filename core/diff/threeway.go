@@ -303,15 +303,22 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 				change.ClassMigration)
 			d.Property = propName
 			d.Note = "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer"
+			// Le remède passe par le retrait de l'ancienne option : son coût est
+			// le nombre de lignes qui la portent, et c'est le nom ACTUEL qui sait
+			// les filtrer.
+			d.Measure = &resources.Measurement{
+				Property:     propName,
+				PropertyType: have.Type,
+				Option:       current,
+			}
 			out = append(out, d)
 		} else {
 			// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
-			// place est libre pour comparer color et group, en classe sûre — comme
-			// le format de number. Sur une migration, la ligne porte déjà son
-			// propre changement ; superposer un second écart y sèmerait la
-			// confusion sans rien ajouter, puisque l'option va de toute façon être
-			// recréée.
-			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
+			// place est libre pour comparer color et group. Sur une migration, la
+			// ligne porte déjà son propre changement ; superposer un second écart y
+			// sèmerait la confusion sans rien ajouter, puisque l'option va de toute
+			// façon être recréée.
+			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
 		}
 	}
 
@@ -320,7 +327,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 	for _, w := range keyless {
 		if i, ok := idxByName[w.Name]; ok && !claimed[i] {
 			claimed[i] = true
-			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
+			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
 			continue
 		}
 		d := resources.NewDetail("+",
@@ -357,23 +364,34 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 }
 
 // optionAttrLines compare color et group d'une option appariée dont le nom
-// coïncide déjà — via key ou, à défaut, via nom. Classe sûre, comme le format
-// de number : la donnée n'est pas perdue, elle est juste réaffichée
-// autrement. Ne compare que ce que le YAML déclare : une couleur ou un group
-// absent du YAML ne doit jamais produire de changement fantôme, exactement
-// comme le nom de database et la description (gardés par un test de
-// non-vacuité).
+// coïncide déjà. Les deux attributs ne se comportent PAS pareil, et c'est
+// mesuré :
 //
-// Les garder dans le state sans jamais les lire ici serait la seule façon de
-// faire diverger apply du plan le jour où apply existera : le plan promettrait
-// une couleur qu'il n'écrirait jamais.
-func optionAttrLines(propName string, want, have state.Option) []resources.Detail {
+//   - color est IMMUABLE. L'API répond 400 — « Cannot update color of select
+//     with id » — par id comme par nom, et l'échec porte sur tout le PATCH de la
+//     propriété. Le changement est donc inexprimable : il faut créer une option,
+//     migrer les lignes, retirer l'ancienne. D'où ClassMigration, et une mesure,
+//     puisque ce remède coûte autant de lignes que l'option en porte.
+//   - group est MUTABLE par id, et survit même quand on l'omet. Classe sûre,
+//     comme le format de number.
+//
+// Ne compare que ce que le YAML déclare : une couleur ou un group absent du
+// YAML ne doit jamais produire de changement fantôme.
+func optionAttrLines(propName, propType string, want, have state.Option) []resources.Detail {
 	var out []resources.Detail
 	target := fmt.Sprintf("option %q (propriété %q)", want.Name, propName)
 	if want.Color != "" && want.Color != have.Color {
-		d := resources.NewDetail("~", target, change.ClassSafe)
+		d := resources.NewDetail("~", target, change.ClassMigration)
 		d.Property = propName
-		d.Note = fmt.Sprintf("color %s → %s", have.Color, want.Color)
+		d.Note = fmt.Sprintf(
+			"color %s → %s : la couleur d'une option est immuable, l'API répond 400. "+
+				"Créer une option, migrer les lignes, puis retirer l'ancienne",
+			have.Color, want.Color)
+		d.Measure = &resources.Measurement{
+			Property:     propName,
+			PropertyType: propType,
+			Option:       have.Name,
+		}
 		out = append(out, d)
 	}
 	if want.Group != "" && want.Group != have.Group {

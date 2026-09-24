@@ -174,6 +174,50 @@ func TestEnrichSkipsResourcesWithoutADataSourceID(t *testing.T) {
 	}
 }
 
+// planWithOptionMigration fabrique un renommage ou une couleur d'option : la
+// classe est ClassMigration AVANT toute mesure, et la ligne porte tout de
+// même une demande de mesure — celle du coût du remède (retirer l'ancienne
+// option).
+func planWithOptionMigration() *diff.Plan {
+	return &diff.Plan{Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks",
+		Class: change.ClassMigration,
+		Details: []resources.Detail{{
+			Op: "~", Target: `option "Fait" → "Terminé" (propriété "Statut")`,
+			Class: change.ClassMigration, Count: -1,
+			Measure: &resources.Measurement{
+				Property: "Statut", PropertyType: "status", Option: "Fait",
+			},
+		}},
+	}}}
+}
+
+// Un renommage ou une couleur d'option est déjà inexprimable AVANT toute
+// mesure : ClassifyOptionRemoval ne doit donc jamais reclasser une ligne
+// ClassMigration, quel que soit le compte — seul le COÛT du remède doit être
+// rempli. Sans cette garde, un renommage sur une propriété portant des lignes
+// (compte non nul) retombait en ClassDestructive/ClassSilentRewrite, et un
+// renommage sur une colonne vide (compte nul) retombait en ClassSafe : dans
+// les deux cas, `--fail-on=migration` cessait de se déclencher.
+func TestEnrichKeepsMigrationClassAndFillsCount(t *testing.T) {
+	p := planWithOptionMigration()
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 12}, nil })
+
+	if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
+		t.Fatalf("échecs = %v, want aucun", fails)
+	}
+	d := p.Changes[0].Details[0]
+	if d.Class != change.ClassMigration {
+		t.Errorf("Class = %v, want ClassMigration : la mesure ne reclasse pas une ligne déjà inexprimable", d.Class)
+	}
+	if d.Count != 12 {
+		t.Errorf("Count = %d, want 12 : le coût du remède doit être rempli", d.Count)
+	}
+	if got := p.Changes[0].Class; got != change.ClassMigration {
+		t.Errorf("Class d'en-tête = %v, want ClassMigration", got)
+	}
+}
+
 // planWithTypeChange fabrique un changement de type : la mesure porte la
 // colonne entière (Option vide), pas une option.
 func planWithTypeChange() *diff.Plan {
