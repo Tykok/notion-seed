@@ -10,6 +10,123 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
+// Une database retirée du YAML et déjà supprimée à la main dans Notion ne doit
+// plus être annoncée « à détruire » : il n'y a plus rien à détruire. Ce qui
+// reste est une entrée de state obsolète, dont le nettoyage n'écrit rien dans
+// Notion.
+func TestComputeReportsStaleStateForOrphanAlreadyDeleted(t *testing.T) {
+	cfg := &config.Config{}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ToDestroy != 0 {
+		t.Errorf("ToDestroy = %d, want 0 : la destruction a déjà eu lieu", p.ToDestroy)
+	}
+	if got := p.StaleState; len(got) != 1 || got[0] != "database.tasks" {
+		t.Errorf("StaleState = %v, want [database.tasks]", got)
+	}
+	if p.Blocked {
+		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
+	}
+}
+
+// Une database archivée compte comme détruite : dans Notion, détruire une
+// database, c'est l'archiver.
+func TestComputeReportsStaleStateForArchivedOrphan(t *testing.T) {
+	cfg := &config.Config{}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "archivée ou en corbeille"}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.StaleState; len(got) != 1 || got[0] != "database.tasks" {
+		t.Errorf("StaleState = %v, want [database.tasks]", got)
+	}
+}
+
+// Une orpheline toujours présente dans Notion reste une destruction planifiée.
+func TestComputeStillPlansDestroyWhenOrphanExists(t *testing.T) {
+	cfg := &config.Config{}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db-1", Name: "Tasks"}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ToDestroy != 1 {
+		t.Errorf("ToDestroy = %d, want 1", p.ToDestroy)
+	}
+	if len(p.StaleState) != 0 {
+		t.Errorf("StaleState = %v, want vide", p.StaleState)
+	}
+}
+
+// Sans refresh (--skip-preflight), on ne sait rien de l'orpheline : ni la
+// détruire, ni conclure qu'elle a disparu. Elle tombe sous « Non comparé ».
+func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
+	cfg := &config.Config{}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+
+	p, err := Compute(cfg, applied, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ToDestroy != 0 {
+		t.Errorf("ToDestroy = %d, want 0 : rien n'a été lu", p.ToDestroy)
+	}
+	if got := p.NotCompared; len(got) != 1 || got[0] != "database.tasks" {
+		t.Errorf("NotCompared = %v, want [database.tasks]", got)
+	}
+}
+
+// prevent_destroy protège la ressource la mieux gardée du fichier. La voir
+// disparaître hors de notion-seed est le fait le plus grave que le plan puisse
+// constater : on bloque au lieu de nettoyer en silence.
+func TestComputeBlocksWhenProtectedOrphanVanished(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Blocked {
+		t.Fatal("Blocked = false, want true")
+	}
+	if len(p.StaleState) != 0 {
+		t.Errorf("StaleState = %v, want vide : rien ne doit être nettoyé sous prevent_destroy", p.StaleState)
+	}
+	joined := strings.Join(p.BlockedReasons, "\n")
+	for _, want := range []string{"prevent_destroy", "hors de notion-seed", "  → "} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("raisons =\n%s\nil manque %q", joined, want)
+		}
+	}
+}
+
 func TestComputeAllCreatesWhenRemoteIsEmpty(t *testing.T) {
 	cfg := &config.Config{
 		Version:   1,

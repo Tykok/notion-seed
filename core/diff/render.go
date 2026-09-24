@@ -47,7 +47,8 @@ func Render(w io.Writer, p *Plan) error {
 	// Une ressource non comparée (--skip-preflight) n'est pas non plus « aucun
 	// changement » : on ne sait rien d'elle, donc on ne peut pas affirmer
 	// qu'elle est conforme.
-	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && len(p.NotCompared) == 0 && !p.Blocked {
+	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && len(p.NotCompared) == 0 &&
+		len(p.StaleState) == 0 && !p.Blocked {
 		_, err := fmt.Fprintln(w, "Aucun changement. La configuration correspond à l'état réel.")
 		return err
 	}
@@ -113,6 +114,26 @@ func Render(w io.Writer, p *Plan) error {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}
+		}
+	}
+
+	if len(p.StaleState) > 0 {
+		if _, err := fmt.Fprintln(w,
+			"Entrée de state obsolète — la ressource n'existe plus dans Notion"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+		for _, r := range p.StaleState {
+			if _, err := fmt.Fprintf(w,
+				"  - %s — son identité sera retirée du state, rien ne sera écrit dans Notion\n",
+				r); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
 		}
 	}
 

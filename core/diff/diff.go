@@ -74,6 +74,12 @@ type Plan struct {
 	// distinguer les deux.
 	NotCompared []string
 
+	// StaleState nomme les ressources que le state ancre, que la configuration
+	// ne déclare plus, et qui n'existent plus dans Notion : la destruction a
+	// déjà eu lieu hors de notion-seed. Retirer leur entrée n'écrit rien dans
+	// Notion — c'est un nettoyage local, pas une destruction.
+	StaleState []string
+
 	Blocked bool
 	// BlockedReasons nomme chaque blocage et son issue. « au moins un changement
 	// refusé » ne dit pas à l'utilisateur quoi faire.
@@ -138,7 +144,36 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 	sort.Strings(orphans)
 	for _, key := range orphans {
 		a := appliedDBs[key]
-		p.absorb(key, CompareDatabase(key, nil, &a, nil), allowDataLoss, preventDestroy)
+		resource := "database." + key
+
+		r, read := actual[key]
+		switch {
+		case !read:
+			// --skip-preflight : rien n'a été lu, donc on ne peut ni planifier la
+			// destruction ni conclure qu'elle a déjà eu lieu. Annoncer une
+			// destruction ici, c'est ce que faisait la version précédente : elle
+			// concluait sans jamais regarder le réel.
+			p.NotCompared = append(p.NotCompared, resource)
+			continue
+
+		case r.Missing:
+			// Introuvable ou archivée : dans Notion, détruire une database c'est
+			// l'archiver, donc les deux cas valent destruction déjà effective.
+			if preventDestroy[resource] {
+				p.block(fmt.Sprintf(
+					"%s : protégée par lifecycle.prevent_destroy, mais %s dans Notion.\n"+
+						"  → la ressource la mieux protégée du fichier a disparu hors de "+
+						"notion-seed. Restaurez-la dans Notion, ou retirez %s de "+
+						"prevent_destroy pour acter sa disparition",
+					resource, r.Reason, resource))
+				continue
+			}
+			p.StaleState = append(p.StaleState, resource)
+			continue
+		}
+
+		d := r.Database
+		p.absorb(key, CompareDatabase(key, nil, &a, &d), allowDataLoss, preventDestroy)
 	}
 	return p, nil
 }
