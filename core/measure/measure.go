@@ -180,6 +180,20 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if !decoded.HasMore {
 			return out, nil
 		}
+		// Une page suivante annoncée sans dire où la prendre est une réponse
+		// incomprise, au même titre qu'un `results` absent. Repartir sans curseur
+		// redemanderait la PREMIÈRE page et la recompterait à chaque tour : une
+		// page de 2 lignes ressortirait à « plus de 6 lignes », un chiffre fabriqué
+		// que Capped présente en plus comme un minorant — donc comme une garantie.
+		// Mieux vaut ne rien annoncer que garantir un nombre inventé.
+		if decoded.NextCursor == "" {
+			return Result{}, fmt.Errorf(
+				"%w pour %q: l'API annonce une page suivante sans curseur pour l'atteindre\n"+
+					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
+					"réponse de l'API",
+				ErrUnreadableCount, r.Property)
+		}
 		cursor = decoded.NextCursor
 	}
 
