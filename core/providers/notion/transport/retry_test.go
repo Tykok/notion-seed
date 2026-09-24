@@ -233,6 +233,68 @@ func TestRetryingNeverRetriesUsageError(t *testing.T) {
 	}
 }
 
+// Un 5xx sur une requête MUTANTE ne se rejoue pas : une passerelle peut rendre
+// 502 alors que Notion a déjà créé la ressource, et le rejeu la dupliquerait.
+// C'est la même ambiguïté qu'un timeout, donc la même issue : inconnue.
+func TestRetryingDoesNotReplayServerErrorOnMutatingRequest(t *testing.T) {
+	clock := newFakeClock()
+	inner := scripted(
+		entry{APIResponse{Status: 502}, &APIError{Status: 502, NotionCode: "internal_server_error"}},
+		entry{APIResponse{Status: 200}, nil},
+	)
+	r := newTestRetrying(inner, clock)
+
+	_, err := r.Execute(context.Background(), APIRequest{Method: "POST", Path: "/v1/databases"})
+	if inner.calls != 1 {
+		t.Errorf("appels = %d, want 1 : une mutation ne se rejoue pas sur 5xx", inner.calls)
+	}
+	var unknown *OutcomeUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("error = %v (%T), want un OutcomeUnknownError", err, err)
+	}
+	// L'erreur d'origine doit rester lisible : c'est elle qui dit ce qui s'est
+	// passé côté API.
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != 502 {
+		t.Errorf("error = %v, elle doit continuer d'envelopper le 502", err)
+	}
+}
+
+// Un 429 se rejoue même sur une mutation : l'API dit explicitement qu'elle n'a
+// rien traité, il n'y a aucune ambiguïté à lever.
+func TestRetryingStillReplaysRateLimitOnMutatingRequest(t *testing.T) {
+	clock := newFakeClock()
+	inner := scripted(
+		entry{APIResponse{Status: 429}, &APIError{Status: 429, NotionCode: "rate_limited"}},
+		entry{APIResponse{Status: 200, Body: []byte(`{"ok":true}`)}, nil},
+	)
+	r := newTestRetrying(inner, clock)
+
+	if _, err := r.Execute(context.Background(), APIRequest{Method: "POST", Path: "/v1/databases"}); err != nil {
+		t.Fatalf("Execute() error = %v, want nil après rejeu", err)
+	}
+	if inner.calls != 2 {
+		t.Errorf("appels = %d, want 2", inner.calls)
+	}
+}
+
+// Une lecture reste rejouée sur 5xx : la rejouer ne peut rien dupliquer.
+func TestRetryingStillReplaysServerErrorOnRead(t *testing.T) {
+	clock := newFakeClock()
+	inner := scripted(
+		entry{APIResponse{Status: 502}, &APIError{Status: 502}},
+		entry{APIResponse{Status: 200, Body: []byte(`{"ok":true}`)}, nil},
+	)
+	r := newTestRetrying(inner, clock)
+
+	if _, err := r.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/databases/db1"}); err != nil {
+		t.Fatalf("Execute() error = %v, want nil après rejeu", err)
+	}
+	if inner.calls != 2 {
+		t.Errorf("appels = %d, want 2", inner.calls)
+	}
+}
+
 func TestRetryingGivesUpAfterMaxAttempts(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(

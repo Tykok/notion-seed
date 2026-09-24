@@ -85,6 +85,13 @@ func NewRetrying(inner Transport, limiter Limiter, policy RetryPolicy, clock Clo
 	return &Retrying{inner: inner, limiter: limiter, policy: policy, clock: clock, notify: notify}
 }
 
+// isSafeMethod dit si rejouer la requête ne peut rien créer ni modifier deux
+// fois. Une méthode vide vaut GET : c'est le défaut de `ntn api` quand -X est
+// absent, et notion-seed ne la laisse jamais vide sur une mutation.
+func isSafeMethod(method string) bool {
+	return method == "" || method == "GET" || method == "HEAD"
+}
+
 func (r *Retrying) Execute(ctx context.Context, req APIRequest) (APIResponse, error) {
 	var lastResp APIResponse
 	var lastErr error
@@ -116,6 +123,17 @@ func (r *Retrying) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 		var apiErr *APIError
 		if !errors.As(err, &apiErr) || !apiErr.Retryable() {
 			return resp, err
+		}
+		// Un 5xx sur une requête MUTANTE porte la même ambiguïté qu'un timeout :
+		// une passerelle peut rendre 502 alors que Notion a déjà appliqué la
+		// mutation. La rejouer créerait un doublon — exactement ce que le save
+		// incrémental d'apply existe pour empêcher. On la reclasse en issue
+		// inconnue, ce qui arrête net et rend un message qui envoie vérifier.
+		//
+		// Un 429 reste rejoué même sur une mutation : l'API dit explicitement
+		// qu'elle n'a rien traité, il n'y a aucune ambiguïté à lever.
+		if apiErr.Status >= 500 && !isSafeMethod(req.Method) {
+			return resp, &OutcomeUnknownError{Cause: err}
 		}
 		if attempt == r.policy.MaxAttempts-1 {
 			break
