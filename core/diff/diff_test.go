@@ -196,8 +196,23 @@ func TestComputeListsPropertiesOfCreatedDatabase(t *testing.T) {
 		`+ property "Estimate" (number)`,
 		`+ property "Name" (title)`,
 	}
-	if !reflect.DeepEqual(p.Changes[0].Lines, want) {
-		t.Fatalf("lines = %v, want %v", p.Changes[0].Lines, want)
+	got := make([]string, 0, len(p.Changes[0].Details))
+	for _, d := range p.Changes[0].Details {
+		got = append(got, d.Op+" "+d.Target)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("lines = %v, want %v", got, want)
+	}
+	// Une création ne coûte rien : elle ne demande aucune mesure, donc aucun
+	// appel ne sera payé pour elle. Et aucun détail ne doit affirmer « 0 ligne
+	// concernée » sans que personne n'ait mesuré.
+	for _, d := range p.Changes[0].Details {
+		if d.Measure != nil {
+			t.Errorf("la ligne %q demande une mesure alors qu'elle ne coûte rien", d.Target)
+		}
+		if d.Count != -1 {
+			t.Errorf("Count = %d pour %q, want -1 tant que rien n'a été mesuré", d.Count, d.Target)
+		}
 	}
 }
 

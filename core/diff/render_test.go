@@ -75,11 +75,12 @@ func TestRenderNotComparedBlocksNoChangeMessage(t *testing.T) {
 
 // I3 : Note porte déjà ses propres guillemets là où il en faut (un
 // renommage de propriété avertit avec `"Ancien" n'est pas renommée...`).
-// Avant correction, absorb ré-échappait toute la note avec %q, produisant des
-// antislashs illisibles — précisément sur la ligne censée éviter à
-// l'utilisateur de croire qu'il a renommé une propriété. Les autres tests de
-// rendu fabriquent des Lines déjà formatées : celui-ci seul, en passant par
-// Compute puis par Render, exerce la concaténation réelle de Note.
+// Avant correction, l'aplatissement ré-échappait toute la note avec %q,
+// produisant des antislashs illisibles — précisément sur la ligne censée éviter
+// à l'utilisateur de croire qu'il a renommé une propriété. La concaténation vit
+// désormais dans Render, et les autres tests de rendu fabriquent des Details
+// sans Note : celui-ci seul, en passant par Compute puis par Render, l'exerce
+// réellement.
 func TestRenderNoteWithQuotesIsNotReEscaped(t *testing.T) {
 	cfg := &config.Config{Databases: []config.Database{{
 		Key: "tasks", Name: "Tasks",
@@ -124,7 +125,10 @@ func TestRenderCreatePlan(t *testing.T) {
 			Resource: "database.tasks",
 			Detail:   "(new)",
 			Kind:     resources.KindCreate,
-			Lines:    []string{`+ property "Estimate" (number)`, `+ property "Name" (title)`},
+			Details: []resources.Detail{
+				{Op: "+", Target: `property "Estimate" (number)`, Class: ClassSafe, Count: -1},
+				{Op: "+", Target: `property "Name" (title)`, Class: ClassSafe, Count: -1},
+			},
 		}},
 	}
 	var buf bytes.Buffer
@@ -209,7 +213,10 @@ func TestRenderMarksBlockingChanges(t *testing.T) {
 		Changes: []Change{{
 			Class:    ClassSilentRewrite,
 			Resource: "database.tasks",
-			Lines:    []string{`- option "Shipped" du status "Status"`},
+			Details: []resources.Detail{
+				{Op: "-", Target: `option "Shipped" du status "Status"`,
+					Class: ClassSilentRewrite, Count: -1},
+			},
 		}},
 	}
 	var buf bytes.Buffer
@@ -248,10 +255,14 @@ func TestRenderShowsDriftBeforePlan(t *testing.T) {
 			`~ option "Fait" de la propriété "Statut" renommée en "Terminé" hors de notion-seed`,
 		}}},
 		Changes: []Change{{
-			Resource:    "database.tasks",
-			Class:       ClassMigration,
-			Lines:       []string{`~ option "Terminé" → "Fait" (propriété "Statut")`},
-			LineClasses: []Class{ClassMigration},
+			Resource: "database.tasks",
+			Class:    ClassMigration,
+			Details: []resources.Detail{{
+				Op:     "~",
+				Target: `option "Terminé" → "Fait" (propriété "Statut")`,
+				Class:  ClassMigration,
+				Count:  -1,
+			}},
 		}},
 	}
 	var b strings.Builder
@@ -273,7 +284,9 @@ func TestRenderShowsDriftBeforePlan(t *testing.T) {
 func TestRenderOmitsEmptySections(t *testing.T) {
 	p := &Plan{ToAdd: 1, Changes: []Change{{
 		Resource: "database.tasks", Detail: "(new)",
-		Lines: []string{`+ property "Name" (title)`}, LineClasses: []Class{ClassSafe},
+		Details: []resources.Detail{
+			{Op: "+", Target: `property "Name" (title)`, Class: ClassSafe, Count: -1},
+		},
 	}}}
 	var b strings.Builder
 	if err := Render(&b, p); err != nil {
@@ -294,7 +307,9 @@ func TestRenderBlockedMessageNamesReasonAndRemedy(t *testing.T) {
 		ToChange: 1,
 		Changes: []Change{{
 			Resource: "database.flows", Class: ClassSilentRewrite,
-			Lines: []string{`- option "Annulé"`}, LineClasses: []Class{ClassSilentRewrite},
+			Details: []resources.Detail{
+				{Op: "-", Target: `option "Annulé"`, Class: ClassSilentRewrite, Count: -1},
+			},
 		}},
 	}
 	var b strings.Builder
@@ -331,19 +346,20 @@ func TestRenderListsUnmanaged(t *testing.T) {
 // database qui reçoit un ajout sûr en même temps qu'un retrait d'option de
 // status ne doit pas faire porter l'étiquette dangereuse à la ligne sûre.
 // Sans ce test, une régression qui dériverait le suffixe de chaque ligne
-// depuis c.Class au lieu de c.LineClasses[i] passerait inaperçue : dans tous
-// les autres tests, Class et LineClasses portent la même valeur.
+// depuis c.Class au lieu de d.Class passerait inaperçue : dans tous les autres
+// tests, la classe de la ressource et celle de ses détails portent la même
+// valeur.
 func TestRenderLineClassIsIndependentOfResourceClass(t *testing.T) {
 	p := &Plan{
 		ToChange: 1,
 		Changes: []Change{{
 			Resource: "database.flows",
 			Class:    ClassSilentRewrite,
-			Lines: []string{
-				`+ property "Name" (title)`,
-				`- option "Annulé" (status "Étape")`,
+			Details: []resources.Detail{
+				{Op: "+", Target: `property "Name" (title)`, Class: ClassSafe, Count: -1},
+				{Op: "-", Target: `option "Annulé" (status "Étape")`,
+					Class: ClassSilentRewrite, Count: -1},
 			},
-			LineClasses: []Class{ClassSafe, ClassSilentRewrite},
 		}},
 	}
 	var b strings.Builder
@@ -387,7 +403,9 @@ func TestRenderOrdersUnmanagedBeforeBlocked(t *testing.T) {
 		ToChange: 1,
 		Changes: []Change{{
 			Resource: "database.flows", Class: ClassSilentRewrite,
-			Lines: []string{`- option "Annulé"`}, LineClasses: []Class{ClassSilentRewrite},
+			Details: []resources.Detail{
+				{Op: "-", Target: `option "Annulé"`, Class: ClassSilentRewrite, Count: -1},
+			},
 		}},
 	}
 	var b strings.Builder

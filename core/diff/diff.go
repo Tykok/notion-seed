@@ -16,11 +16,11 @@ type Change struct {
 	Class    Class
 	Resource string
 	Detail   string
-	Lines    []string
-	// LineClasses porte la classe de chaque entrée de Lines, dans le même
-	// ordre : une database peut recevoir un ajout sûr et un retrait d'option en
-	// réécriture silencieuse.
-	LineClasses []Class
+
+	// Details porte les changements élémentaires, non aplatis. La passe de
+	// mesure les enrichit APRÈS Compute : aplatir en chaînes ici rendrait le
+	// plan immesurable.
+	Details []resources.Detail
 
 	// Key est la key de configuration, sans le préfixe "database.". apply en a
 	// besoin pour indexer le state ; Resource est fait pour l'affichage.
@@ -206,29 +206,21 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 		Key:      key,
 		Kind:     res.Changeset.Kind,
 		Target:   res.Target,
-		Class:    worstClass(res.Changeset.Details),
+		Class:    WorstClass(res.Changeset.Details),
 	}
 	if res.Changeset.Kind == resources.KindCreate {
 		c.Detail = "(new)"
 	}
-	for _, d := range res.Changeset.Details {
-		line := d.Op + " " + d.Target
-		if d.Note != "" {
-			// PAS de %q ici : Note porte déjà ses propres guillemets là où il en
-			// faut (un renommage rend `"Ancien" → "Nouveau"`). Un %q supplémentaire
-			// ré-échappe ces guillemets et l'ensemble de la note, jusqu'à rendre
-			// illisible la seule ligne censée éviter qu'on croie avoir renommé une
-			// propriété alors qu'elle reste hors config.
-			line += " — " + d.Note
-		}
-		c.Lines = append(c.Lines, line)
-		c.LineClasses = append(c.LineClasses, d.Class)
-	}
+	// Les détails passent tels quels : c'est la passe de mesure, après Compute,
+	// qui les enrichira. Les aplatir en chaînes ici — ce que faisait la version
+	// précédente — rendait le plan immesurable, et le rendu n'a de toute façon
+	// besoin que de Details.
+	c.Details = res.Changeset.Details
 	p.Changes = append(p.Changes, c)
 
 	// lifecycle.prevent_destroy reste le seul blocage fondé sur autre chose
 	// qu'une mesure : notion-seed ne refuse plus un changement sur la foi de sa
-	// classe — il MESURE son coût et le dit (voir Class et LineClasses
+	// classe — il MESURE son coût et le dit (voir Class et Details
 	// ci-dessus). allow_data_loss n'a donc plus rien à débloquer ici.
 	if res.Changeset.Kind == resources.KindDestroy && preventDestroy[resource] {
 		p.block(fmt.Sprintf(
