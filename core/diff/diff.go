@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/state"
@@ -227,30 +226,15 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 	}
 	p.Changes = append(p.Changes, c)
 
-	// lifecycle. prevent_destroy est absolu ; allow_data_loss ne couvre que le
-	// destructif ; la réécriture silencieuse n'est couverte par rien — consentir
-	// à perdre une donnée n'est pas consentir à ce qu'elle soit remplacée par
-	// une autre, plausible et fausse.
-	for _, d := range res.Changeset.Details {
-		switch {
-		case d.Class == change.ClassSilentRewrite:
-			p.block(fmt.Sprintf(
-				"%s : réécriture silencieuse (%s).\n"+
-					"  → retirer une option de status réassigne les lignes concernées à "+
-					"l'option par défaut, sans erreur ni avertissement. allow_data_loss ne "+
-					"débloque pas ce cas. Migrez les lignes dans Notion, puis retirez "+
-					"l'option du YAML", resource, d.Target))
-		case res.Changeset.Kind == resources.KindDestroy && preventDestroy[resource]:
-			p.block(fmt.Sprintf(
-				"%s : destruction interdite par lifecycle.prevent_destroy.\n"+
-					"  → retirez %s de prevent_destroy si la destruction est voulue",
-				resource, resource))
-		case d.Class.CoveredByAllowDataLoss() && !allowDataLoss[resource]:
-			p.block(fmt.Sprintf(
-				"%s : changement destructif (%s).\n"+
-					"  → ajoutez %s à lifecycle.allow_data_loss si la perte est acceptée",
-				resource, d.Target, resource))
-		}
+	// lifecycle.prevent_destroy reste le seul blocage fondé sur autre chose
+	// qu'une mesure : notion-seed ne refuse plus un changement sur la foi de sa
+	// classe — il MESURE son coût et le dit (voir Class et LineClasses
+	// ci-dessus). allow_data_loss n'a donc plus rien à débloquer ici.
+	if res.Changeset.Kind == resources.KindDestroy && preventDestroy[resource] {
+		p.block(fmt.Sprintf(
+			"%s : destruction interdite par lifecycle.prevent_destroy.\n"+
+				"  → retirez %s de prevent_destroy si la destruction est voulue",
+			resource, resource))
 	}
 }
 

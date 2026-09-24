@@ -59,25 +59,29 @@ func (c Class) String() string {
 	}
 }
 
-// CoveredByAllowDataLoss dit si lifecycle.allow_data_loss suffit à autoriser
-// ce changement. Une réécriture silencieuse n'est jamais couverte : consentir
-// à perdre une donnée n'est pas consentir à ce qu'elle soit remplacée par une
-// autre valeur, plausible et fausse.
-func (c Class) CoveredByAllowDataLoss() bool {
-	return c == ClassDestructive
-}
-
-// Blocking dit si ce changement arrête le plan par défaut.
-func (c Class) Blocking() bool {
-	return c == ClassDestructive || c == ClassSilentRewrite
-}
-
-// ClassifyOptionRemoval donne la classe du retrait d'une option, selon le type
-// de la propriété. Mesuré au spike : les trois types ne se comportent pas
-// pareil.
-func ClassifyOptionRemoval(propertyType string) Class {
-	if propertyType == "status" {
+// ClassifyOptionRemoval donne le coût du retrait d'une option, selon le type de
+// la propriété ET le nombre de lignes qui la portent.
+//
+// count < 0 signifie « non mesuré » : sous --skip-preflight, ou quand la
+// requête de comptage a échoué.
+//
+// Mesuré le 2026-09-24 contre l'API 2025-09-03 : retirer une option de select
+// vide la ligne ; retirer une option de status RÉASSIGNE la ligne à une autre
+// option, sans erreur ni avertissement. Le premier cas perd une donnée, le
+// second la remplace par une valeur plausible et fausse.
+//
+// Le compte change tout : une option que personne n'utilise peut être retirée
+// sans rien coûter, quel que soit son type. C'est ce que le blocage par
+// principe ne savait pas voir, et pourquoi il a été remplacé par une mesure.
+func ClassifyOptionRemoval(propertyType string, count int) Class {
+	switch {
+	case count < 0:
+		return ClassUnknownImpact
+	case count == 0:
+		return ClassSafe
+	case propertyType == "status":
 		return ClassSilentRewrite
+	default:
+		return ClassDestructive
 	}
-	return ClassDestructive
 }

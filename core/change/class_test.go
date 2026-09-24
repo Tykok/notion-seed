@@ -4,28 +4,43 @@ package change
 
 import "testing"
 
-// Le cœur de la classification, mesuré au spike : les trois types ne se
-// comportent PAS pareil quand on retire une option.
-//
-//	select        → la ligne passe à null. Donnée perdue, pas de fausse valeur.
-//	multi_select  → l'option quitte la liste. Donnée perdue, pas de fausse valeur.
-//	status        → la ligne est réassignée à l'option par défaut. Donnée
-//	                perdue ET remplacée par une valeur fausse.
-func TestClassifyOptionRemoval(t *testing.T) {
-	tests := []struct {
-		propertyType string
-		want         Class
-	}{
-		{"select", ClassDestructive},
-		{"multi_select", ClassDestructive},
-		{"status", ClassSilentRewrite},
+// Le compte décide, pas le type seul. Retirer une option que personne n'utilise
+// ne coûte rien, quel que soit le type — c'est ce que le blocage par principe
+// ne savait pas voir.
+func TestClassifyOptionRemovalIsSafeWhenNoRowUsesTheOption(t *testing.T) {
+	for _, propType := range []string{"select", "multi_select", "status"} {
+		if got := ClassifyOptionRemoval(propType, 0); got != ClassSafe {
+			t.Errorf("ClassifyOptionRemoval(%q, 0) = %v, want ClassSafe", propType, got)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.propertyType, func(t *testing.T) {
-			if got := ClassifyOptionRemoval(tt.propertyType); got != tt.want {
-				t.Errorf("ClassifyOptionRemoval(%q) = %v, want %v", tt.propertyType, got, tt.want)
-			}
-		})
+}
+
+// Mesuré le 2026-09-24 : sur un status, les lignes sont RÉASSIGNÉES à une autre
+// option, pas vidées. La donnée est remplacée par une valeur plausible et
+// fausse — indistinguable après coup.
+func TestClassifyOptionRemovalOnStatusWithRowsIsSilentRewrite(t *testing.T) {
+	if got := ClassifyOptionRemoval("status", 47); got != ClassSilentRewrite {
+		t.Errorf("ClassifyOptionRemoval(status, 47) = %v, want ClassSilentRewrite", got)
+	}
+}
+
+// Mesuré le 2026-09-24 : sur un select, la ligne passe à vide. Perdue, mais
+// visiblement.
+func TestClassifyOptionRemovalOnSelectWithRowsIsDestructive(t *testing.T) {
+	for _, propType := range []string{"select", "multi_select"} {
+		if got := ClassifyOptionRemoval(propType, 3); got != ClassDestructive {
+			t.Errorf("ClassifyOptionRemoval(%q, 3) = %v, want ClassDestructive", propType, got)
+		}
+	}
+}
+
+// Un compte négatif dit « pas mesuré ». Ce n'est ni sûr ni dangereux : c'est
+// inconnu, et le dire est la seule réponse honnête.
+func TestClassifyOptionRemovalIsUnknownWhenNotMeasured(t *testing.T) {
+	for _, propType := range []string{"select", "status"} {
+		if got := ClassifyOptionRemoval(propType, -1); got != ClassUnknownImpact {
+			t.Errorf("ClassifyOptionRemoval(%q, -1) = %v, want ClassUnknownImpact", propType, got)
+		}
 	}
 }
 
@@ -43,17 +58,5 @@ func TestClassStringIsStable(t *testing.T) {
 		if got := tt.c.String(); got != tt.want {
 			t.Errorf("Class(%d).String() = %q, want %q", tt.c, got, tt.want)
 		}
-	}
-}
-
-// Une réécriture silencieuse ne doit jamais être autorisable par le même
-// garde-fou qu'une suppression ordinaire : l'utilisateur croit consentir à une
-// perte, il consent à une falsification.
-func TestSilentRewriteIsNotCoveredByAllowDataLoss(t *testing.T) {
-	if ClassSilentRewrite.CoveredByAllowDataLoss() {
-		t.Error("ClassSilentRewrite ne doit pas être couverte par allow_data_loss")
-	}
-	if !ClassDestructive.CoveredByAllowDataLoss() {
-		t.Error("ClassDestructive doit être couverte par allow_data_loss")
 	}
 }

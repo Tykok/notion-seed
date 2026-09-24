@@ -335,7 +335,9 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			Op:     "-",
 			Target: fmt.Sprintf("option %q (propriété %q)", o.Name, propName),
 			Note:   "absente du YAML : l'API remplace la liste entière des options",
-			Class:  change.ClassifyOptionRemoval(have.Type),
+			// -1 : le nombre de lignes portant cette option n'est pas mesuré à cet
+			// endroit du plan. La mesure existera plus tard, branchée ici même.
+			Class: change.ClassifyOptionRemoval(have.Type, -1),
 		})
 	}
 	return out
