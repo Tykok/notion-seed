@@ -50,8 +50,14 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				// apparaître « comptage impossible » à chaque plan portant un tel
 				// type, et apprendrait à ignorer une ligne qui signale par ailleurs
 				// de vrais incidents — 403, 429 épuisé, réponse incomprise.
+				// Le MÊME test tranche les deux conséquences : ne pas compter
+				// l'incident, et marquer la ligne comme non mesurable pour que le
+				// rendu cesse de promettre un remède inexistant. Relancer ne rendra
+				// pas rich_text filtrable.
 				if !errors.Is(err, ErrUnsupportedFilter) {
 					failures = append(failures, fmt.Sprintf("%s : %v", ch.Resource, err))
+				} else {
+					d.Unmeasurable = true
 				}
 				continue
 			}
