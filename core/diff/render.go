@@ -225,19 +225,26 @@ func bound(n int, capped bool) string {
 // l'utilisateur lit pour décider, donc elle ne doit jamais affirmer plus que ce
 // qui a été mesuré.
 func consequence(d resources.Detail) string {
-	if d.Measure == nil || d.Count < 0 {
-		if d.Class == ClassUnknownImpact {
-			return "impact non mesuré ; relancez en ligne pour l'obtenir"
-		}
+	// Aucune demande de mesure : la ligne ne coûte rien à personne, et il n'y a
+	// rien à annoncer. C'est le SEUL cas qui autorise le silence.
+	if d.Measure == nil {
 		return ""
 	}
-	count := fmt.Sprintf("%d lignes", d.Count)
-	if d.Capped {
-		count = fmt.Sprintf("plus de %d lignes", d.Count)
+	// Mesurable, mais pas mesurée. Se taire ici la rendrait indiscernable d'une
+	// ligne sans coût, à côté de voisines qui portent leur chiffre — et une
+	// réécriture silencieuse qu'on croit anodine est le pire malentendu que ce
+	// rendu puisse produire. Le cas n'est pas théorique : un type non filtrable
+	// (rich_text) laisse le compte à -1 sans qu'aucune panne ne soit survenue.
+	if d.Count < 0 {
+		return "impact non mesuré ; relancez en ligne pour l'obtenir"
 	}
 	if d.Count == 0 {
 		return "0 ligne concernée"
 	}
+	// Sur UNE mesure, le compte est bien un nombre de lignes distinctes : un
+	// filtre, une propriété. C'est en sommant plusieurs mesures que Impact perd
+	// cette propriété, et c'est pour ça qu'il parle de valeurs, pas de lignes.
+	count := bound(d.Count, d.Capped) + " lignes"
 
 	// Retrait d'option : le sort des lignes dépend du type, mesuré le 2026-09-24.
 	if d.Measure.Option != "" {
@@ -253,7 +260,7 @@ func consequence(d resources.Detail) string {
 		// 300 » borne par le haut ce qu'on ne sait justement plus borner. On dit
 		// alors le plancher mesuré, et on assume de ne pas savoir le plafond.
 		if d.Capped {
-			return count + " non vides, dont un nombre non mesuré seront appauvries, sans trace"
+			return count + " non vides, dont un nombre non mesuré sera appauvri, sans trace"
 		}
 		return "jusqu'à " + count + " appauvries, sans trace"
 	}
@@ -272,6 +279,15 @@ func consequence(d resources.Detail) string {
 // Un compte plafonné contamine sa famille, et elle seule : une somme dont un
 // terme est un minorant est un minorant, mais le plafond de l'une ne rend pas
 // l'autre plus floue qu'elle n'est.
+//
+// Ces totaux comptent des VALEURS, pas des lignes distinctes, et le disent.
+// Chaque compte est un nombre de lignes pour SA mesure, mais deux mesures d'une
+// même database peuvent tomber sur les mêmes lignes : deux options retirées
+// d'un même multi_select se filtrent par `contains`, et une ligne portant les
+// deux est comptée deux fois. Écrire « 18 lignes » là où 10 lignes distinctes
+// sont touchées serait un chiffre faux dans la ligne qui EST l'argument du
+// produit. Le dédoublonnage exigerait de collecter les identifiants de lignes,
+// ce que la passe de mesure ne fait pas — alors on nomme ce qu'on a.
 func Impact(p *Plan) string {
 	reassigned, lost, weakened, destroyed := 0, 0, 0, 0
 	var reassignedCapped, lostCapped, weakenedCapped bool
@@ -299,11 +315,11 @@ func Impact(p *Plan) string {
 
 	var parts []string
 	if reassigned > 0 {
-		parts = append(parts, fmt.Sprintf("%s lignes réassignées sans trace",
+		parts = append(parts, fmt.Sprintf("%s valeurs réassignées sans trace",
 			bound(reassigned, reassignedCapped)))
 	}
 	if lost > 0 {
-		parts = append(parts, fmt.Sprintf("%s lignes perdront leur valeur",
+		parts = append(parts, fmt.Sprintf("%s valeurs perdues",
 			bound(lost, lostCapped)))
 	}
 	if weakened > 0 {
@@ -311,9 +327,9 @@ func Impact(p *Plan) string {
 		// perdu. Plafonné, il ne borne plus rien par le haut : on ne peut plus
 		// dire « jusqu'à », et le plancher mesuré vit sur la ligne du détail.
 		if weakenedCapped {
-			parts = append(parts, "un nombre non mesuré de lignes appauvries sans trace")
+			parts = append(parts, "un nombre non mesuré de valeurs appauvries sans trace")
 		} else {
-			parts = append(parts, fmt.Sprintf("jusqu'à %d lignes appauvries sans trace", weakened))
+			parts = append(parts, fmt.Sprintf("jusqu'à %d valeurs appauvries sans trace", weakened))
 		}
 	}
 	if destroyed > 0 {

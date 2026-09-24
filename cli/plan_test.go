@@ -746,10 +746,14 @@ databases:
 		t.Errorf("le plan bloque encore:\n%s", out)
 	}
 	// Le chiffre lui-même, pas seulement la classe : c'est lui le produit.
-	if !strings.Contains(out, "2 lignes") {
-		t.Errorf("le compte mesuré n'est pas affiché:\n%s", out)
+	//
+	// La phrase ENTIÈRE, pas « 2 lignes » : ce fragment est déjà satisfait par la
+	// seule ligne d'agrégat, donc il ne prouverait pas que la ligne de détail
+	// porte son compte — ce qui est pourtant tout l'objet de cette passe.
+	if !strings.Contains(out, "2 lignes seront réassignées à une autre option, sans trace") {
+		t.Errorf("la ligne de détail ne porte pas son compte mesuré:\n%s", out)
 	}
-	if !strings.Contains(out, "Impact : 2 lignes réassignées sans trace.") {
+	if !strings.Contains(out, "Impact : 2 valeurs réassignées sans trace.") {
 		t.Errorf("la ligne d'agrégat manque ou ne dit pas ce qui a été mesuré:\n%s", out)
 	}
 }

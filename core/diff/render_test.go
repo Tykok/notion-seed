@@ -528,6 +528,82 @@ func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 	}
 }
 
+// Une ligne MESURABLE dont la mesure n'a pas eu lieu ne doit pas se taire.
+//
+// Le cas est atteignable sans panne ni --skip-preflight : rich_text → number
+// est classé « réécriture silencieuse » par la table mesurée, donc le détail
+// porte une demande de mesure ; mais core/measure ne sait pas construire de
+// filtre pour rich_text, écarte la demande sans la compter pour un incident, et
+// le compte reste à -1. Sans conséquence affichée, la ligne se lit « rien à
+// signaler » — juste à côté d'une voisine qui porte son chiffre, et sur une
+// réécriture silencieuse.
+func TestRenderSaysWhenAMeasurableLineWasNotMeasured(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Class: ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "~", Target: `property "Notes"`, Note: "rich_text → number",
+			Class: ClassSilentRewrite, Count: -1,
+			Measure: &resources.Measurement{Property: "Notes", PropertyType: "rich_text"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "impact non mesuré") {
+		t.Errorf("sortie:\n%s\nune ligne mesurable non mesurée doit le DIRE, pas se taire", b.String())
+	}
+}
+
+// Le pendant du test précédent : une ligne sans demande de mesure ne coûte
+// rien, et n'a donc aucune conséquence à annoncer. Sans cette borne, la
+// correction ci-dessus ferait déborder « impact non mesuré » sur chaque ajout
+// de propriété d'une création.
+func TestRenderStaysSilentOnALineThatCostsNothing(t *testing.T) {
+	p := &Plan{ToAdd: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindCreate, Detail: "(new)",
+		Details: []resources.Detail{
+			{Op: "+", Target: `property "Name" (title)`, Class: ClassSafe, Count: -1},
+		},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "→") {
+		t.Errorf("sortie:\n%s\nune ligne qui ne coûte rien n'annonce rien", b.String())
+	}
+}
+
+// Impact somme des comptes pris sur des mesures DIFFÉRENTES, qui peuvent
+// porter sur les mêmes lignes : deux options retirées d'une même propriété
+// multi_select se filtrent par `contains`, donc une ligne portant les deux est
+// comptée deux fois. 10 + 8 ne fait pas 18 lignes distinctes. Le total qu'on
+// détient est un nombre de valeurs — de couples (ligne, option) — et c'est
+// ainsi qu'il doit se lire.
+func TestImpactDoesNotPresentValuesAsDistinctRows(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details: []resources.Detail{
+			{Op: "-", Class: ClassDestructive, Count: 10,
+				Measure: &resources.Measurement{
+					Property: "Tags", PropertyType: "multi_select", Option: "A"}},
+			{Op: "-", Class: ClassDestructive, Count: 8,
+				Measure: &resources.Measurement{
+					Property: "Tags", PropertyType: "multi_select", Option: "B"}},
+		},
+	}}}
+	got := Impact(p)
+	if strings.Contains(got, "18 lignes") {
+		t.Errorf("Impact = %q : 18 est un nombre de valeurs, pas de lignes distinctes "+
+			"(les mêmes lignes peuvent porter les deux options)", got)
+	}
+	if !strings.Contains(got, "18 valeurs") {
+		t.Errorf("Impact = %q : le total mesuré doit rester visible, nommé pour ce qu'il est", got)
+	}
+}
+
 // Un changement de type PLAFONNÉ ne se borne pas par le haut. Le compte est
 // celui des lignes non vides, donc un majorant de ce qui sera perdu — d'où
 // « jusqu'à » — mais plafonné il devient un MINORANT de ce majorant. Les deux
@@ -570,12 +646,12 @@ func TestImpactKeepsACappedSumALowerBound(t *testing.T) {
 		},
 	}}}
 	got := Impact(p)
-	if !strings.Contains(got, "plus de 300 lignes réassignées") {
+	if !strings.Contains(got, "plus de 300 valeurs réassignées") {
 		t.Errorf("Impact = %q : une somme qui contient un compte plafonné est un minorant", got)
 	}
 	// La famille non plafonnée garde son compte ferme : le plafond de l'une ne
 	// doit pas rendre l'autre plus floue qu'elle ne l'est.
-	if !strings.Contains(got, "12 lignes perdront leur valeur") {
+	if !strings.Contains(got, "12 valeurs perdues") {
 		t.Errorf("Impact = %q : la famille non plafonnée garde son compte exact", got)
 	}
 }
