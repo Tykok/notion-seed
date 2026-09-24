@@ -114,6 +114,27 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 // création, que celui du groupe substitué par le mapper.
 func createLines(target *state.Database) []resources.Detail {
 	var out []resources.Detail
+
+	// Le nom, la description et l'icône partent AUSSI dans le payload de
+	// création. Les omettre ici serait exactement le défaut que les options
+	// avaient : écrit, jamais affiché. La même garde de non-vacuité qu'ailleurs
+	// s'applique — ce que le YAML ne déclare pas n'est pas écrit, donc n'est pas
+	// annoncé.
+	for _, f := range []struct{ label, value string }{
+		{"name", target.Name},
+		{"description", target.Description},
+		{"icon", target.Icon},
+	} {
+		if f.value == "" {
+			continue
+		}
+		out = append(out, resources.Detail{
+			Op:     "+",
+			Target: fmt.Sprintf("%s %q", f.label, f.value),
+			Class:  change.ClassSafe,
+		})
+	}
+
 	for _, name := range sortedPropNames(target.Properties) {
 		p := target.Properties[name]
 		out = append(out, resources.Detail{

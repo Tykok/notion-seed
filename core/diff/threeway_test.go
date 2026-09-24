@@ -38,6 +38,53 @@ func TestCompareDatabaseListsOptionsOnCreation(t *testing.T) {
 	}
 }
 
+// Une création écrit AUSSI le nom, la description et l'icône : ils doivent donc
+// être annoncés. Les omettre était la moitié non corrigée du même défaut que
+// les options — écrire ce que le plan n'a pas montré.
+func TestCompareDatabaseAnnouncesNameDescriptionAndIconOnCreation(t *testing.T) {
+	desired := state.Database{
+		Name:        "Notes de réunion",
+		Description: "Toutes les notes",
+		Icon:        "📝",
+		Properties:  map[string]state.Property{"Titre": {Type: "title"}},
+	}
+	res := CompareDatabase("notes", &desired, nil, nil)
+
+	var lines []string
+	for _, d := range res.Changeset.Details {
+		lines = append(lines, d.Op+" "+d.Target)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{
+		`name "Notes de réunion"`,
+		`description "Toutes les notes"`,
+		`icon "📝"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("détails =\n%s\nil manque %q", joined, want)
+		}
+	}
+	// Le nom vient en premier : c'est ce que l'utilisateur cherche d'abord.
+	if !strings.HasPrefix(joined, `+ name "Notes de réunion"`) {
+		t.Errorf("la première ligne doit être le nom, obtenu :\n%s", joined)
+	}
+}
+
+// Ce que le YAML ne déclare pas n'est pas écrit, donc n'est pas annoncé : même
+// garde de non-vacuité que partout ailleurs.
+func TestCompareDatabaseOmitsUndeclaredFieldsOnCreation(t *testing.T) {
+	desired := state.Database{
+		Name:       "Notes",
+		Properties: map[string]state.Property{"Titre": {Type: "title"}},
+	}
+	res := CompareDatabase("notes", &desired, nil, nil)
+	for _, d := range res.Changeset.Details {
+		if strings.HasPrefix(d.Target, "description") || strings.HasPrefix(d.Target, "icon") {
+			t.Errorf("ligne inattendue %q : le YAML ne déclare ni description ni icône", d.Target)
+		}
+	}
+}
+
 // La cible résolue EST ce qui sera écrit. Tant qu'apply ne fait que des
 // créations, elle coïncide avec la voie desired, et c'est précisément
 // l'invariant qui rend plan et apply indissociables.
