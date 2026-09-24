@@ -49,6 +49,22 @@ type Detail struct {
 	Note   string // précision optionnelle
 	Class  change.Class
 
+	// Property nomme la propriété que ce détail concerne. Vide sur un détail de
+	// niveau database.
+	//
+	// C'est ce champ qui fait le JEU D'ÉCRITURE : apply n'envoie que les
+	// propriétés qui portent au moins un détail, donc ce qui est écrit est
+	// exactement ce qui est affiché. Sans lui, apply devrait relire le texte des
+	// lignes ou recalculer un diff en parallèle — un second chemin capable de
+	// diverger du plan en silence.
+	Property string
+
+	// Field nomme l'attribut de database que ce détail concerne : "name",
+	// "description" ou "icon". Vide sur un détail de niveau propriété. Property
+	// et Field sont exclusifs : un détail concerne l'un ou l'autre, jamais les
+	// deux.
+	Field string
+
 	// Measure est la demande de mesure, nil quand le détail ne coûte rien.
 	Measure *Measurement
 	// Count est le nombre de lignes concernées. -1 tant que rien n'a été

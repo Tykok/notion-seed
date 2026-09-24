@@ -117,7 +117,7 @@ func createLines(target *state.Database) []resources.Detail {
 	// avaient : écrit, jamais affiché. La même garde de non-vacuité qu'ailleurs
 	// s'applique — ce que le YAML ne déclare pas n'est pas écrit, donc n'est pas
 	// annoncé.
-	for _, f := range []struct{ label, value string }{
+	for _, f := range []struct{ field, value string }{
 		{"name", target.Name},
 		{"description", target.Description},
 		{"icon", target.Icon},
@@ -125,21 +125,26 @@ func createLines(target *state.Database) []resources.Detail {
 		if f.value == "" {
 			continue
 		}
-		out = append(out, resources.NewDetail("+",
-			fmt.Sprintf("%s %q", f.label, f.value), change.ClassSafe))
+		d := resources.NewDetail("+",
+			fmt.Sprintf("%s %q", f.field, f.value), change.ClassSafe)
+		d.Field = f.field
+		out = append(out, d)
 	}
 
 	for _, name := range sortedPropNames(target.Properties) {
 		p := target.Properties[name]
-		out = append(out, resources.NewDetail("+",
-			fmt.Sprintf("property %q (%s)", name, p.Type), change.ClassSafe))
+		d := resources.NewDetail("+",
+			fmt.Sprintf("property %q (%s)", name, p.Type), change.ClassSafe)
+		d.Property = name
+		out = append(out, d)
 		// L'ordre des options est celui du YAML : il est visible dans Notion,
 		// le trier le rendrait faux.
 		for _, o := range p.Options {
-			d := resources.NewDetail("+",
+			od := resources.NewDetail("+",
 				fmt.Sprintf("option %q (propriété %q)", o.Name, name), change.ClassSafe)
-			d.Note = optionAttrNote(o)
-			out = append(out, d)
+			od.Property = name
+			od.Note = optionAttrNote(o)
+			out = append(out, od)
 		}
 	}
 	return out
@@ -165,11 +170,13 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 
 	if desired.Name != "" && desired.Name != actual.Name {
 		d := resources.NewDetail("~", "name", change.ClassSafe)
+		d.Field = "name"
 		d.Note = fmt.Sprintf("%q → %q", actual.Name, desired.Name)
 		out = append(out, d)
 	}
 	if desired.Description != "" && desired.Description != actual.Description {
 		d := resources.NewDetail("~", "description", change.ClassSafe)
+		d.Field = "description"
 		d.Note = fmt.Sprintf("%q → %q", actual.Description, desired.Description)
 		out = append(out, d)
 	}
@@ -190,6 +197,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			}
 			d := resources.NewDetail("+",
 				fmt.Sprintf("property %q (%s)", name, want.Type), change.ClassSafe)
+			d.Property = name
 			d.Note = note
 			out = append(out, d)
 			continue
@@ -200,6 +208,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			// précisera l'ampleur.
 			class := change.ClassifyTypeChange(have.Type, want.Type)
 			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), class)
+			d.Property = name
 			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
 			// Un couple que la table dit SÛR (select→multi_select,
 			// number→rich_text, status→select, date→rich_text) ne demande aucune
@@ -218,6 +227,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
 			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), change.ClassSafe)
+			d.Property = name
 			d.Note = fmt.Sprintf("format %s → %s", have.Format, want.Format)
 			out = append(out, d)
 		}
@@ -285,6 +295,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			d := resources.NewDetail("~",
 				fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
 				change.ClassMigration)
+			d.Property = propName
 			d.Note = "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer"
 			out = append(out, d)
 		} else {
@@ -306,8 +317,10 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
 			continue
 		}
-		out = append(out, resources.NewDetail("+",
-			fmt.Sprintf("option %q (propriété %q)", w.Name, propName), change.ClassSafe))
+		d := resources.NewDetail("+",
+			fmt.Sprintf("option %q (propriété %q)", w.Name, propName), change.ClassSafe)
+		d.Property = propName
+		out = append(out, d)
 	}
 
 	// Passe 3 : ce qui existe dans Notion et que le YAML ne réclame pas SERA
@@ -318,9 +331,10 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			continue
 		}
 		out = append(out, resources.Detail{
-			Op:     "-",
-			Target: fmt.Sprintf("option %q (propriété %q)", o.Name, propName),
-			Note:   "absente du YAML : l'API remplace la liste entière des options",
+			Op:       "-",
+			Target:   fmt.Sprintf("option %q (propriété %q)", o.Name, propName),
+			Property: propName,
+			Note:     "absente du YAML : l'API remplace la liste entière des options",
 			// Classe et compte viennent de la mesure. Avant elle, on ne sait pas :
 			// -1 dit « non mesuré », et ClassifyOptionRemoval le traduit en impact
 			// inconnu plutôt qu'en « sûr ».
@@ -352,11 +366,13 @@ func optionAttrLines(propName string, want, have state.Option) []resources.Detai
 	target := fmt.Sprintf("option %q (propriété %q)", want.Name, propName)
 	if want.Color != "" && want.Color != have.Color {
 		d := resources.NewDetail("~", target, change.ClassSafe)
+		d.Property = propName
 		d.Note = fmt.Sprintf("color %s → %s", have.Color, want.Color)
 		out = append(out, d)
 	}
 	if want.Group != "" && want.Group != have.Group {
 		d := resources.NewDetail("~", target, change.ClassSafe)
+		d.Property = propName
 		d.Note = fmt.Sprintf("group %s → %s", have.Group, want.Group)
 		out = append(out, d)
 	}
