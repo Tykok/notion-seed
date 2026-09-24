@@ -181,3 +181,90 @@ func TestDatabaseCreatePayloadNamesKeyAndPropertyOnUnsupportedType(t *testing.T)
 		}
 	}
 }
+
+// Sans l'id, l'option existante serait appariée par nom côté API : un nom
+// changé deviendrait un retrait suivi d'un ajout, et les lignes qui la
+// portaient perdraient leur valeur. Une option neuve n'en a pas.
+func TestOptionsPayloadCarriesExistingIDsAndOmitsThemForNewOnes(t *testing.T) {
+	target := state.Database{Properties: map[string]state.Property{
+		"Prio": {Type: "select", Options: []state.Option{
+			{ID: "o-haute", Name: "Haute", Color: "red"},
+			{Name: "Moyenne", Color: "orange"},
+		}},
+	}}
+
+	body, err := DataSourceUpdatePayload("tasks", target, []string{"Prio"})
+	if err != nil {
+		t.Fatalf("DataSourceUpdatePayload() error = %v", err)
+	}
+	var got struct {
+		Properties map[string]struct {
+			Select struct {
+				Options []map[string]any `json:"options"`
+			} `json:"select"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("payload illisible: %v", err)
+	}
+	opts := got.Properties["Prio"].Select.Options
+	if len(opts) != 2 {
+		t.Fatalf("options = %d, want 2", len(opts))
+	}
+	if opts[0]["id"] != "o-haute" {
+		t.Errorf("options[0][id] = %v, want o-haute — sans l'id, l'API détruit l'option", opts[0]["id"])
+	}
+	if _, present := opts[1]["id"]; present {
+		t.Errorf("options[1] porte un id alors qu'elle est neuve : %v", opts[1])
+	}
+}
+
+// Seules les propriétés du plan partent : en envoyer davantage écrirait des
+// propriétés que le plan n'a pas montrées.
+func TestDataSourceUpdatePayloadSendsOnlyTheNamedProperties(t *testing.T) {
+	target := state.Database{Properties: map[string]state.Property{
+		"Prio":  {Type: "select"},
+		"Notes": {Type: "rich_text"},
+	}}
+	body, err := DataSourceUpdatePayload("tasks", target, []string{"Prio"})
+	if err != nil {
+		t.Fatalf("DataSourceUpdatePayload() error = %v", err)
+	}
+	if strings.Contains(string(body), "Notes") {
+		t.Errorf("payload = %s, want sans Notes : seules les propriétés du plan partent", body)
+	}
+}
+
+// La description est refusée par l'API sur le data source (mesuré le
+// 2026-09-24) : seuls les champs nommés côté database partent, jamais plus.
+func TestDatabaseUpdatePayloadSendsOnlyTheNamedFields(t *testing.T) {
+	target := state.Database{Name: "Tâches", Description: "desc", Icon: "🟢"}
+	body, err := DatabaseUpdatePayload("tasks", target, []string{"name", "icon"})
+	if err != nil {
+		t.Fatalf("DatabaseUpdatePayload() error = %v", err)
+	}
+	s := string(body)
+	if !strings.Contains(s, "Tâches") || !strings.Contains(s, "🟢") {
+		t.Errorf("payload = %s, want le titre et l'icône", s)
+	}
+	if strings.Contains(s, "description") {
+		t.Errorf("payload = %s, want sans description : elle n'est pas dans le plan", s)
+	}
+}
+
+// Review Focus #4 : un type non supporté doit nommer la database ET la
+// propriété, et l'erreur doit remonter avant tout appel.
+func TestDataSourceUpdatePayloadNamesTheUnsupportedProperty(t *testing.T) {
+	target := state.Database{Properties: map[string]state.Property{
+		"Lien": {Type: "relation"},
+	}}
+	_, err := DataSourceUpdatePayload("tasks", target, []string{"Lien"})
+	if err == nil {
+		t.Fatal("error = nil, want une erreur de type non supporté")
+	}
+	for _, want := range []string{"tasks", "Lien", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}
