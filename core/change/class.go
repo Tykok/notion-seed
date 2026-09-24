@@ -34,16 +34,20 @@ const (
 	ClassDestructive
 
 	// ClassSilentRewrite : suppression d'une option de status. Les lignes qui
-	// la portaient sont réassignées à l'option par défaut, sans erreur ni
+	// la portaient sont réassignées à UNE AUTRE option, sans erreur ni
 	// avertissement de l'API. La donnée n'est pas seulement perdue : elle est
 	// remplacée par une valeur fausse, indistinguable après coup.
+	//
+	// « une autre » et pas « l'option par défaut » : la mesure du 2026-09-24
+	// donne À faire → Fait, qui n'est pas l'option par défaut du groupe. Laquelle
+	// l'API choisit n'a pas été mesuré, donc n'est pas affirmé.
 	ClassSilentRewrite
 
 	// ClassUnknownImpact : on ne sait pas ce que ce changement coûte. Un couple
 	// de types hors de la table mesurée, ou une mesure qui n'a pas pu être
 	// faite (--skip-preflight, requête en échec).
 	//
-	// En dernier de l'énumération DÉLIBÉRÉMENT : worstClass prend le maximum, et
+	// En dernier de l'énumération DÉLIBÉRÉMENT : WorstClass prend le maximum, et
 	// un impact qu'on ne sait pas nommer doit dominer l'en-tête d'une ressource.
 	// Ne pas savoir mérite plus d'attention que savoir que c'est sûr.
 	ClassUnknownImpact

@@ -18,9 +18,11 @@ import (
 // pas un échec de la commande — priver l'utilisateur du reste de son plan parce
 // qu'un comptage a échoué le serait.
 //
-// dataSourceIDs associe la key de configuration à l'id du data source, lu dans
-// le state. Une ressource absente de cette table n'est pas mesurable : elle n'a
-// jamais été importée, donc il n'y a rien à interroger.
+// dataSourceIDs associe la key de configuration à l'id du data source À
+// INTERROGER. L'appelant le compose : l'id frais que le refresh vient de lire
+// l'emporte, celui du state ne sert que de repli — mesurer sur un id périmé
+// compterait les lignes d'un autre objet. Une ressource absente de cette table
+// n'est pas mesurable : rien, ni relu ni en state, ne dit quoi interroger.
 func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *diff.Plan) []string {
 	var failures []string
 
