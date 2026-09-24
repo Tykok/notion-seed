@@ -174,3 +174,76 @@ func TestCountPropagatesTransportErrors(t *testing.T) {
 		t.Errorf("error = %v, elle doit porter le statut", err)
 	}
 }
+
+// Une réponse 200 qui n'est PAS une liste doit être refusée.
+//
+// Sans ce refus, n'importe quel objet JSON se décode sans erreur avec un
+// `results` absent, donc Count = 0, donc ClassifyOptionRemoval rend ClassSafe :
+// notion-seed affirmerait « 0 ligne concernée, rien à perdre » sur une réponse
+// dont il n'a rien compris. C'est exactement l'affirmation invérifiée que ce
+// produit existe pour rendre impossible.
+func TestCountRefusesAResponseThatIsNotAList(t *testing.T) {
+	// Le schéma d'un data source : ce que rendrait un ordre de routes erroné,
+	// côté serveur comme côté faux binaire de test.
+	body := []byte(`{"object":"data_source","id":"ds-1",` +
+		`"properties":{"Statut":{"id":"p-statut","type":"status"}}}`)
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{Status: 200, Body: body}, nil
+	})
+
+	res, err := NewCounter(tr).Count(context.Background(), Request{
+		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
+	})
+	if err == nil {
+		t.Fatalf("Count() error = nil (Count = %d), want le refus d'une réponse non comprise",
+			res.Count)
+	}
+	if !errors.Is(err, ErrUnreadableCount) {
+		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+	}
+	if !strings.Contains(fmt.Sprint(err), "  → ") {
+		t.Errorf("error = %v, elle doit porter une action corrective", err)
+	}
+}
+
+// Une réponse de type liste SANS champ `results` n'est pas une liste vide :
+// c'est une réponse qu'on n'a pas comprise. Les distinguer impose un pointeur
+// de tranche — une tranche nue confond « absent » et « vide ».
+func TestCountRefusesAListWithoutResults(t *testing.T) {
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list","has_more":false}`)}, nil
+	})
+
+	res, err := NewCounter(tr).Count(context.Background(), Request{
+		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
+	})
+	if err == nil {
+		t.Fatalf("Count() error = nil (Count = %d), want le refus d'une liste sans results",
+			res.Count)
+	}
+	if !errors.Is(err, ErrUnreadableCount) {
+		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+	}
+}
+
+// Une liste VIDE, elle, est une réponse parfaitement légitime : personne
+// n'utilise l'option, et c'est le cas qui rend un retrait sûr. La confondre
+// avec une réponse incomprise ferait perdre tout l'intérêt de mesurer.
+func TestCountAcceptsAnEmptyListAsZero(t *testing.T) {
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{
+			Status: 200,
+			Body:   []byte(`{"object":"list","results":[],"has_more":false}`),
+		}, nil
+	})
+
+	res, err := NewCounter(tr).Count(context.Background(), Request{
+		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
+	})
+	if err != nil {
+		t.Fatalf("Count() error = %v, want une liste vide acceptée", err)
+	}
+	if res.Count != 0 {
+		t.Errorf("Count = %d, want 0", res.Count)
+	}
+}

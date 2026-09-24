@@ -5,6 +5,7 @@ package measure
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -86,6 +87,27 @@ func TestEnrichLeavesUnfilterableTypesUnknown(t *testing.T) {
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if d := p.Changes[0].Details[0]; d.Class != change.ClassUnknownImpact {
 		t.Errorf("Class = %v, want ClassUnknownImpact", d.Class)
+	}
+}
+
+// ... et il ne produit AUCUNE ligne d'échec : rien n'est en panne. Les verser
+// dans la même liste que les 403 et les timeouts ferait apparaître « comptage
+// impossible » à chaque plan portant un type non filtrable, et apprendrait à
+// ignorer une ligne qui, elle, signale de vrais incidents.
+func TestEnrichReportsNoFailureForAnUnfilterableType(t *testing.T) {
+	p := planWithRemoval("people", "Quelqu'un")
+	c := counterFunc(func(context.Context, Request) (Result, error) {
+		// Enveloppée, comme filterFor l'enveloppe réellement : c'est errors.Is
+		// qui doit trancher, pas une comparaison d'égalité.
+		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedFilter, "people")
+	})
+
+	if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
+		t.Errorf("échecs = %v, want aucun : ne pas savoir poser la question n'est pas une panne", fails)
+	}
+	// Le comportement de la ligne, lui, ne change pas : on ne sait toujours pas.
+	if d := p.Changes[0].Details[0]; d.Class != change.ClassUnknownImpact || d.Count != -1 {
+		t.Errorf("Detail = {Count:%d Class:%v}, want inconnu", d.Count, d.Class)
 	}
 }
 

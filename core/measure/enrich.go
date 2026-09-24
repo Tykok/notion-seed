@@ -4,6 +4,7 @@ package measure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/tykok/notion-seed/core/change"
@@ -42,7 +43,16 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 			if err != nil {
 				// La ligne reste inconnue, ce qu'elle était déjà. On ne dégrade
 				// jamais vers « sûr » sur un échec.
-				failures = append(failures, fmt.Sprintf("%s : %v", ch.Resource, err))
+				//
+				// Un type non filtrable N'EST PAS une panne : c'est une question
+				// qu'on ne sait pas poser, et notion-seed le sait d'avance sans
+				// avoir rien tenté. Le verser dans la liste des échecs ferait
+				// apparaître « comptage impossible » à chaque plan portant un tel
+				// type, et apprendrait à ignorer une ligne qui signale par ailleurs
+				// de vrais incidents — 403, 429 épuisé, réponse incomprise.
+				if !errors.Is(err, ErrUnsupportedFilter) {
+					failures = append(failures, fmt.Sprintf("%s : %v", ch.Resource, err))
+				}
 				continue
 			}
 

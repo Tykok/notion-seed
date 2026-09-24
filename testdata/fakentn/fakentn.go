@@ -33,6 +33,26 @@ const createdDataSource = `{"object":"data_source","id":"ds-new",` +
 	`"title":[{"plain_text":"Projects"}],` +
 	`"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`
 
+// queryTwoRows est la réponse de TOUTE requête de comptage
+// (`POST /v1/data_sources/<id>/query`). Deux lignes portent l'option "Fait" :
+// de quoi vérifier qu'un retrait mesuré ressort avec son chiffre.
+//
+// PIÈGE D'ORDRE, valable pour tous les scénarios : le chemin
+// `/v1/data_sources/ds-1/query` porte AUSSI le préfixe `/v1/data_sources/`. Un
+// scénario qui teste ce préfixe avant le suffixe `/query` rend le schéma d'un
+// data source à une requête de comptage — un 200 parfaitement valide, sans
+// aucun `results`. Le comptage n'y verrait aucune ligne, donc « 0 ligne
+// concernée », donc « rien à perdre » : une affirmation fausse, pas une erreur.
+// Le cas `/query` passe donc TOUJOURS en premier, dans chaque scénario, et
+// TestFakeNtnAnswersQueryWithAListInEveryScenario le vérifie.
+//
+// Un compte non nul est délibéré : si un scénario reçoit une requête de
+// comptage qu'on n'avait pas prévue, il vaut mieux qu'elle produise un chiffre
+// visible qu'un zéro qui se lirait « sûr ».
+const queryTwoRows = `{"object":"list","results":[` +
+	`{"object":"page","id":"p1"},{"object":"page","id":"p2"}],` +
+	`"has_more":false}`
+
 // subcommand dit quelle sous-commande ntn a été invoquée. Les scénarios d'auth
 // doivent répondre différemment à --version et à whoami : dispatcher uniquement
 // sur la variable d'environnement ferait répondre la version à whoami, et
@@ -122,15 +142,9 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":false,"in_trash":false,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
-			// AVANT le cas de préfixe : /v1/data_sources/ds-1/query porte aussi le
-			// préfixe /v1/data_sources/, et l'ordre inverse ferait rendre le schéma
-			// du data source à une requête de comptage, qui lirait n'importe quoi.
+			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
 			case strings.HasSuffix(path, "/query"):
-				// Deux lignes portent l'option "Fait" : de quoi vérifier qu'un
-				// retrait mesuré ressort avec son chiffre.
-				fmt.Fprint(os.Stdout, `{"object":"list","results":[`+
-					`{"object":"page","id":"p1"},{"object":"page","id":"p2"}],`+
-					`"has_more":false}`)
+				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
 				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
 					`"title":[{"plain_text":"Tasks"}],`+
@@ -233,6 +247,9 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":true,"in_trash":true,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
+			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			case strings.HasSuffix(path, "/query"):
+				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
 				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
 					`"title":[{"plain_text":"Tasks"}],`+
@@ -264,6 +281,9 @@ func main() {
 			fmt.Fprint(os.Stderr, "> https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
 			switch {
+			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			case strings.HasSuffix(path, "/query"):
+				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/databases"):
 				fmt.Fprint(os.Stdout, createdDatabase)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
