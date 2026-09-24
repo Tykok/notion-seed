@@ -420,3 +420,181 @@ func TestRenderOrdersUnmanagedBeforeBlocked(t *testing.T) {
 		t.Errorf("le hors config doit précéder le blocage:\n%s", out)
 	}
 }
+
+// Chaque ligne mesurée porte son chiffre : c'est ce qui fait décider.
+func TestRenderShowsTheMeasuredCount(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Class: ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Annulé" (propriété "Statut")`,
+			Class: ClassSilentRewrite, Count: 47,
+			Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", Option: "Annulé"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	for _, want := range []string{"47 lignes", "réassignées", "sans trace"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sortie:\n%s\nil manque %q", got, want)
+		}
+	}
+}
+
+// 0 ligne : la ligne doit le dire, et être sûre. Sans ça, l'utilisateur ne sait
+// pas que notion-seed a vérifié.
+func TestRenderSaysWhenNoRowIsAffected(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Legacy" (propriété "Priorité")`,
+			Class: ClassSafe, Count: 0,
+			Measure: &resources.Measurement{Property: "Priorité", PropertyType: "select", Option: "Legacy"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "0 ligne concernée") {
+		t.Errorf("sortie:\n%s", b.String())
+	}
+}
+
+// Un compte plafonné ne doit jamais s'afficher comme un compte exact.
+func TestRenderMarksACappedCountAsALowerBound(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "X" (propriété "Statut")`,
+			Class: ClassSilentRewrite, Count: 300, Capped: true,
+			Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", Option: "X"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "plus de 300") {
+		t.Errorf("sortie:\n%s\nun compte plafonné doit se lire comme un minorant", b.String())
+	}
+}
+
+// La ligne Impact n'additionne JAMAIS deux familles différentes, et ne
+// revendique jamais plus que ce qui a été mesuré.
+func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details: []resources.Detail{
+			{Op: "-", Class: ClassSilentRewrite, Count: 47,
+				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
+			{Op: "~", Class: ClassSilentRewrite, Count: 230,
+				Measure: &resources.Measurement{PropertyType: "multi_select"}},
+		},
+	}}}
+	got := Impact(p)
+	if !strings.Contains(got, "47") || !strings.Contains(got, "jusqu'à 230") {
+		t.Errorf("Impact = %q : le compte de valeurs non vides est un MAJORANT, "+
+			"il ne dit pas combien de lignes perdront vraiment quelque chose", got)
+	}
+}
+
+func TestImpactIsEmptyWhenNothingIsAtStake(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details:  []resources.Detail{{Op: "+", Class: ClassSafe, Count: -1}},
+	}}}
+	if got := Impact(p); got != "" {
+		t.Errorf("Impact = %q, want vide", got)
+	}
+}
+
+// lifecycle ne bloque plus mais doit s'entendre.
+func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
+	p := &Plan{ToDestroy: 1, Changes: []Change{{
+		Resource: "database.archive", Kind: resources.KindDestroy,
+		Class: ClassDestructive, Acknowledged: []string{"prevent_destroy"},
+		Details: []resources.Detail{{Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "prevent_destroy") {
+		t.Errorf("sortie:\n%s", b.String())
+	}
+}
+
+// Un changement de type PLAFONNÉ ne se borne pas par le haut. Le compte est
+// celui des lignes non vides, donc un majorant de ce qui sera perdu — d'où
+// « jusqu'à » — mais plafonné il devient un MINORANT de ce majorant. Les deux
+// à la fois donneraient « jusqu'à plus de 300 », qui ne veut rien dire et
+// laisse croire à une borne supérieure qui n'existe pas.
+func TestRenderNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Class: ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "~", Target: `property "Tags" (multi_select → select)`,
+			Class: ClassSilentRewrite, Count: 300, Capped: true,
+			Measure: &resources.Measurement{Property: "Tags", PropertyType: "multi_select"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if strings.Contains(got, "jusqu'à") {
+		t.Errorf("sortie:\n%s\nun compte plafonné ne borne rien par le haut", got)
+	}
+	if !strings.Contains(got, "plus de 300") {
+		t.Errorf("sortie:\n%s\nle minorant mesuré doit rester visible", got)
+	}
+}
+
+// La ligne Impact somme des comptes ; si l'un d'eux est plafonné, la somme est
+// un minorant et doit se lire comme tel. L'afficher en compte ferme serait
+// exactement l'affirmation invérifiée que notion-seed existe pour empêcher.
+func TestImpactKeepsACappedSumALowerBound(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details: []resources.Detail{
+			{Op: "-", Class: ClassSilentRewrite, Count: 300, Capped: true,
+				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
+			{Op: "-", Class: ClassDestructive, Count: 12,
+				Measure: &resources.Measurement{PropertyType: "select", Option: "Legacy"}},
+		},
+	}}}
+	got := Impact(p)
+	if !strings.Contains(got, "plus de 300 lignes réassignées") {
+		t.Errorf("Impact = %q : une somme qui contient un compte plafonné est un minorant", got)
+	}
+	// La famille non plafonnée garde son compte ferme : le plafond de l'une ne
+	// doit pas rendre l'autre plus floue qu'elle ne l'est.
+	if !strings.Contains(got, "12 lignes perdront leur valeur") {
+		t.Errorf("Impact = %q : la famille non plafonnée garde son compte exact", got)
+	}
+}
+
+// Même raisonnement sur la famille « appauvries » : plafonnée, elle perd sa
+// borne supérieure, donc son « jusqu'à ».
+func TestImpactNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details: []resources.Detail{{
+			Op: "~", Class: ClassSilentRewrite, Count: 300, Capped: true,
+			Measure: &resources.Measurement{PropertyType: "multi_select"},
+		}},
+	}}}
+	got := Impact(p)
+	if strings.Contains(got, "jusqu'à") {
+		t.Errorf("Impact = %q : un compte plafonné ne borne rien par le haut", got)
+	}
+	if got == "" {
+		t.Error("Impact ne doit pas se taire : des lignes seront appauvries")
+	}
+}

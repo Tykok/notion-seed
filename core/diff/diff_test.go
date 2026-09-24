@@ -169,6 +169,44 @@ func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
 	}
 }
 
+// Une ressource couverte par les DEUX clés doit les accuser dans un ordre
+// stable, et dans cet ordre-là : le rendu les imprime telles quelles, et la
+// sortie de `plan` doit rester identique entre deux exécutions.
+//
+// Sans ce test, l'ordre ne tient qu'à la suite des deux `if` dans absorb :
+// les permuter, ou verser les clés depuis une map, changerait la sortie sans
+// qu'aucun test ne le remarque.
+func TestComputeAcknowledgesPreventDestroyBeforeAllowDataLoss(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{
+		PreventDestroy: []string{"database.tasks"},
+		AllowDataLoss:  []string{"database.tasks"},
+	}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db-1", Name: "Tasks"}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Changes) != 1 {
+		t.Fatalf("Changes = %d, want 1", len(p.Changes))
+	}
+	got := p.Changes[0].Acknowledged
+	want := []string{"prevent_destroy", "allow_data_loss"}
+	if len(got) != len(want) {
+		t.Fatalf("Acknowledged = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Acknowledged = %v, want %v (l'ordre fait partie du contrat)", got, want)
+			break
+		}
+	}
+}
+
 // Blocked survit pour ce qui n'est PAS une classification de risque : une
 // ressource que le state ancre et que Notion ne connaît plus rend le plan
 // incalculable, ce qui reste une erreur.
