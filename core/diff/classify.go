@@ -15,4 +15,5 @@ const (
 	ClassMigration     = change.ClassMigration
 	ClassDestructive   = change.ClassDestructive
 	ClassSilentRewrite = change.ClassSilentRewrite
+	ClassUnknownImpact = change.ClassUnknownImpact
 )

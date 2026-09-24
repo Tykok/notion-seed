@@ -703,8 +703,9 @@ func TestCheckWorkspaceMatchRejectsForeignWorkspace(t *testing.T) {
 // Le faux ntn rend deux lignes portant l'option "Fait" sur une propriété de
 // type status : mesuré, ce retrait est une réécriture silencieuse. Non mesuré,
 // il resterait « impact inconnu » — c'est exactement l'écart que cette passe
-// ferme, et la seule preuve de bout en bout que le comptage a bien eu lieu tant
-// que le rendu ne porte pas encore le chiffre.
+// ferme. Depuis que le rendu porte le chiffre, ce test l'assère : c'est la
+// seule vérification de bout en bout que le nombre AFFICHÉ est celui qui a été
+// compté, et pas un compte d'une autre database ou un reste de classification.
 func TestPlanMeasuresRowsAndDoesNotBlock(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -743,6 +744,13 @@ databases:
 	}
 	if strings.Contains(out, "Plan bloqué") {
 		t.Errorf("le plan bloque encore:\n%s", out)
+	}
+	// Le chiffre lui-même, pas seulement la classe : c'est lui le produit.
+	if !strings.Contains(out, "2 lignes") {
+		t.Errorf("le compte mesuré n'est pas affiché:\n%s", out)
+	}
+	if !strings.Contains(out, "Impact : 2 lignes réassignées sans trace.") {
+		t.Errorf("la ligne d'agrégat manque ou ne dit pas ce qui a été mesuré:\n%s", out)
 	}
 }
 
