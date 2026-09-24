@@ -30,8 +30,13 @@ type Change struct {
 	// le décider sans relire le texte des lignes.
 	Kind resources.ChangeKind
 	// Target est la cible résolue, non nulle sur une création et sur un
-	// update. Voir Result.Target.
+	// update. Voir Result.Target : l'autorisation d'écrire est portée par
+	// Withheld, pas par Target seul — Target == nil ne suffit plus à la
+	// déduire.
 	Target *state.Database
+	// Withheld dit pourquoi cette ressource ne sera pas écrite, ou "" si elle
+	// peut l'être. Voir diff.Result.Withheld.
+	Withheld string
 
 	// Acknowledged nomme les clés de lifecycle qui couvrent cette ressource.
 	//
@@ -211,6 +216,7 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 		Key:      key,
 		Kind:     res.Changeset.Kind,
 		Target:   res.Target,
+		Withheld: res.Withheld,
 		Class:    WorstClass(res.Changeset.Details),
 	}
 	if res.Changeset.Kind == resources.KindCreate {

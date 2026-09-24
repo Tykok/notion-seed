@@ -198,6 +198,41 @@ func TestUpdateTargetCarriesRemoteOptionIDs(t *testing.T) {
 	}
 }
 
+// Un renommage d'option — même key, nom différent — ne peut pas s'exprimer
+// dans l'API : le PATCH rend 200 sans rien changer. Écrire retiendrait dans le
+// state un nom que Notion ne porte pas, donc la ressource ENTIÈRE doit être
+// retenue plutôt qu'à moitié écrite.
+func TestMigrationWithholdsTheWholeResource(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
+		{Key: "haute", Name: "Très haute", Color: "red"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	if res.Target != nil {
+		t.Error("Target non nulle sur une ressource retenue : apply l'écrirait")
+	}
+	if res.Withheld == "" {
+		t.Fatal("Withheld vide : une cible nulle sans motif renvoie l'utilisateur deviner")
+	}
+	if !strings.Contains(res.Withheld, "  → ") {
+		t.Errorf("Withheld = %q, want une action corrective introduite par \"  → \"", res.Withheld)
+	}
+}
+
+// Le cas symétrique : une ressource sans migration ne doit jamais être
+// retenue, et Target reste l'autorisation d'écrire attendue par apply.
+func TestAResourceWithoutMigrationIsNotWithheld(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if res.Withheld != "" {
+		t.Errorf("Withheld = %q, want vide", res.Withheld)
+	}
+	if res.Target == nil {
+		t.Error("Target = nil alors que rien ne retient la ressource")
+	}
+}
+
 func TestUpdateTargetKeepsUndeclaredPropertiesOut(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)

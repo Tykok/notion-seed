@@ -81,7 +81,11 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 	}
 
 	for _, c := range p.Changes {
-		// Une cible nulle EST l'interdiction d'écrire : voir diff.Result.Target.
+		// apply n'écrit aujourd'hui que les créations : c'est Kind qui tranche.
+		// Target nil ne fait ici que protéger contre une cible manquante — ce
+		// n'est plus, depuis diff.Result.Target, l'autorisation d'écrire : celle-ci
+		// est portée par Withheld, que ce chemin ne lit pas encore (mise à jour :
+		// tâche 8).
 		if c.Kind != resources.KindCreate || c.Target == nil {
 			rep.Skipped = append(rep.Skipped, c.Resource)
 			continue
