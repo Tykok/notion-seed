@@ -25,23 +25,26 @@ Les deux derniers sont ceux qui justifient l'outil : la donnée n'est pas perdue
 elle est remplacée par une valeur plausible et fausse, indistinguable après coup.
 
 `notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
-de lignes sont concernées :
+de lignes sont concernées. Une option de `status` retirée du YAML, deux lignes
+la portent :
 
 ```
+ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
+
+Plan: 0 to add, 1 to change, 0 to destroy
+
   ~ database.tasks  [réécriture silencieuse]
-      - option "Annulé" (propriété "Statut")  [réécriture silencieuse]
-          → 47 lignes seront réassignées à une autre option, sans trace.
-      - option "Legacy" (propriété "Priorité")
-          → 0 ligne concernée.
+      - option "Fait" (propriété "Statut") — absente du YAML : l'API remplace la liste entière des options  [réécriture silencieuse]
+          → 2 lignes seront réassignées à une autre option, sans trace.
 
-Impact : 47 valeurs réassignées sans trace.
+Impact : 2 valeurs réassignées sans trace.
 ```
 
-Une option que personne n'utilise ne coûte rien à retirer, quel que soit son
-type : c'est ce qu'un refus par principe ne savait pas voir, et pourquoi il a
-été remplacé par une mesure. Ce qui n'a pas pu être compté — hors ligne, ou
-quand la requête échoue — ressort en `impact inconnu`, jamais en « rien à
-perdre ».
+Le chiffre est mesuré, pas déduit : la même ligne serait classée `sûr`, avec
+`0 ligne concernée`, si personne n'utilisait cette option. C'est ce qu'un refus
+par principe ne savait pas voir, et pourquoi il a été remplacé par une mesure.
+Ce qui n'a pas pu être compté — hors ligne, ou quand la requête échoue —
+ressort en `impact inconnu`, jamais en « rien à perdre ».
 
 Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
 appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
@@ -207,11 +210,19 @@ Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notio
 
 `prevent_destroy` et `allow_data_loss` ne bloquent **plus rien**. Malgré son
 nom, `prevent_destroy` n'empêche pas la destruction : ces deux clés ne sont que
-des accusés de lecture, affichés sous la ressource qu'elles nomment.
+des accusés de lecture, affichés sous la ressource qu'elles nomment. Une
+database sortie du YAML, déclarée dans `prevent_destroy` :
 
 ```
-  - database.archive  [destructif]
+ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
+
+Plan: 0 to add, 0 to change, 1 to destroy
+
+  - database.tasks  [destructif]
+      - database.tasks — présente dans le state, absente de la configuration  [destructif]
       → déclarée dans lifecycle.prevent_destroy.
+
+Impact : 1 database(s) à la corbeille.
 ```
 
 Elles disent « je sais ce que cette ressource porte », et rien de plus. C'est
@@ -348,9 +359,11 @@ ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
 Plan: 2 to add, 0 to change, 0 to destroy
 
   + database.projects (new)
+      + name "Projects"
       + property "Name" (title)
 
   + database.tasks (new)
+      + name "Tasks"
       + property "Estimate" (number)
       + property "Name" (title)
 ```
