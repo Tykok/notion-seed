@@ -70,13 +70,9 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 		// config, et c'est voulu — garder un id « géré mais non déclaré » le
 		// rendrait invisible.
 		res.Changeset.Kind = resources.KindDestroy
-		res.Changeset.Details = []resources.Detail{{
-			Op:     "-",
-			Target: "database." + key,
-			Note:   "présente dans le state, absente de la configuration",
-			Class:  change.ClassDestructive,
-			Count:  -1,
-		}}
+		d := resources.NewDetail("-", "database."+key, change.ClassDestructive)
+		d.Note = "présente dans le state, absente de la configuration"
+		res.Changeset.Details = []resources.Detail{d}
 		return res
 
 	case actual == nil && applied != nil:
@@ -129,32 +125,21 @@ func createLines(target *state.Database) []resources.Detail {
 		if f.value == "" {
 			continue
 		}
-		out = append(out, resources.Detail{
-			Op:     "+",
-			Target: fmt.Sprintf("%s %q", f.label, f.value),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		out = append(out, resources.NewDetail("+",
+			fmt.Sprintf("%s %q", f.label, f.value), change.ClassSafe))
 	}
 
 	for _, name := range sortedPropNames(target.Properties) {
 		p := target.Properties[name]
-		out = append(out, resources.Detail{
-			Op:     "+",
-			Target: fmt.Sprintf("property %q (%s)", name, p.Type),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		out = append(out, resources.NewDetail("+",
+			fmt.Sprintf("property %q (%s)", name, p.Type), change.ClassSafe))
 		// L'ordre des options est celui du YAML : il est visible dans Notion,
 		// le trier le rendrait faux.
 		for _, o := range p.Options {
-			out = append(out, resources.Detail{
-				Op:     "+",
-				Target: fmt.Sprintf("option %q (propriété %q)", o.Name, name),
-				Note:   optionAttrNote(o),
-				Class:  change.ClassSafe,
-				Count:  -1,
-			})
+			d := resources.NewDetail("+",
+				fmt.Sprintf("option %q (propriété %q)", o.Name, name), change.ClassSafe)
+			d.Note = optionAttrNote(o)
+			out = append(out, d)
 		}
 	}
 	return out
@@ -179,22 +164,14 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 	var out []resources.Detail
 
 	if desired.Name != "" && desired.Name != actual.Name {
-		out = append(out, resources.Detail{
-			Op:     "~",
-			Target: "name",
-			Note:   fmt.Sprintf("%q → %q", actual.Name, desired.Name),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		d := resources.NewDetail("~", "name", change.ClassSafe)
+		d.Note = fmt.Sprintf("%q → %q", actual.Name, desired.Name)
+		out = append(out, d)
 	}
 	if desired.Description != "" && desired.Description != actual.Description {
-		out = append(out, resources.Detail{
-			Op:     "~",
-			Target: "description",
-			Note:   fmt.Sprintf("%q → %q", actual.Description, desired.Description),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		d := resources.NewDetail("~", "description", change.ClassSafe)
+		d.Note = fmt.Sprintf("%q → %q", actual.Description, desired.Description)
+		out = append(out, d)
 	}
 
 	for _, name := range sortedPropNames(desired.Properties) {
@@ -211,13 +188,10 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				note = fmt.Sprintf(
 					"%q n'est pas renommée, elle reste hors config avec ses données", old)
 			}
-			out = append(out, resources.Detail{
-				Op:     "+",
-				Target: fmt.Sprintf("property %q (%s)", name, want.Type),
-				Note:   note,
-				Class:  change.ClassSafe,
-				Count:  -1,
-			})
+			d := resources.NewDetail("+",
+				fmt.Sprintf("property %q (%s)", name, want.Type), change.ClassSafe)
+			d.Note = note
+			out = append(out, d)
 			continue
 		}
 
@@ -238,13 +212,9 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
-			out = append(out, resources.Detail{
-				Op:     "~",
-				Target: fmt.Sprintf("property %q", name),
-				Note:   fmt.Sprintf("format %s → %s", have.Format, want.Format),
-				Class:  change.ClassSafe,
-				Count:  -1,
-			})
+			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), change.ClassSafe)
+			d.Note = fmt.Sprintf("format %s → %s", have.Format, want.Format)
+			out = append(out, d)
 		}
 		out = append(out, optionLines(name, want, have, applied.Properties[name])...)
 	}
@@ -307,13 +277,11 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		}
 		claimed[i] = true
 		if current := have.Options[i].Name; current != w.Name {
-			out = append(out, resources.Detail{
-				Op:     "~",
-				Target: fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
-				Note:   "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer",
-				Class:  change.ClassMigration,
-				Count:  -1,
-			})
+			d := resources.NewDetail("~",
+				fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
+				change.ClassMigration)
+			d.Note = "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer"
+			out = append(out, d)
 		} else {
 			// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
 			// place est libre pour comparer color et group, en classe sûre — comme
@@ -333,12 +301,8 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			out = append(out, optionAttrLines(propName, w, have.Options[i])...)
 			continue
 		}
-		out = append(out, resources.Detail{
-			Op:     "+",
-			Target: fmt.Sprintf("option %q (propriété %q)", w.Name, propName),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		out = append(out, resources.NewDetail("+",
+			fmt.Sprintf("option %q (propriété %q)", w.Name, propName), change.ClassSafe))
 	}
 
 	// Passe 3 : ce qui existe dans Notion et que le YAML ne réclame pas SERA
@@ -380,23 +344,16 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 // une couleur qu'il n'écrirait jamais.
 func optionAttrLines(propName string, want, have state.Option) []resources.Detail {
 	var out []resources.Detail
+	target := fmt.Sprintf("option %q (propriété %q)", want.Name, propName)
 	if want.Color != "" && want.Color != have.Color {
-		out = append(out, resources.Detail{
-			Op:     "~",
-			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
-			Note:   fmt.Sprintf("color %s → %s", have.Color, want.Color),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		d := resources.NewDetail("~", target, change.ClassSafe)
+		d.Note = fmt.Sprintf("color %s → %s", have.Color, want.Color)
+		out = append(out, d)
 	}
 	if want.Group != "" && want.Group != have.Group {
-		out = append(out, resources.Detail{
-			Op:     "~",
-			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
-			Note:   fmt.Sprintf("group %s → %s", have.Group, want.Group),
-			Class:  change.ClassSafe,
-			Count:  -1,
-		})
+		d := resources.NewDetail("~", target, change.ClassSafe)
+		d.Note = fmt.Sprintf("group %s → %s", have.Group, want.Group)
+		out = append(out, d)
 	}
 	return out
 }

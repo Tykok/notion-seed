@@ -59,10 +59,20 @@ type Detail struct {
 	Capped bool
 }
 
-// newDetail construit un détail non mesuré. À utiliser SYSTÉMATIQUEMENT : un
+// NewDetail construit un détail non mesuré. À utiliser SYSTÉMATIQUEMENT : un
 // Detail composé à la main porte Count = 0, donc « aucune ligne concernée »,
 // donc « sûr » — une affirmation que personne n'a vérifiée.
-func newDetail(op, target string, class change.Class) Detail {
+//
+// Exportée parce que le comparateur, dans le paquet diff, produit l'essentiel
+// des détails du dépôt : une fonction non exportée l'aurait laissé sans
+// garde-fou, seul endroit où il en faut vraiment un.
+//
+// Elle ne prend PAS Note ni les trois champs de mesure : un constructeur à six
+// arguments serait moins lisible que le littéral qu'il remplace. Les détails
+// qui portent une mesure restent donc des littéraux, avec Count: -1 écrit
+// explicitement. Le filet qui rattrape un oubli n'est pas ce constructeur mais
+// TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount, dans core/diff.
+func NewDetail(op, target string, class change.Class) Detail {
 	return Detail{Op: op, Target: target, Class: class, Count: -1}
 }
 
