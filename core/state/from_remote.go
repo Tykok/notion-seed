@@ -9,17 +9,15 @@ import "github.com/tykok/notion-seed/core/providers/notion/resources"
 // Le résultat ne porte aucune key : l'API ne connaît pas cette notion. C'est la
 // voie « actual » du diff à trois voies.
 //
-// Icon reste vide : le décodeur ne lit pas l'icône de la réponse. Tant que
-// c'est le cas, l'icône ne doit être comparée NULLE PART — la config la porte,
-// le réel jamais, donc toute comparaison produirait un changement fantôme à
-// chaque run. Le jour où le décodeur la lira, elle deviendra comparable sans
-// autre changement ici.
+// Icon porte l'emoji de la database, ou "" pour toute autre forme d'icône : le
+// YAML ne déclare qu'un emoji.
 func FromRemote(rd resources.RemoteDatabase) Database {
 	out := Database{
 		ID:           rd.ID,
 		DataSourceID: rd.DataSourceID,
 		Name:         rd.Name,
 		Description:  rd.Description,
+		Icon:         rd.Icon,
 		Properties:   make(map[string]Property, len(rd.Properties)),
 	}
 	for name, p := range rd.Properties {
