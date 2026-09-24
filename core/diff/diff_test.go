@@ -296,10 +296,14 @@ func TestComputeReportsNotComparedWhenActualWasNotRead(t *testing.T) {
 	}
 }
 
-func TestComputeAllowDataLossUnblocksDestructiveOnly(t *testing.T) {
-	// tasks perd une option de select (destructif), statuses perd une option de
-	// status (réécriture silencieuse). allow_data_loss couvre les deux
-	// ressources ; une seule doit être débloquée.
+// Avant ce commit, allow_data_loss ne débloquait que le destructif ordinaire :
+// une réécriture silencieuse restait bloquée quoi qu'il arrive, quand bien
+// même elle figurait dans allow_data_loss. Depuis ce commit, aucune classe ne
+// bloque plus le plan par elle-même — notion-seed mesure le coût d'un
+// changement et le dit, il ne le refuse plus sur la foi de sa classe. tasks
+// perd une option de select, flows perd une option de status : les deux
+// passent désormais, qu'allow_data_loss les couvre ou non.
+func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 	cfg := &config.Config{
 		Databases: []config.Database{
 			{Key: "tasks", Name: "Tasks", Properties: map[string]config.Property{
@@ -344,15 +348,11 @@ func TestComputeAllowDataLossUnblocksDestructiveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute() error = %v", err)
 	}
-	if !p.Blocked {
-		t.Fatal("Blocked = false : la réécriture silencieuse ne doit JAMAIS être débloquée par allow_data_loss")
+	if p.Blocked {
+		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
 	}
-	joined := strings.Join(p.BlockedReasons, " ")
-	if strings.Contains(joined, "database.tasks") {
-		t.Errorf("database.tasks est couverte par allow_data_loss: %v", p.BlockedReasons)
-	}
-	if !strings.Contains(joined, "database.flows") {
-		t.Errorf("database.flows doit rester bloquée: %v", p.BlockedReasons)
+	if p.ToChange != 2 {
+		t.Errorf("ToChange = %d, want 2 : les deux retraits d'option sont mesurés, pas refusés", p.ToChange)
 	}
 }
 

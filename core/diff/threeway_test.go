@@ -183,39 +183,43 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"Fait" → "Terminé"`,
 		},
 		{
-			name:      "option renommée sans key : retrait plus ajout",
+			// Le retrait passe par ClassifyOptionRemoval(have.Type, -1) à cet
+			// endroit du plan : le nombre de lignes concernées n'y est pas encore
+			// mesuré (une tâche ultérieure le branchera), donc -1 dit « non mesuré »
+			// et la classe rendue est ClassUnknownImpact, quel que soit le type.
+			name:      "option renommée sans key : retrait plus ajout, impact non mesuré",
 			desired:   db("Statut", status(state.Option{Name: "Terminé", Group: "Complete"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Name: "Fait", Group: "Complete"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "Fait", Group: "Complete"})),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassSilentRewrite,
+			wantClass: change.ClassUnknownImpact,
 			wantLine:  `"Fait"`,
 		},
 		{
-			name:      "option de status retirée : réécriture silencieuse",
+			name:      "option de status retirée : impact non mesuré à ce point du plan",
 			desired:   db("Statut", status(state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Key: "todo", Name: "À faire", Group: "To-do"}, state.Option{ID: "o2", Key: "ko", Name: "Annulé", Group: "Complete"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "À faire", Group: "To-do"}, state.Option{ID: "o2", Name: "Annulé", Group: "Complete"})),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassSilentRewrite,
+			wantClass: change.ClassUnknownImpact,
 			wantLine:  `"Annulé"`,
 		},
 		{
-			name:      "option de select retirée : destructif",
+			name:      "option de select retirée : impact non mesuré à ce point du plan",
 			desired:   db("Tag", sel(state.Option{Key: "a", Name: "A"})),
 			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "a", Name: "A"}, state.Option{ID: "o2", Key: "b", Name: "B"})),
 			actual:    db("Tag", sel(state.Option{ID: "o1", Name: "A"}, state.Option{ID: "o2", Name: "B"})),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassDestructive,
+			wantClass: change.ClassUnknownImpact,
 			wantLine:  `"B"`,
 		},
 		{
-			name:      "option de multi_select retirée : destructif",
+			name:      "option de multi_select retirée : impact non mesuré à ce point du plan",
 			desired:   db("Tags", multiSel(state.Option{Key: "a", Name: "A"})),
 			applied:   db("Tags", multiSel(state.Option{ID: "o1", Key: "a", Name: "A"}, state.Option{ID: "o2", Key: "b", Name: "B"})),
 			actual:    db("Tags", multiSel(state.Option{ID: "o1", Name: "A"}, state.Option{ID: "o2", Name: "B"})),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassDestructive,
+			wantClass: change.ClassUnknownImpact,
 			wantLine:  `"B"`,
 		},
 		{
@@ -489,8 +493,10 @@ func TestCompareDatabaseOptionRenameFreesNameForNewOption(t *testing.T) {
 
 // Angle mort de la table (ronde de relecture 1) : un renommage par key et un
 // retrait sur la même propriété status doivent produire les DEUX lignes, et
-// la classe rendue doit rester la plus grave des deux — réécriture
-// silencieuse, pas migration.
+// la classe rendue doit rester la plus grave des deux. Le retrait n'est pas
+// mesuré à ce point du plan (ClassifyOptionRemoval y reçoit -1), donc c'est
+// l'impact inconnu qui domine la migration — pas la réécriture silencieuse
+// que la mesure révélera une fois branchée.
 func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 	desired := db("Statut", status(state.Option{Key: "a", Name: "Migré"}))
 	applied := db("Statut", status(
@@ -507,8 +513,8 @@ func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 	if got.Changeset.Kind != resources.KindUpdate {
 		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
 	}
-	if c := worstClass(got.Changeset.Details); c != change.ClassSilentRewrite {
-		t.Errorf("classe = %v, want ClassSilentRewrite (détails: %+v)", c, got.Changeset.Details)
+	if c := worstClass(got.Changeset.Details); c != change.ClassUnknownImpact {
+		t.Errorf("classe = %v, want ClassUnknownImpact (détails: %+v)", c, got.Changeset.Details)
 	}
 
 	lines := detailStrings(got.Changeset.Details)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tykok/notion-seed/core/config"
+	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/state"
 )
 
@@ -122,6 +123,7 @@ func TestRenderCreatePlan(t *testing.T) {
 			Class:    ClassSafe,
 			Resource: "database.tasks",
 			Detail:   "(new)",
+			Kind:     resources.KindCreate,
 			Lines:    []string{`+ property "Estimate" (number)`, `+ property "Name" (title)`},
 		}},
 	}

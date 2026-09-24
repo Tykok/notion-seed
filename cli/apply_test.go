@@ -211,30 +211,31 @@ func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 
 // Un plan bloqué gagne sur --auto-approve : le consentement est déclaratif, et
 // la confirmation ne lève rien. Aucune écriture.
+//
+// notion-seed ne bloque plus sur la foi de la classe d'un changement (voir
+// core/change) : il mesure le coût et le dit. lifecycle.prevent_destroy reste
+// le seul blocage qui subsiste à ce stade du plan, donc c'est le scénario qui
+// exerce encore un vrai refus ici — une database protégée qui sort du YAML
+// alors qu'elle existe toujours dans Notion.
 func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
-	// La database importée porte l'option "Fait" que le YAML ne déclare plus :
-	// retrait d'une option de status, donc réécriture silencieuse.
 	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml": workspaceYAML,
-		"databases/all.yaml": `
-databases:
-  - key: tasks
-    name: "Tasks"
-    properties:
-      Name:
-        type: title
-      Statut:
-        type: status
-        options:
-          - key: todo
-            name: "À faire"
-            color: blue
-            group: "To-do"
-`,
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
 	})
 	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
 		t.Fatalf("import: %v", err)
+	}
+	// La database sort du YAML mais reste protégée par prevent_destroy : elle
+	// existe toujours dans Notion, donc c'est une destruction que
+	// prevent_destroy doit bloquer, quel que soit --auto-approve.
+	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
+		[]byte(workspaceYAML+"lifecycle:\n  prevent_destroy:\n    - database.tasks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte("databases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	before := mustReadFile(t, filepath.Join(dir, state.FileName))
 

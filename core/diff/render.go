@@ -5,6 +5,8 @@ package diff
 import (
 	"fmt"
 	"io"
+
+	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
 
 // Render écrit le plan en texte brut. notion-seed est un outil de terminal :
@@ -61,12 +63,17 @@ func Render(w io.Writer, p *Plan) error {
 	}
 
 	for _, c := range p.Changes {
+		// Le marqueur suit le Kind de la ressource — ce que l'opération FAIT
+		// (créer, détruire, modifier) — pas sa Class : notion-seed ne bloque plus
+		// sur la foi d'une classe, donc la classe n'a plus à décider d'un
+		// marqueur d'alerte. Le coût, lui, reste visible juste après : l'étiquette
+		// [classe] sur l'en-tête et sur chaque ligne concernée.
 		marker := "~"
-		if c.Detail == "(new)" {
+		switch c.Kind {
+		case resources.KindCreate:
 			marker = "+"
-		}
-		if c.Class.Blocking() {
-			marker = "x"
+		case resources.KindDestroy:
+			marker = "-"
 		}
 
 		header := fmt.Sprintf("  %s %s", marker, c.Resource)
