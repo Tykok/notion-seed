@@ -309,3 +309,71 @@ func TestValidateDocumentRejectsMalformedYAML(t *testing.T) {
 		t.Errorf("message = %q, il doit nommer le fichier", err.Error())
 	}
 }
+
+// Une option de status sans group doit être refusée au chargement. C'est la
+// contrepartie de la suppression du défaut "To-do" dans le mapper : sans
+// défaut, une option sans group produirait un payload que l'API rangerait
+// silencieusement dans le premier groupe.
+func TestValidateRejectsStatusOptionWithoutGroup(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+`)
+	err := ValidateDocument("databases/tasks.yaml", doc)
+	if err == nil {
+		t.Fatal("ValidateDocument() = nil, want un refus sur l'option sans group")
+	}
+	for _, want := range []string{"group", "À faire", "To-do", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
+// Symétrique du traitement de `format` : `group` n'a de sens que sur status.
+func TestValidateRejectsGroupOnSelectOption(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Priorité:
+        type: select
+        options:
+          - name: "Haute"
+            group: "To-do"
+`)
+	err := ValidateDocument("databases/tasks.yaml", doc)
+	if err == nil {
+		t.Fatal("ValidateDocument() = nil, want un refus de group sur un select")
+	}
+	if !strings.Contains(err.Error(), "group") {
+		t.Errorf("message = %q, il doit nommer `group`", err.Error())
+	}
+}
+
+// Le chemin heureux ne doit pas régresser.
+func TestValidateAcceptsStatusOptionWithGroup(t *testing.T) {
+	doc := []byte(`
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+            group: "To-do"
+`)
+	if err := ValidateDocument("databases/tasks.yaml", doc); err != nil {
+		t.Fatalf("ValidateDocument() = %v, want nil", err)
+	}
+}

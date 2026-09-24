@@ -140,9 +140,45 @@ func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 		return ""
 	}
 
+	// `group` manquant sur une option de status. Le message brut dit « missing
+	// property "group" » sans expliquer pourquoi ce champ est obligatoire ici
+	// alors qu'il ne l'est nulle part ailleurs — et c'est justement la question
+	// que se pose l'utilisateur.
+	if req, isRequired := errKind.(*kind.Required); isRequired {
+		for _, missing := range req.Missing {
+			if missing != "group" {
+				continue
+			}
+			name := ""
+			if opt, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+				name, _ = opt["name"].(string)
+			}
+			return fmt.Sprintf(
+				"`group` est obligatoire sur chaque option de status (ici %q) et n'accepte que %s. "+
+					"notion-seed ne choisit pas de groupe à votre place : une option envoyée sans "+
+					"group est rangée par l'API dans le premier groupe, sans erreur.",
+				name, quotedList(StatusGroups))
+		}
+	}
+
 	// Cas `not` UNIQUEMENT : le pointeur désigne la PROPRIÉTÉ, pas le champ
 	// fautif, donc on regarde ce qu'elle contient pour nommer le champ en trop.
 	if _, isNot := errKind.(*kind.Not); isNot {
+		// `group` sur une option hors status. Le pointeur désigne l'OPTION, donc
+		// le type fautif se lit un cran plus haut : c'est la propriété qui porte
+		// le type, pas l'option. Sans ce cas, le message se réduit à « 'not'
+		// failed », qui ne nomme même pas le champ en trop.
+		if opt, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
+			if _, hasGroup := opt["group"]; hasGroup {
+				t := ""
+				if prop, ok := valueAtPointer(doc, propertyPointerOf(pointer)).(map[string]any); ok {
+					t, _ = prop["type"].(string)
+				}
+				return fmt.Sprintf(
+					"`group` n'existe que sur les options d'une propriété de type status. "+
+						"Cette propriété est de type %q — retirez le champ `group`.", t)
+			}
+		}
 		if prop, ok := valueAtPointer(doc, pointer).(map[string]any); ok {
 			t, _ := prop["type"].(string)
 			if _, hasOptions := prop["options"]; hasOptions && !acceptsOptions(t) {
@@ -193,6 +229,16 @@ func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 	return fmt.Sprintf(
 		"`group` n'accepte que %s — l'API Notion refuse les groupes nommés librement. Trouvé %q.",
 		quotedList(StatusGroups), got)
+}
+
+// propertyPointerOf remonte du pointeur d'une option à celui de sa propriété,
+// en retirant le suffixe `/options/<n>`. Le type d'une option n'est pas porté
+// par l'option : il est sur la propriété.
+func propertyPointerOf(optionPointer string) string {
+	if i := strings.LastIndex(optionPointer, "/options/"); i >= 0 {
+		return optionPointer[:i]
+	}
+	return optionPointer
 }
 
 // acceptsOptions dit si un type de propriété accepte un bloc `options`.

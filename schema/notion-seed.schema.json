@@ -87,6 +87,23 @@
             "required": ["type"]
           },
           "else": { "not": { "required": ["options"] } }
+        },
+        {
+          "comment": "group n'existe que sur status, et y est obligatoire. Obligatoire parce que notion-seed ne substitue aucune valeur par défaut : une option de status sans group partirait dans le payload sans group, et l'API rangerait TOUTES les options dans le premier groupe, sans erreur — une écriture que le plan n'aurait pas annoncée. Interdit ailleurs, pour la même raison que `format` hors number.",
+          "if": {
+            "properties": { "type": { "const": "status" } },
+            "required": ["type"]
+          },
+          "then": {
+            "properties": {
+              "options": { "items": { "required": ["name", "group"] } }
+            }
+          },
+          "else": {
+            "properties": {
+              "options": { "items": { "not": { "required": ["group"] } } }
+            }
+          }
         }
       ]
     },
