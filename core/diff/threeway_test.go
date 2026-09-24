@@ -235,6 +235,101 @@ func TestDriftLinesNamesIconChangedOutside(t *testing.T) {
 	}
 }
 
+// D1 (mesuré le 2026-09-24) : la couleur d'une option est immuable côté API —
+// le PATCH répond 400 « Cannot update color of select with id/name » et fait
+// échouer toute la propriété. Le remède passe par la recréation de l'option,
+// donc ClassMigration, et son coût se mesure — le nombre de lignes qui portent
+// l'option ACTUELLE.
+func TestOptionColorChangeIsMigrationAndIsMeasured(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	// Une seule option, un seul écart : la couleur.
+	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
+		{Key: "haute", Name: "Haute", Color: "purple"},
+		{Key: "basse", Name: "Basse", Color: "blue"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	var found *resources.Detail
+	for i, d := range res.Changeset.Details {
+		if strings.Contains(d.Note, "color") {
+			found = &res.Changeset.Details[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("aucune ligne de couleur alors que red → purple")
+	}
+	if found.Class != change.ClassMigration {
+		t.Errorf("Class = %v, want ClassMigration", found.Class)
+	}
+	if found.Measure == nil {
+		t.Fatal("Measure = nil : le remède passe par le retrait de l'option, son coût se mesure")
+	}
+	if found.Measure.Option != "Haute" || found.Measure.PropertyType != "select" {
+		t.Errorf("Measure = %+v, want Option=Haute PropertyType=select", *found.Measure)
+	}
+	if found.Count != -1 {
+		t.Errorf("Count = %d, want -1 (non mesuré)", found.Count)
+	}
+}
+
+// Le group est MUTABLE par id (mesuré le 2026-09-24 : "Fait" déplacée de
+// Complete vers In progress). Il ne doit donc pas suivre la couleur.
+func TestOptionGroupChangeStaysSafe(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {ID: "s1", Type: "status", Options: []state.Option{
+				{ID: "o-fait", Name: "Fait", Color: "green", Group: "Complete"},
+			}},
+		},
+	}
+	applied := actual
+	applied.Properties = map[string]state.Property{
+		"Statut": {ID: "s1", Type: "status", Options: []state.Option{
+			{ID: "o-fait", Key: "fait", Name: "Fait", Color: "green", Group: "Complete"},
+		}},
+	}
+	desired := state.Database{Name: "Tasks", Properties: map[string]state.Property{
+		"Statut": {Type: "status", Options: []state.Option{
+			{Key: "fait", Name: "Fait", Group: "In progress"},
+		}},
+	}}
+
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	if len(res.Changeset.Details) != 1 {
+		t.Fatalf("détails = %d, want 1 : %+v", len(res.Changeset.Details), res.Changeset.Details)
+	}
+	if got := res.Changeset.Details[0].Class; got != change.ClassSafe {
+		t.Errorf("Class = %v, want ClassSafe — le group est mutable", got)
+	}
+}
+
+// Un renommage porte lui aussi son coût : le remède passe par le retrait de
+// l'ancienne option.
+func TestOptionRenameIsMeasured(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
+		{Key: "haute", Name: "Très haute", Color: "red"},
+		{Key: "basse", Name: "Basse", Color: "blue"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	for _, d := range res.Changeset.Details {
+		if d.Class != change.ClassMigration {
+			continue
+		}
+		if d.Measure == nil {
+			t.Fatalf("ligne de migration %q sans Measure", d.Target)
+		}
+		if d.Measure.Option != "Haute" {
+			t.Errorf("Measure.Option = %q, want %q (le nom ACTUEL, celui qui filtre)",
+				d.Measure.Option, "Haute")
+		}
+		return
+	}
+	t.Fatal("aucune ligne de migration alors que le nom change")
+}
+
 func TestUpdateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
@@ -410,7 +505,12 @@ func TestCompareDatabase(t *testing.T) {
 			// part avant cette correction — vérifié en inversant les deux groupes
 			// et en changeant les deux couleurs dans un YAML de test, qui
 			// ressortait alors en « Aucun changement ».
-			name: "option couleur déclarée et différente : ligne sûre",
+			//
+			// D1 (mesuré le 2026-09-24) : la couleur d'une option est IMMUABLE côté
+			// API — le PATCH répond 400 et fait échouer toute la propriété. Le
+			// remède passe par la recréation de l'option, d'où ClassMigration à la
+			// place du ClassSafe d'origine.
+			name: "option couleur déclarée et différente : migration requise",
 			desired: db("Statut", status(
 				state.Option{Key: "todo", Name: "À faire", Color: "red", Group: "To-do"})),
 			applied: db("Statut", status(
@@ -418,7 +518,7 @@ func TestCompareDatabase(t *testing.T) {
 			actual: db("Statut", status(
 				state.Option{ID: "o1", Name: "À faire", Color: "blue", Group: "To-do"})),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassSafe,
+			wantClass: change.ClassMigration,
 			wantLine:  "color blue → red",
 		},
 		{

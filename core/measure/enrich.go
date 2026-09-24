@@ -67,9 +67,19 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 			d.Count = res.Count
 			d.Capped = res.Capped
 
-			if d.Measure.Option != "" {
+			switch {
+			case d.Class == change.ClassMigration:
+				// Un renommage ou une couleur d'option porte déjà ClassMigration
+				// AVANT toute mesure : le changement est inexprimable côté API,
+				// indépendamment du nombre de lignes concernées. Seul le COÛT du
+				// remède (retirer l'ancienne option) restait à mesurer, et c'est
+				// fait ci-dessus. Recalculer la classe ici la ferait retomber à
+				// ClassSafe/ClassDestructive/ClassSilentRewrite selon le compte, et
+				// `--fail-on=migration` cesserait de se déclencher sur un simple
+				// renommage.
+			case d.Measure.Option != "":
 				d.Class = change.ClassifyOptionRemoval(d.Measure.PropertyType, res.Count)
-			} else if res.Count == 0 {
+			case res.Count == 0:
 				// Le compte reclasse un changement de type DANS UN SEUL SENS, et
 				// l'asymétrie n'a rien d'évident :
 				//
