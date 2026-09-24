@@ -81,7 +81,10 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 	reportMeasureFailures(cmd, prep)
 
 	out := cmd.OutOrStdout()
-	if err := diff.Render(out, prep.plan); err != nil {
+	// Sans la ligne d'agrégat : elle couvre tout le plan, alors qu'apply n'en
+	// écrit qu'une partie. apply annonce lui-même ce qu'il va écrire, juste
+	// avant la confirmation.
+	if err := diff.RenderWithoutImpact(out, prep.plan); err != nil {
 		return err
 	}
 

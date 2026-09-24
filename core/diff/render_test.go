@@ -784,3 +784,39 @@ func TestImpactNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 		t.Error("Impact ne doit pas se taire : des lignes seront appauvries")
 	}
 }
+
+// apply n'écrit que les créations : lui faire afficher la ligne d'agrégat du
+// plan complet lui ferait annoncer des destructions et des modifications qu'il
+// ne fera pas — démenties quatre lignes plus bas par sa propre section « Non
+// appliqué ». La ligne la plus lue du produit ne peut pas mentir sur la
+// commande qui écrit.
+func TestRenderWithoutImpactOmitsTheAggregateLine(t *testing.T) {
+	p := &Plan{ToDestroy: 1, Changes: []Change{{
+		Resource: "database.archive", Kind: resources.KindDestroy,
+		Class: ClassDestructive,
+		Details: []resources.Detail{{
+			Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1,
+		}},
+	}}}
+
+	var withImpact bytes.Buffer
+	if err := Render(&withImpact, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(withImpact.String(), "Impact :") {
+		t.Fatalf("montage du test faux : Render doit porter la ligne Impact\n%s", withImpact.String())
+	}
+
+	var without bytes.Buffer
+	if err := RenderWithoutImpact(&without, p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without.String(), "Impact :") {
+		t.Errorf("sortie:\n%s\nelle ne doit pas porter la ligne d'agrégat", without.String())
+	}
+	// Tout le reste du plan doit être rendu à l'identique : seule la ligne
+	// d'agrégat disparaît, pas le détail de ce qui est en jeu.
+	if !strings.Contains(without.String(), "database.archive") {
+		t.Errorf("sortie:\n%s\nle plan lui-même doit rester rendu", without.String())
+	}
+}

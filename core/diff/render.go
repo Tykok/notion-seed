@@ -19,7 +19,23 @@ import (
 // le non comparé ensuite (ce qu'on n'a pas vérifié), le blocage en dernier
 // avec son issue. Chaque section disparaît si elle est vide : sans state, la
 // sortie est exactement celle d'avant.
-func Render(w io.Writer, p *Plan) error {
+func Render(w io.Writer, p *Plan) error { return render(w, p, true) }
+
+// RenderWithoutImpact écrit le plan sans sa ligne d'agrégat.
+//
+// C'est ce dont `apply` a besoin. La ligne Impact agrège TOUT le plan, or apply
+// n'écrit aujourd'hui que les créations : la lui faire afficher lui ferait
+// annoncer « 1 database(s) à la corbeille » pour une destruction que cette
+// version ne fera pas — et sa propre section « Non appliqué » la démentirait
+// quatre lignes plus bas. La ligne la plus lue du produit ne peut pas mentir
+// sur la commande qui écrit.
+//
+// apply annonce lui-même ce qu'il va écrire, juste avant la confirmation. Le
+// jour où il écrira update et destroy, les deux rendus coïncideront et cette
+// fonction pourra disparaître.
+func RenderWithoutImpact(w io.Writer, p *Plan) error { return render(w, p, false) }
+
+func render(w io.Writer, p *Plan, withImpact bool) error {
 	if len(p.Drifts) > 0 {
 		if _, err := fmt.Fprintln(w, "Dérive détectée hors de notion-seed"); err != nil {
 			return err
@@ -131,7 +147,7 @@ func Render(w io.Writer, p *Plan) error {
 	// La ligne d'agrégat vient après la liste : on lit le détail, puis le total
 	// par famille. Elle disparaît quand rien de mesuré n'est en jeu — annoncer
 	// un impact vide serait une affirmation de plus que ce qui a été mesuré.
-	if line := Impact(p); line != "" {
+	if line := Impact(p); withImpact && line != "" {
 		if _, err := fmt.Fprintf(w, "%s\n\n", line); err != nil {
 			return err
 		}
