@@ -83,7 +83,7 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 		return err
 	}
 
-	writable, skipped := splitByWritability(prep.plan)
+	toCreate, toClean, skipped := splitByWritability(prep.plan)
 	if err := renderSkipped(out, skipped); err != nil {
 		return err
 	}
@@ -95,15 +95,14 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 			"  → chaque blocage est détaillé ci-dessus, avec ce qui le lève")
 	}
 
-	if writable == 0 && len(skipped) == 0 {
+	if toCreate == 0 && toClean == 0 && len(skipped) == 0 {
 		// Plan convergé. Un prompt de cérémonie sur un plan vide apprendrait à
 		// taper « apply » sans lire.
 		return nil
 	}
 
-	if writable > 0 {
-		fmt.Fprintf(out, "%d écriture(s) vont partir dans la page %s.\n",
-			writable, prep.cfg.Workspace.ParentPageID)
+	if toCreate > 0 || toClean > 0 {
+		announceWhatWillHappen(out, toCreate, toClean, prep.cfg.Workspace.ParentPageID)
 		ok, err := confirm(cmd, autoApprove)
 		if err != nil {
 			return err
@@ -112,6 +111,15 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 			return fmt.Errorf("confirmation refusée, rien n'a été appliqué\n"+
 				"  → relancez et tapez exactement %q pour appliquer", confirmWord)
 		}
+	}
+
+	// apply est souvent la PREMIÈRE commande qui écrit le state. Sans cette
+	// ligne, checkWorkspaceMatch resterait désarmé à vie pour un projet amorcé
+	// par apply : un state sans workspace_id est traité comme « on ne peut pas
+	// vérifier », et un 404 venu du mauvais workspace ferait jeter une identité
+	// parfaitement valide.
+	if prep.snap.WorkspaceID == "" {
+		prep.snap.WorkspaceID = prep.workspaceID
 	}
 
 	res := resources.NewDatabaseResource(prep.tr, mapper.RemoteDatabaseFromJSON)
@@ -141,24 +149,52 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 //
 // Le nettoyage d'une entrée de state obsolète compte comme une écriture : c'est
 // une identité qu'on jette, et elle ne se retrouve que par un import.
-func splitByWritability(p *diff.Plan) (int, []string) {
-	writable := len(p.StaleState)
-	var skipped []string
+// splitByWritability sépare ce qui part vers Notion, ce qui ne touche que le
+// state local, et ce qu'apply ne sait pas écrire.
+//
+// Les deux premiers sont comptés SÉPARÉMENT : retirer une entrée de state
+// obsolète n'écrit rien dans Notion, et les confondre ferait mentir la phrase
+// de confirmation — le seul moment où l'utilisateur décide, sur la foi de ce
+// qui est à l'écran.
+func splitByWritability(p *diff.Plan) (toCreate, toClean int, skipped []skippedChange) {
+	toClean = len(p.StaleState)
 	for _, c := range p.Changes {
 		// Une cible nulle EST l'interdiction d'écrire : voir diff.Result.Target.
 		if c.Kind == resources.KindCreate && c.Target != nil {
-			writable++
+			toCreate++
 			continue
 		}
-		skipped = append(skipped, c.Resource)
+		skipped = append(skipped, skippedChange{resource: c.Resource, kind: c.Kind})
 	}
-	return writable, skipped
+	return toCreate, toClean, skipped
+}
+
+// skippedChange porte le Kind en plus du nom : sans lui, une destruction en
+// attente serait présentée comme une modification de propriétés, et le message
+// enverrait l'utilisateur faire la mauvaise chose sur l'opération la plus
+// destructrice du produit.
+type skippedChange struct {
+	resource string
+	kind     resources.ChangeKind
+}
+
+// announceWhatWillHappen dit ce qui va se passer, par nature. Une seule phrase
+// qui parlerait d'« écritures » pour les deux serait fausse pour le nettoyage.
+func announceWhatWillHappen(w io.Writer, toCreate, toClean int, parentPageID string) {
+	if toCreate > 0 {
+		fmt.Fprintf(w, "%d database(s) vont être créées dans la page %s.\n",
+			toCreate, parentPageID)
+	}
+	if toClean > 0 {
+		fmt.Fprintf(w, "%d entrée(s) obsolètes vont être retirées du state. "+
+			"Rien ne sera écrit dans Notion pour celles-là.\n", toClean)
+	}
 }
 
 // renderSkipped affiche ce qu'apply ne sait pas encore écrire. La section
 // disparaîtra d'elle-même quand update puis destroy arriveront : le contrat de
 // sortie, lui, ne bougera pas.
-func renderSkipped(w io.Writer, skipped []string) error {
+func renderSkipped(w io.Writer, skipped []skippedChange) error {
 	if len(skipped) == 0 {
 		return nil
 	}
@@ -169,13 +205,19 @@ func renderSkipped(w io.Writer, skipped []string) error {
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
 	}
-	for _, r := range skipped {
-		if _, err := fmt.Fprintf(w, "  ~ %s\n", r); err != nil {
+	for _, s := range skipped {
+		marker, hint := "~", "les modifications de propriétés arrivent dans une "+
+			"version suivante. Appliquez-les dans Notion, ou attendez."
+		if s.kind == resources.KindDestroy {
+			// Le marqueur DOIT correspondre à celui du plan affiché plus haut, et
+			// l'action corrective à l'opération réellement en attente.
+			marker, hint = "-", "la destruction des databases arrive dans une version "+
+				"suivante. Archivez-la dans Notion, ou attendez."
+		}
+		if _, err := fmt.Fprintf(w, "  %s %s\n", marker, s.resource); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(w,
-			"      → les modifications de propriétés arrivent dans une version "+
-				"suivante. Appliquez-les dans Notion, ou attendez."); err != nil {
+		if _, err := fmt.Fprintf(w, "      → %s\n", hint); err != nil {
 			return err
 		}
 	}
@@ -183,7 +225,7 @@ func renderSkipped(w io.Writer, skipped []string) error {
 	return err
 }
 
-func renderReport(w io.Writer, rep apply.Report, skipped []string) {
+func renderReport(w io.Writer, rep apply.Report, skipped []skippedChange) {
 	for _, l := range rep.Created {
 		fmt.Fprintf(w, "+ %s\n", l)
 	}
