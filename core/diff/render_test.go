@@ -143,6 +143,65 @@ func TestRenderCreatePlan(t *testing.T) {
 	}
 }
 
+// Depuis que notion-seed ne bloque plus sur la foi d'une Class (voir
+// core/change), le marqueur d'en-tête suit le Kind de la ressource — ce que
+// l'opération FAIT, pas ce qu'elle coûte. Sans ce test, permuter les deux
+// `case` du switch de Render, ou mapper KindDestroy sur "+" par erreur de
+// copier-coller, resterait invisible : go test ./... passerait quand même,
+// puisque seul le cas création était couvert par TestRenderCreatePlan.
+func TestRenderDestroyMarksResourceWithMinus(t *testing.T) {
+	p := &Plan{
+		ToDestroy: 1,
+		Changes: []Change{{
+			Resource: "database.tasks",
+			Kind:     resources.KindDestroy,
+		}},
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	header := findLineContaining(t, buf.String(), "database.tasks")
+	if !strings.HasPrefix(header, "  - ") {
+		t.Errorf("en-tête = %q, want un marqueur « - » (destruction)", header)
+	}
+}
+
+// Symétrique du test ci-dessus, côté modification : sans lui, un Kind autre
+// que création ou destruction pourrait glisser sur n'importe quel marqueur
+// sans qu'aucun test ne le remarque.
+func TestRenderUpdateMarksResourceWithTilde(t *testing.T) {
+	p := &Plan{
+		ToChange: 1,
+		Changes: []Change{{
+			Resource: "database.tasks",
+			Kind:     resources.KindUpdate,
+		}},
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, p); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	header := findLineContaining(t, buf.String(), "database.tasks")
+	if !strings.HasPrefix(header, "  ~ ") {
+		t.Errorf("en-tête = %q, want un marqueur « ~ » (modification)", header)
+	}
+}
+
+// findLineContaining rend la première ligne de out qui contient sub, pour
+// isoler l'en-tête d'une ressource du reste du rendu sans dépendre de son
+// contenu exact au-delà du marqueur.
+func findLineContaining(t *testing.T, out, sub string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, sub) {
+			return line
+		}
+	}
+	t.Fatalf("aucune ligne ne contient %q dans:\n%s", sub, out)
+	return ""
+}
+
 func TestRenderMarksBlockingChanges(t *testing.T) {
 	p := &Plan{
 		ToChange: 1,
