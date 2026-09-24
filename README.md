@@ -9,13 +9,14 @@ Déclarer un workspace Notion en fichiers n'est pas le problème difficile. Le
 problème difficile, c'est de savoir ce que l'API va faire de vos données quand
 la déclaration change.
 
-Quatre comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
+Cinq comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
 la requête ne vous signale pas :
 
 | Changement | Ce que fait l'API |
 |---|---|
 | Renommer une option (avec son id) | Répond `200`, ne change rien |
-| Retirer une option de `select` / `multi_select` | Les lignes concernées passent à vide |
+| Retirer une option de `select` | Les lignes concernées passent à vide |
+| Retirer une option de `multi_select` | Les lignes concernées perdent **cette valeur** — elles ne passent à vide que si elles n'en portaient pas d'autre |
 | Retirer une option de `status` | **Réassigne les lignes à une autre option**, sans erreur |
 | `multi_select` → `select` | **Ne garde qu'une valeur** sur les lignes qui en portaient plusieurs |
 
