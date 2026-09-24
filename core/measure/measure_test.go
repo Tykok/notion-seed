@@ -247,3 +247,33 @@ func TestCountAcceptsAnEmptyListAsZero(t *testing.T) {
 		t.Errorf("Count = %d, want 0", res.Count)
 	}
 }
+
+// `has_more: true` avec un `next_cursor` vide est une réponse qu'on n'a pas
+// comprise : l'API annonce une page suivante et ne dit pas où la prendre.
+//
+// Sans ce refus, la boucle repart sur la PREMIÈRE page et la recompte à chaque
+// tour : une page de 2 lignes ressort à {Count: 6, Capped: true}, et
+// l'utilisateur lit « plus de 6 lignes seront réassignées, sans trace » pour 2
+// lignes réelles. Pire qu'un compte faux : Capped le présente comme un
+// minorant, donc comme une garantie.
+func TestCountRefusesHasMoreWithoutACursor(t *testing.T) {
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{Status: 200, Body: []byte(
+			`{"object":"list","results":[{"object":"page"},{"object":"page"}],` +
+				`"has_more":true,"next_cursor":""}`)}, nil
+	})
+
+	res, err := NewCounter(tr).Count(context.Background(), Request{
+		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
+	})
+	if err == nil {
+		t.Fatalf("Count() error = nil (Count = %d, Capped = %v), want le refus d'un "+
+			"has_more sans curseur", res.Count, res.Capped)
+	}
+	if !errors.Is(err, ErrUnreadableCount) {
+		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+	}
+	if !strings.Contains(fmt.Sprint(err), "  → ") {
+		t.Errorf("error = %v, elle doit porter une action corrective", err)
+	}
+}
