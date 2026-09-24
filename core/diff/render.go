@@ -256,12 +256,28 @@ func consequence(d resources.Detail) string {
 	// cette propriété, et c'est pour ça qu'il parle de valeurs, pas de lignes.
 	count := bound(d.Count, d.Capped) + " lignes"
 
-	// Retrait d'option : le sort des lignes dépend du type, mesuré le 2026-09-24.
+	// Retrait d'option : le sort des lignes dépend du type, et les TROIS cas
+	// mesurés le 2026-09-24 diffèrent. Les confondre affirmerait plus que ce qui
+	// a été mesuré, ce qui est le seul défaut que ce produit ne peut pas se
+	// permettre.
 	if d.Measure.Option != "" {
-		if d.Measure.PropertyType == "status" {
+		switch d.Measure.PropertyType {
+		case "status":
 			return count + " seront réassignées à une autre option, sans trace"
+		case "multi_select":
+			// Mesuré : ['Un','Deux'] moins 'Un' donne ['Deux'] ; ['Un'] moins 'Un'
+			// donne []. La ligne perd CETTE valeur, pas forcément toute sa cellule.
+			//
+			// On ne dit pas combien de lignes se videront : le filtre `contains`
+			// compte les lignes portant l'option, pas celles qui n'en portent
+			// qu'elle. Le savoir coûterait de relire chaque ligne, ce que la passe
+			// de mesure ne fait pas — alors on nomme ce qu'on a.
+			return count + " perdront cette valeur ; elles ne passeront à vide que si " +
+				"elles n'en portaient pas d'autre"
+		default:
+			// select : mesuré, la cellule est vidée. La ligne n'en portait qu'une.
+			return count + " passeront à vide"
 		}
-		return count + " perdront leur valeur"
 	}
 	// Changement de type : le compte est celui des valeurs NON VIDES, donc un
 	// majorant de ce qui sera réellement perdu.
