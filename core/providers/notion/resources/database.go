@@ -223,7 +223,7 @@ func DatabaseChangeset(db config.Database, remote RemoteState) Changeset {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			cs.Details = append(cs.Details, newDetail("+",
+			cs.Details = append(cs.Details, NewDetail("+",
 				fmt.Sprintf("property %q (%s)", name, db.Properties[name].Type),
 				change.ClassSafe))
 		}

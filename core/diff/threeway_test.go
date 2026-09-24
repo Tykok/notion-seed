@@ -642,6 +642,154 @@ func TestCompareDatabaseRequestsNoMeasurementForSafeDetails(t *testing.T) {
 	}
 }
 
+// Aucun détail émis par le comparateur ne doit porter Count == 0.
+//
+// POURQUOI c'est un bug et pas une lubie : 0 se lit « 0 ligne concernée », donc
+// « rien à perdre », donc « sûr ». Or CompareDatabase est PURE — elle ne compte
+// rien, elle se contente d'ÉMETTRE des demandes de mesure. Un 0 sorti d'ici
+// serait donc une affirmation d'innocuité que personne n'a vérifiée, et c'est
+// exactement le défaut que ce produit existe pour rendre impossible. Avant la
+// passe de mesure, le seul compte honnête est -1 : « on ne sait pas ».
+//
+// Ce test existe parce que resources.NewDetail ne suffit pas : un littéral
+// `resources.Detail{...}` reste toujours possible, et le champ Count vaut 0 par
+// défaut en Go. Le constructeur est la commodité ; ce test est le garde-fou. Il
+// balaie un éventail de cas, pas un seul, parce que le trou peut s'ouvrir dans
+// n'importe quelle branche de planLines, optionLines ou createLines.
+func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
+	withColor := func(name, color, group string) state.Property {
+		return state.Property{ID: "p1", Type: "status", Options: []state.Option{
+			{ID: "o1", Key: "k", Name: name, Color: color, Group: group},
+		}}
+	}
+
+	cases := []struct {
+		name                     string
+		desired, applied, actual *state.Database
+	}{
+		{
+			name:    "création complète",
+			desired: db("Statut", status(state.Option{Key: "todo", Name: "À faire", Color: "blue", Group: "To-do"})),
+		},
+		{
+			name: "nom et description modifiés",
+			desired: &state.Database{Name: "Nouveau", Description: "Nouvelle", Properties: map[string]state.Property{
+				"Name": {Type: "title"},
+			}},
+			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
+			actual: &state.Database{Name: "Ancien", Description: "Ancienne", Properties: map[string]state.Property{
+				"Name": {ID: "p1", Type: "title"},
+			}},
+		},
+		{
+			name: "ajout de propriété",
+			desired: &state.Database{Name: "Tasks", Properties: map[string]state.Property{
+				"Name":     {Type: "title"},
+				"Estimate": {Type: "number"},
+			}},
+			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
+			actual:  db("Name", state.Property{ID: "p1", Type: "title"}),
+		},
+		{
+			name:    "changement de type dans la table mesurée",
+			desired: db("Tags", state.Property{Type: "multi_select"}),
+			applied: db("Tags", state.Property{ID: "p1", Type: "select"}),
+			actual:  db("Tags", state.Property{ID: "p1", Type: "select"}),
+		},
+		{
+			name:    "changement de type hors de la table mesurée",
+			desired: db("Estimate", state.Property{Type: "people"}),
+			applied: db("Estimate", state.Property{ID: "p1", Type: "number"}),
+			actual:  db("Estimate", state.Property{ID: "p1", Type: "number"}),
+		},
+		{
+			name:    "format de number modifié",
+			desired: db("Estimate", state.Property{Type: "number", Format: "euro"}),
+			applied: db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
+			actual:  db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
+		},
+		{
+			name: "ajout d'option",
+			desired: db("Statut", status(
+				state.Option{Key: "todo", Name: "À faire"},
+				state.Option{Name: "Neuve"},
+			)),
+			applied: db("Statut", status(state.Option{ID: "o1", Key: "todo", Name: "À faire"})),
+			actual:  db("Statut", status(state.Option{ID: "o1", Name: "À faire"})),
+		},
+		{
+			name:    "retrait d'option de status",
+			desired: db("Statut", status(state.Option{Key: "todo", Name: "À faire"})),
+			applied: db("Statut", status(
+				state.Option{ID: "o1", Key: "todo", Name: "À faire"},
+				state.Option{ID: "o2", Name: "Annulé"},
+			)),
+			actual: db("Statut", status(
+				state.Option{ID: "o1", Name: "À faire"},
+				state.Option{ID: "o2", Name: "Annulé"},
+			)),
+		},
+		{
+			name:    "retrait d'option de select",
+			desired: db("Tag", sel(state.Option{Key: "a", Name: "A"})),
+			applied: db("Tag", sel(
+				state.Option{ID: "o1", Key: "a", Name: "A"},
+				state.Option{ID: "o2", Name: "B"},
+			)),
+			actual: db("Tag", sel(
+				state.Option{ID: "o1", Name: "A"},
+				state.Option{ID: "o2", Name: "B"},
+			)),
+		},
+		{
+			name:    "retrait d'option de multi_select",
+			desired: db("Tag", multiSel(state.Option{Key: "a", Name: "A"})),
+			applied: db("Tag", multiSel(
+				state.Option{ID: "o1", Key: "a", Name: "A"},
+				state.Option{ID: "o2", Name: "B"},
+			)),
+			actual: db("Tag", multiSel(
+				state.Option{ID: "o1", Name: "A"},
+				state.Option{ID: "o2", Name: "B"},
+			)),
+		},
+		{
+			name:    "renommage d'option par key",
+			desired: db("Statut", status(state.Option{Key: "done", Name: "Terminé"})),
+			applied: db("Statut", status(state.Option{ID: "o1", Key: "done", Name: "Fait"})),
+			actual:  db("Statut", status(state.Option{ID: "o1", Name: "Fait"})),
+		},
+		{
+			name:    "couleur et groupe d'option modifiés",
+			desired: db("Statut", withColor("Fait", "green", "Complete")),
+			applied: db("Statut", withColor("Fait", "blue", "To-do")),
+			actual:  db("Statut", withColor("Fait", "blue", "To-do")),
+		},
+		{
+			name:    "destruction d'une database orpheline",
+			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
+			actual:  db("Name", state.Property{ID: "p1", Type: "title"}),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := CompareDatabase("tasks", tc.desired, tc.applied, tc.actual)
+			if len(res.Changeset.Details) == 0 {
+				t.Fatal("aucun détail : ce cas ne couvre plus rien, corrigez le triplet")
+			}
+			for _, d := range res.Changeset.Details {
+				if d.Count == 0 {
+					t.Errorf(
+						"le détail %q %q porte Count = 0, donc « 0 ligne concernée », "+
+							"donc « sûr » — alors que rien n'a été mesuré ; want -1",
+						d.Op, d.Target)
+				}
+			}
+		})
+	}
+}
+
 func detailStrings(ds []resources.Detail) []string {
 	out := make([]string, 0, len(ds))
 	for _, d := range ds {
