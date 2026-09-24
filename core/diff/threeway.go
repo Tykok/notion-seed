@@ -56,10 +56,19 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 	case desired == nil && applied == nil:
 		return res
 
+	case desired == nil && actual == nil:
+		// Plus dans la config, et le réel ne la porte pas — ou n'a pas été lu.
+		// Les deux situations se distinguent par la raison du refresh, que seul
+		// Compute connaît : c'est donc lui qui tranche entre « entrée de state
+		// obsolète » et « non comparé ». Conclure ici à une destruction
+		// proposerait de détruire ce qui n'existe déjà plus.
+		return res
+
 	case desired == nil:
-		// Dans le state, plus dans la config : l'identité n'a plus d'ancre
-		// déclarée. Plus strict que la règle des propriétés hors config, et c'est
-		// voulu — garder un id « géré mais non déclaré » le rendrait invisible.
+		// Dans le state, TOUJOURS dans Notion, plus dans la config : l'identité
+		// n'a plus d'ancre déclarée. Plus strict que la règle des propriétés hors
+		// config, et c'est voulu — garder un id « géré mais non déclaré » le
+		// rendrait invisible.
 		res.Changeset.Kind = resources.KindDestroy
 		res.Changeset.Details = []resources.Detail{{
 			Op:     "-",
