@@ -66,7 +66,20 @@ func newPlanCmd() *cobra.Command {
 	return cmd
 }
 
-func runPlan(cmd *cobra.Command, opts *planOptions) error {
+// prepared porte tout ce que plan et apply calculent de la même façon.
+//
+// Les deux commandes DOIVENT passer par ici : si apply recalculait autrement,
+// le plan affiché et ce qui est écrit pourraient diverger — le défaut même que
+// la cible résolue existe pour rendre impossible.
+type prepared struct {
+	cfg  *config.Config
+	snap *state.Snapshot
+	plan *diff.Plan
+	// tr est nil sous --skip-preflight : aucun appel n'a été émis.
+	tr transport.Transport
+}
+
+func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 	// Pas de fallback sur un contexte nil : cobra le peuple toujours avant RunE
 	// (vérifié dans les sources de v1.10.2), et un fallback silencieux
 	// masquerait une erreur de programmation au lieu de la révéler.
@@ -76,56 +89,65 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 	// positif, et une panic est un message inutilisable pour qui a tapé
 	// `--rate 0`.
 	if err := opts.validate(); err != nil {
-		return err
+		return nil, err
 	}
 
 	// 1. Load — valider chaque fichier, fusionner, PUIS vérifier l'unicité
 	// globale des key. config.Load garantit cet ordre.
-
 	cfg, err := config.Load(opts.dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 2. State — le dernier état appliqué. Absent = premier run, tout ressort
 	// en création, exactement comme avant l'existence du state.
 	snap, err := state.Load(opts.dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	out := &prepared{cfg: cfg, snap: snap}
 	var refreshed map[string]diff.Refreshed
 	if !opts.skipPreflight {
 		info, err := preflight.Check(ctx, "ntn")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		cmd.Printf("ntn %s — workspace %s (%s)\n\n",
 			info.NtnVersion, info.WorkspaceName, info.WorkspaceID)
 
 		if err := checkWorkspaceMatch(snap, info.WorkspaceID); err != nil {
-			return err
+			return nil, err
 		}
 
-		tr := newTransport(cmd, opts)
-		if err := checkParentPage(ctx, tr, cfg.Workspace.ParentPageID, opts.ratePerSec); err != nil {
-			return err
+		out.tr = newTransport(cmd, opts)
+		if err := checkParentPage(ctx, out.tr, cfg.Workspace.ParentPageID, opts.ratePerSec); err != nil {
+			return nil, err
 		}
 
 		// 3. Refresh — lire l'état réel des seules ressources que le state ancre.
 		// Sans id, aucune mise en correspondance n'est possible : une database
 		// non importée ressort en création, ce qui est exact.
-		refreshed, err = refreshManaged(ctx, tr, snap)
+		refreshed, err = refreshManaged(ctx, out.tr, snap)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// 4. Diff — config, state et réel.
-	p, err := diff.Compute(cfg, snap, refreshed)
+	out.plan, err = diff.Compute(cfg, snap, refreshed)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func runPlan(cmd *cobra.Command, opts *planOptions) error {
+	prep, err := preparePlan(cmd, opts)
 	if err != nil {
 		return err
 	}
+	p := prep.plan
 
 	// 5. Render — texte brut sur stdout.
 	if err := diff.Render(cmd.OutOrStdout(), p); err != nil {
