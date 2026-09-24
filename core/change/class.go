@@ -31,6 +31,15 @@ const (
 	// avertissement de l'API. La donnée n'est pas seulement perdue : elle est
 	// remplacée par une valeur fausse, indistinguable après coup.
 	ClassSilentRewrite
+
+	// ClassUnknownImpact : on ne sait pas ce que ce changement coûte. Un couple
+	// de types hors de la table mesurée, ou une mesure qui n'a pas pu être
+	// faite (--skip-preflight, requête en échec).
+	//
+	// En dernier de l'énumération DÉLIBÉRÉMENT : worstClass prend le maximum, et
+	// un impact qu'on ne sait pas nommer doit dominer l'en-tête d'une ressource.
+	// Ne pas savoir mérite plus d'attention que savoir que c'est sûr.
+	ClassUnknownImpact
 )
 
 func (c Class) String() string {
@@ -43,6 +52,8 @@ func (c Class) String() string {
 		return "destructif"
 	case ClassSilentRewrite:
 		return "réécriture silencieuse"
+	case ClassUnknownImpact:
+		return "impact inconnu"
 	default:
 		return "inconnu"
 	}
