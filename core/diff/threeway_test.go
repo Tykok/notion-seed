@@ -3,6 +3,7 @@
 package diff
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,6 +11,73 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/state"
 )
+
+// Une création doit annoncer ses OPTIONS, pas seulement ses propriétés. Sans
+// ça, apply écrit des options — avec leur couleur et leur groupe — que le plan
+// n'a jamais montrées.
+func TestCompareDatabaseListsOptionsOnCreation(t *testing.T) {
+	desired := state.Database{
+		Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {Type: "status", Options: []state.Option{
+				{Key: "todo", Name: "À faire", Color: "blue", Group: "To-do"},
+			}},
+		},
+	}
+	res := CompareDatabase("tasks", &desired, nil, nil)
+
+	var lines []string
+	for _, d := range res.Changeset.Details {
+		lines = append(lines, d.Op+" "+d.Target+" — "+d.Note)
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{`option "À faire"`, "color blue", "group To-do"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("détails =\n%s\nil manque %q", joined, want)
+		}
+	}
+}
+
+// La cible résolue EST ce qui sera écrit. Tant qu'apply ne fait que des
+// créations, elle coïncide avec la voie desired, et c'est précisément
+// l'invariant qui rend plan et apply indissociables.
+func TestCompareDatabaseResolvesTargetOnCreation(t *testing.T) {
+	desired := state.Database{
+		Name:       "Tasks",
+		Properties: map[string]state.Property{"Name": {Type: "title"}},
+	}
+	res := CompareDatabase("tasks", &desired, nil, nil)
+	if res.Target == nil {
+		t.Fatal("Target = nil, want la cible résolue de la création")
+	}
+	if !reflect.DeepEqual(*res.Target, desired) {
+		t.Errorf("Target = %+v, want %+v", *res.Target, desired)
+	}
+}
+
+// Une ressource qu'apply ne sait pas encore écrire ne doit pas porter de
+// cible : une cible non nulle est une autorisation d'écrire.
+func TestCompareDatabaseLeavesTargetNilOnUpdate(t *testing.T) {
+	desired := state.Database{
+		Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Name":     {Type: "title"},
+			"Estimate": {Type: "number"},
+		},
+	}
+	applied := state.Database{
+		ID:         "db-1",
+		Name:       "Tasks",
+		Properties: map[string]state.Property{"Name": {ID: "title", Type: "title"}},
+	}
+	res := CompareDatabase("tasks", &desired, &applied, &applied)
+	if res.Changeset.Kind != resources.KindUpdate {
+		t.Fatalf("Kind = %v, want KindUpdate", res.Changeset.Kind)
+	}
+	if res.Target != nil {
+		t.Errorf("Target = %+v, want nil tant qu'apply n'écrit pas les updates", res.Target)
+	}
+}
 
 // db construit une database pivot à une seule propriété, pour alléger la table.
 func db(propName string, p state.Property) *state.Database {

@@ -22,6 +22,17 @@ type Change struct {
 	// ordre : une database peut recevoir un ajout sûr et un retrait d'option en
 	// réécriture silencieuse.
 	LineClasses []Class
+
+	// Key est la key de configuration, sans le préfixe "database.". apply en a
+	// besoin pour indexer le state ; Resource est fait pour l'affichage.
+	Key string
+	// Kind dit s'il s'agit d'une création, d'une modification ou d'une
+	// destruction. apply n'écrit aujourd'hui que les créations, et doit pouvoir
+	// le décider sans relire le texte des lignes.
+	Kind resources.ChangeKind
+	// Target est la cible résolue, non nulle seulement là où apply sait
+	// écrire. Voir Result.Target.
+	Target *state.Database
 }
 
 // Drift est un écart constaté entre le state et le réel.
@@ -156,7 +167,13 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 		p.ToDestroy++
 	}
 
-	c := Change{Resource: resource, Class: worstClass(res.Changeset.Details)}
+	c := Change{
+		Resource: resource,
+		Key:      key,
+		Kind:     res.Changeset.Kind,
+		Target:   res.Target,
+		Class:    worstClass(res.Changeset.Details),
+	}
 	if res.Changeset.Kind == resources.KindCreate {
 		c.Detail = "(new)"
 	}

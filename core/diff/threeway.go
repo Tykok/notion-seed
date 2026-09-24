@@ -5,6 +5,7 @@ package diff
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
@@ -21,6 +22,19 @@ type Result struct {
 	Changeset resources.Changeset
 	Drift     []string
 	Unmanaged []string
+
+	// Target est l'état EXACT qu'aura la ressource après écriture, sur la seule
+	// surface gérée. C'est la source unique : Render en dérive ses lignes,
+	// mapper en dérive son payload, state en dérive ce qu'il inscrit. Aucun
+	// chemin de la configuration vers l'API ne la contourne, et c'est ce qui
+	// rend impossible — plutôt que corrigée — une écriture non annoncée.
+	//
+	// Non nulle UNIQUEMENT là où apply sait écrire : une cible non nulle EST
+	// l'autorisation d'écrire. Tant qu'apply ne fait que des créations, seule la
+	// création en porte une. Le jour où update écrira, sa cible sera `actual`
+	// auquel on applique les seuls changements déclarés — ce qui préserve les
+	// propriétés hors config.
+	Target *state.Database
 }
 
 // CompareDatabase compare les trois voies d'une database.
@@ -65,13 +79,9 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 	case actual == nil:
 		// Jamais appliquée : création complète, aucun appel API n'a eu lieu.
 		res.Changeset.Kind = resources.KindCreate
-		for _, name := range sortedPropNames(desired.Properties) {
-			res.Changeset.Details = append(res.Changeset.Details, resources.Detail{
-				Op:     "+",
-				Target: fmt.Sprintf("property %q (%s)", name, desired.Properties[name].Type),
-				Class:  change.ClassSafe,
-			})
-		}
+		target := *desired
+		res.Target = &target
+		res.Changeset.Details = createLines(&target)
 		return res
 	}
 
@@ -84,6 +94,50 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 		res.Changeset.Kind = resources.KindUpdate
 	}
 	return res
+}
+
+// createLines détaille une création depuis la cible résolue : propriétés ET
+// options, avec leur couleur et leur groupe.
+//
+// Les options y figurent parce que la création les ÉCRIT. Les omettre — ce que
+// faisait la version précédente — laissait apply poser des couleurs et des
+// groupes que le plan n'avait jamais montrés. C'est le même défaut, à la
+// création, que celui du groupe substitué par le mapper.
+func createLines(target *state.Database) []resources.Detail {
+	var out []resources.Detail
+	for _, name := range sortedPropNames(target.Properties) {
+		p := target.Properties[name]
+		out = append(out, resources.Detail{
+			Op:     "+",
+			Target: fmt.Sprintf("property %q (%s)", name, p.Type),
+			Class:  change.ClassSafe,
+		})
+		// L'ordre des options est celui du YAML : il est visible dans Notion,
+		// le trier le rendrait faux.
+		for _, o := range p.Options {
+			out = append(out, resources.Detail{
+				Op:     "+",
+				Target: fmt.Sprintf("option %q (propriété %q)", o.Name, name),
+				Note:   optionAttrNote(o),
+				Class:  change.ClassSafe,
+			})
+		}
+	}
+	return out
+}
+
+// optionAttrNote rend les attributs déclarés d'une option, dans un ordre fixe.
+// Vide si le YAML n'en déclare aucun : une note vide vaut mieux qu'une note qui
+// annonce une valeur que notion-seed n'écrira pas.
+func optionAttrNote(o state.Option) string {
+	var parts []string
+	if o.Color != "" {
+		parts = append(parts, "color "+o.Color)
+	}
+	if o.Group != "" {
+		parts = append(parts, "group "+o.Group)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // planLines produit ce qu'on écrirait pour ramener `actual` vers `desired`.
