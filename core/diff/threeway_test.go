@@ -790,6 +790,46 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 	}
 }
 
+// Un changement de type que la table MESURÉE dit sûr ne doit coûter aucun
+// appel : le compte des valeurs non vides ne changerait ni sa classe ni la
+// décision de l'utilisateur. Un plan qui ne contient qu'un `number → rich_text`
+// paierait sinon un comptage contre l'API pour un nombre qui ne change rien.
+func TestCompareDatabaseRequestsNoMeasurementForASafeTypeChange(t *testing.T) {
+	desired := state.Database{
+		Name:       "Clients",
+		Properties: map[string]state.Property{"Estimate": {Type: "rich_text"}},
+	}
+	applied := state.Database{
+		ID: "db-1", Name: "Clients",
+		Properties: map[string]state.Property{
+			"Estimate": {ID: "p1", Type: "number", Format: "number"}},
+	}
+	res := CompareDatabase("clients", &desired, &applied, &applied)
+
+	var found *resources.Detail
+	for i := range res.Changeset.Details {
+		if strings.Contains(res.Changeset.Details[i].Target, `property "Estimate"`) {
+			found = &res.Changeset.Details[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("aucune ligne de changement de type")
+	}
+	// number → rich_text : mesuré sûr le 2026-09-24, donc rien à compter.
+	if found.Class != change.ClassSafe {
+		t.Fatalf("Class = %v, want ClassSafe", found.Class)
+	}
+	if found.Measure != nil {
+		t.Errorf("Measure = %+v, want nil : un changement de type sûr ne coûte aucun appel",
+			found.Measure)
+	}
+	// La ligne reste « non mesurée » : 0 vaudrait « aucune ligne concernée »,
+	// une affirmation que personne n'a vérifiée.
+	if found.Count != -1 {
+		t.Errorf("Count = %d, want -1", found.Count)
+	}
+}
+
 func detailStrings(ds []resources.Detail) []string {
 	out := make([]string, 0, len(ds))
 	for _, d := range ds {

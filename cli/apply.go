@@ -78,6 +78,8 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 	if err != nil {
 		return err
 	}
+	reportMeasureFailures(cmd, prep)
+
 	out := cmd.OutOrStdout()
 	if err := diff.Render(out, prep.plan); err != nil {
 		return err

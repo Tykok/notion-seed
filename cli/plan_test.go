@@ -693,3 +693,108 @@ func TestCheckWorkspaceMatchRejectsForeignWorkspace(t *testing.T) {
 		t.Errorf("le message doit nommer les deux workspaces: %v", err)
 	}
 }
+
+// De bout en bout : le plan mesure réellement les lignes contre l'API et
+// reclasse la ligne concernée avec ce qu'il a compté, au lieu de la laisser en
+// « impact inconnu ». Il ne bloque plus.
+//
+// Le faux ntn rend deux lignes portant l'option "Fait" sur une propriété de
+// type status : mesuré, ce retrait est une réécriture silencieuse. Non mesuré,
+// il resterait « impact inconnu » — c'est exactement l'écart que cette passe
+// ferme, et la seule preuve de bout en bout que le comptage a bien eu lieu tant
+// que le rendu ne porte pas encore le chiffre.
+func TestPlanMeasuresRowsAndDoesNotBlock(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		// Le YAML ne déclare plus l'option "Fait" que porte la database réelle :
+		// son retrait est mesuré à 2 lignes.
+		"databases/all.yaml": `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+            color: blue
+            group: "To-do"
+`,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err != nil {
+		t.Fatalf("plan ne doit plus échouer : %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "réécriture silencieuse") {
+		t.Errorf("le retrait n'a pas été reclassé par la mesure:\n%s", out)
+	}
+	if strings.Contains(out, "impact inconnu") {
+		t.Errorf("la ligne est restée non mesurée:\n%s", out)
+	}
+	if strings.Contains(out, "Plan bloqué") {
+		t.Errorf("le plan bloque encore:\n%s", out)
+	}
+}
+
+// Review Focus 2 : un comptage refusé par l'API ne fait pas échouer la
+// commande. La ligne reste en « impact inconnu », la cause part sur stderr, et
+// le reste du plan est rendu quand même — priver l'utilisateur de son plan
+// parce qu'un comptage a échoué serait le vrai défaut.
+func TestPlanReportsAFailedCountAndStillRendersThePlan(t *testing.T) {
+	withFakeNtn(t, "authenticated_database_query_403")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		"databases/all.yaml": `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+            color: blue
+            group: "To-do"
+`,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	cmd := NewRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"plan", "--dir", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("un comptage en échec ne doit pas faire échouer plan : %v\n%s", err, out.String())
+	}
+
+	if !strings.Contains(out.String(), `option "Fait"`) {
+		t.Errorf("le reste du plan n'est pas rendu:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "impact inconnu") {
+		t.Errorf("la ligne non mesurée doit rester inconnue:\n%s", out.String())
+	}
+	// Les incidents ne polluent pas stdout : le plan doit rester exploitable
+	// dans un pipe.
+	if strings.Contains(out.String(), "comptage impossible") {
+		t.Errorf("l'incident est sur stdout:\n%s", out.String())
+	}
+	for _, want := range []string{"comptage impossible", "database.tasks", "403"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr = %q, il doit contenir %q", errOut.String(), want)
+		}
+	}
+}

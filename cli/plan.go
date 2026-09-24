@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/diff"
+	"github.com/tykok/notion-seed/core/measure"
 	"github.com/tykok/notion-seed/core/preflight"
 	"github.com/tykok/notion-seed/core/providers/notion/mapper"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
@@ -82,6 +83,11 @@ type prepared struct {
 	// state qu'il crée : sans lui, checkWorkspaceMatch reste désarmé à vie pour
 	// un projet amorcé par apply plutôt que par import.
 	workspaceID string
+	// measureFailures porte les comptages qui n'ont pas abouti. Ce sont des
+	// incidents, pas du plan : ils s'affichent sur stderr, et ne font échouer
+	// ni plan ni apply — la ligne concernée reste simplement en « impact
+	// inconnu », ce qui est la vérité.
+	measureFailures []string
 }
 
 func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
@@ -145,7 +151,27 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 5. Mesure — remplir les comptes et reclasser. Hors ligne, rien n'est
+	// mesuré et chaque ligne concernée reste en « impact inconnu », ce qui est
+	// la vérité : on n'a rien lu.
+	if out.tr != nil && snap != nil {
+		dsIDs := make(map[string]string, len(snap.Databases))
+		for key, db := range snap.Databases {
+			dsIDs[key] = db.DataSourceID
+		}
+		out.measureFailures = measure.Enrich(ctx, measure.NewCounter(out.tr), dsIDs, out.plan)
+	}
 	return out, nil
+}
+
+// reportMeasureFailures dit ce qui n'a pas pu être compté, sur stderr : ce sont
+// des incidents, pas du plan. stdout ne porte que le plan, qui doit rester
+// exploitable dans un pipe.
+func reportMeasureFailures(cmd *cobra.Command, prep *prepared) {
+	for _, f := range prep.measureFailures {
+		fmt.Fprintln(cmd.ErrOrStderr(), "comptage impossible — "+f)
+	}
 }
 
 func runPlan(cmd *cobra.Command, opts *planOptions) error {
@@ -154,8 +180,9 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 		return err
 	}
 	p := prep.plan
+	reportMeasureFailures(cmd, prep)
 
-	// 5. Render — texte brut sur stdout.
+	// 6. Render — texte brut sur stdout.
 	if err := diff.Render(cmd.OutOrStdout(), p); err != nil {
 		return err
 	}
