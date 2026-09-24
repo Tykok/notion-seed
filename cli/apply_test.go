@@ -212,11 +212,11 @@ func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 // Un plan bloqué gagne sur --auto-approve : le consentement est déclaratif, et
 // la confirmation ne lève rien. Aucune écriture.
 //
-// notion-seed ne bloque plus sur la foi de la classe d'un changement (voir
-// core/change) : il mesure le coût et le dit. lifecycle.prevent_destroy reste
-// le seul blocage qui subsiste à ce stade du plan, donc c'est le scénario qui
-// exerce encore un vrai refus ici — une database protégée qui sort du YAML
-// alors qu'elle existe toujours dans Notion.
+// notion-seed ne bloque plus sur la foi de la classe d'un changement, ni sur
+// lifecycle.prevent_destroy ou allow_data_loss (voir core/diff) : les deux ne
+// sont plus que des accusés de lecture. Le seul blocage qui subsiste est une
+// ressource que le state ancre et que Notion ne connaît plus — c'est le
+// scénario qui exerce encore un vrai refus ici.
 func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -226,17 +226,10 @@ func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	// La database sort du YAML mais reste protégée par prevent_destroy : elle
-	// existe toujours dans Notion, donc c'est une destruction que
-	// prevent_destroy doit bloquer, quel que soit --auto-approve.
-	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
-		[]byte(workspaceYAML+"lifecycle:\n  prevent_destroy:\n    - database.tasks\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
-		[]byte("databases: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// database.tasks reste déclarée dans le YAML — ce n'est pas une orpheline —
+	// mais Notion ne la connaît plus : le plan devient incalculable, quel que
+	// soit --auto-approve.
+	withFakeNtn(t, "authenticated_database_404")
 	before := mustReadFile(t, filepath.Join(dir, state.FileName))
 
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")

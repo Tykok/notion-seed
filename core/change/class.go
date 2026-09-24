@@ -8,8 +8,10 @@
 // de cycle avec `diff`, qui importe `resources`.
 package change
 
-// Class est la catégorie d'un changement. Elle détermine le comportement par
-// défaut : appliqué, migré, refusé, ou refusé sans échappatoire ordinaire.
+// Class est la catégorie d'un changement. Elle décrit ce qu'il COÛTE — sûr,
+// migration requise, destructif, réécriture silencieuse, ou impact inconnu —
+// elle ne décide plus s'il passe : notion-seed ne refuse plus rien sur la foi
+// d'une classe, il la mesure et la dit.
 type Class int
 
 const (

@@ -32,6 +32,14 @@ type Change struct {
 	// Target est la cible résolue, non nulle seulement là où apply sait
 	// écrire. Voir Result.Target.
 	Target *state.Database
+
+	// Acknowledged nomme les clés de lifecycle qui couvrent cette ressource.
+	//
+	// Elles ne bloquent plus rien : l'utilisateur est garant de sa base. Elles
+	// disent ce qu'il a déjà reconnu, et le rendu s'en sert pour hausser ou
+	// baisser le ton. Une clé absente ne retient pas l'écriture, elle rend la
+	// ligne plus bruyante.
+	Acknowledged []string
 }
 
 // Drift est un écart constaté entre le state et le réel.
@@ -79,6 +87,9 @@ type Plan struct {
 	// Notion — c'est un nettoyage local, pas une destruction.
 	StaleState []string
 
+	// Blocked ne concerne PLUS les classes de changement — plus aucune ne
+	// bloque. Il ne reste vrai que pour ce qui rend le plan incalculable : une
+	// ressource que le state ancre et que Notion ne connaît plus.
 	Blocked bool
 	// BlockedReasons nomme chaque blocage et son issue. « au moins un changement
 	// refusé » ne dit pas à l'utilisateur quoi faire.
@@ -111,8 +122,7 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		}
 		if r, ok := actual[db.Key]; ok {
 			if r.Missing {
-				p.Blocked = true
-				p.BlockedReasons = append(p.BlockedReasons, fmt.Sprintf(
+				p.block(fmt.Sprintf(
 					"database.%s est dans le state mais %s dans Notion.\n"+
 						"  → restaurez-la dans Notion, ou retirez son entrée de %s pour "+
 						"assumer une recréation (la nouvelle database repartira vide)",
@@ -158,15 +168,9 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		case r.Missing:
 			// Introuvable ou archivée : dans Notion, détruire une database c'est
 			// l'archiver, donc les deux cas valent destruction déjà effective.
-			if preventDestroy[resource] {
-				p.block(fmt.Sprintf(
-					"%s : protégée par lifecycle.prevent_destroy, mais %s dans Notion.\n"+
-						"  → la ressource la mieux protégée du fichier a disparu hors de "+
-						"notion-seed. Restaurez-la dans Notion, ou retirez %s de "+
-						"prevent_destroy pour acter sa disparition",
-					resource, r.Reason, resource))
-				continue
-			}
+			// prevent_destroy ne bloque plus ce nettoyage : l'entrée de state
+			// obsolète est retirée dans tous les cas, et c'est le rendu de
+			// StaleState qui porte la mention, pas un refus.
 			p.StaleState = append(p.StaleState, resource)
 			continue
 		}
@@ -177,8 +181,9 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 	return p, nil
 }
 
-// absorb verse le résultat d'une ressource dans le plan, en appliquant
-// lifecycle.
+// absorb verse le résultat d'une ressource dans le plan, et y note les clés de
+// lifecycle qui la couvrent. allowDataLoss et preventDestroy ne bloquent plus
+// rien ici : ce sont des accusés de lecture, pas des garde-fous.
 func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[string]bool) {
 	resource := "database." + key
 
@@ -216,18 +221,19 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 	// précédente — rendait le plan immesurable, et le rendu n'a de toute façon
 	// besoin que de Details.
 	c.Details = res.Changeset.Details
-	p.Changes = append(p.Changes, c)
 
-	// lifecycle.prevent_destroy reste le seul blocage fondé sur autre chose
-	// qu'une mesure : notion-seed ne refuse plus un changement sur la foi de sa
-	// classe — il MESURE son coût et le dit (voir Class et Details
-	// ci-dessus). allow_data_loss n'a donc plus rien à débloquer ici.
-	if res.Changeset.Kind == resources.KindDestroy && preventDestroy[resource] {
-		p.block(fmt.Sprintf(
-			"%s : destruction interdite par lifecycle.prevent_destroy.\n"+
-				"  → retirez %s de prevent_destroy si la destruction est voulue",
-			resource, resource))
+	// lifecycle ne bloque plus rien : notion-seed ne refuse plus un changement
+	// sur la foi de sa classe, il MESURE son coût et le dit (voir Class et
+	// Details ci-dessus). prevent_destroy et allow_data_loss ne sont donc plus
+	// que des accusés de lecture, versés sur la ligne pour que le rendu hausse
+	// ou baisse le ton.
+	if preventDestroy[resource] {
+		c.Acknowledged = append(c.Acknowledged, "prevent_destroy")
 	}
+	if allowDataLoss[resource] {
+		c.Acknowledged = append(c.Acknowledged, "allow_data_loss")
+	}
+	p.Changes = append(p.Changes, c)
 }
 
 func (p *Plan) block(reason string) {
