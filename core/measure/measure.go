@@ -33,6 +33,16 @@ const (
 // passer « je ne sais pas poser la question » pour « l'API a refusé ».
 var ErrUnsupportedFilter = errors.New("type de propriété non filtrable")
 
+// ErrUnreadableCount signale une réponse de comptage qu'on n'a pas comprise.
+//
+// Elle existe parce que le défaut qu'elle ferme est silencieux : n'importe quel
+// objet JSON se décode dans la structure d'une liste avec un `results` absent,
+// donc un compte de 0, donc « aucune ligne concernée », donc « sûr ». Une
+// réponse incomprise doit rendre une ERREUR, jamais un compte — c'est
+// exactement l'affirmation invérifiée que notion-seed existe pour rendre
+// impossible.
+var ErrUnreadableCount = errors.New("réponse de comptage incomprise")
+
 // Request décrit UNE mesure. Option vide signifie « compter les valeurs non
 // vides de la colonne », ce dont un changement de type a besoin.
 type Request struct {
@@ -128,10 +138,16 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 					"pour obtenir le compte", r.Property, err)
 		}
 
+		// Results est un POINTEUR de tranche, délibérément : une tranche nue
+		// confond « results absent » (réponse incomprise) et « results vide »
+		// (personne n'utilise l'option), et ces deux cas doivent se terminer à
+		// l'opposé l'un de l'autre — une erreur pour le premier, un compte de 0
+		// pour le second.
 		var decoded struct {
-			Results    []json.RawMessage `json:"results"`
-			HasMore    bool              `json:"has_more"`
-			NextCursor string            `json:"next_cursor"`
+			Object     string             `json:"object"`
+			Results    *[]json.RawMessage `json:"results"`
+			HasMore    bool               `json:"has_more"`
+			NextCursor string             `json:"next_cursor"`
 		}
 		if err := json.Unmarshal(resp.Body, &decoded); err != nil {
 			return Result{}, fmt.Errorf(
@@ -139,7 +155,28 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 					"  → réessayez ; si ça persiste, l'impact sera annoncé comme inconnu", err)
 		}
 
-		out.Count += len(decoded.Results)
+		// Un 200 dont on ne reconnaît pas la forme ne vaut PAS zéro ligne.
+		// Sans ces deux gardes, le schéma d'un data source — ce que rend une
+		// route mal ordonnée — se décode sans erreur et fait annoncer « 0 ligne
+		// concernée, rien à perdre » sur une réponse dont rien n'a été compris.
+		if decoded.Object != "list" {
+			return Result{}, fmt.Errorf(
+				"%w pour %q: l'API a répondu un objet %q, pas une liste de lignes\n"+
+					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
+					"réponse de l'API",
+				ErrUnreadableCount, r.Property, decoded.Object)
+		}
+		if decoded.Results == nil {
+			return Result{}, fmt.Errorf(
+				"%w pour %q: la liste rendue par l'API ne porte aucun champ results\n"+
+					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
+					"réponse de l'API",
+				ErrUnreadableCount, r.Property)
+		}
+
+		out.Count += len(*decoded.Results)
 		if !decoded.HasMore {
 			return out, nil
 		}

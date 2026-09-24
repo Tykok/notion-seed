@@ -155,14 +155,40 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 	// 5. Mesure — remplir les comptes et reclasser. Hors ligne, rien n'est
 	// mesuré et chaque ligne concernée reste en « impact inconnu », ce qui est
 	// la vérité : on n'a rien lu.
-	if out.tr != nil && snap != nil {
-		dsIDs := make(map[string]string, len(snap.Databases))
-		for key, db := range snap.Databases {
-			dsIDs[key] = db.DataSourceID
-		}
-		out.measureFailures = measure.Enrich(ctx, measure.NewCounter(out.tr), dsIDs, out.plan)
+	if out.tr != nil {
+		out.measureFailures = measure.Enrich(ctx, measure.NewCounter(out.tr),
+			measuredDataSourceIDs(snap, refreshed), out.plan)
 	}
 	return out, nil
+}
+
+// measuredDataSourceIDs associe chaque key au data source à INTERROGER.
+//
+// L'id frais, celui que le refresh vient de lire, l'emporte sur celui du
+// state : le plan est calculé contre le réel relu, et mesurer ailleurs
+// compterait les lignes d'un autre objet. Un data source qui a changé d'id
+// laisse derrière lui un ancien id qui peut être encore vivant — il appartient
+// alors à une autre database, répond 200, et le 0 qui en sortirait ferait
+// annoncer « rien à perdre » sur un retrait qui coûte.
+//
+// Le state reste le repli : sous --skip-preflight rien n'est relu, et une
+// ressource relue sans data source id n'a rien de mieux à proposer.
+func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refreshed) map[string]string {
+	out := make(map[string]string, len(refreshed))
+	if snap != nil {
+		for key, db := range snap.Databases {
+			out[key] = db.DataSourceID
+		}
+	}
+	for key, r := range refreshed {
+		// Une ressource introuvable ou archivée n'a pas été lue : son
+		// Database est vide, et l'écraser avec du vide effacerait le repli.
+		if r.Missing || r.Database.DataSourceID == "" {
+			continue
+		}
+		out[key] = r.Database.DataSourceID
+	}
+	return out
 }
 
 // reportMeasureFailures dit ce qui n'a pas pu être compté, sur stderr : ce sont

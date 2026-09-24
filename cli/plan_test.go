@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tykok/notion-seed/core/diff"
 	"github.com/tykok/notion-seed/core/state"
 )
 
@@ -741,6 +743,87 @@ databases:
 	}
 	if strings.Contains(out, "Plan bloqué") {
 		t.Errorf("le plan bloque encore:\n%s", out)
+	}
+}
+
+// Le piège d'ordre du faux ntn, désarmé pour TOUS les scénarios.
+//
+// `/v1/data_sources/ds-1/query` porte le préfixe `/v1/data_sources/` : un
+// scénario qui teste le préfixe avant le suffixe `/query` rend le schéma d'un
+// data source à une requête de comptage. Ce n'est pas une erreur visible — la
+// réponse est un 200 valide — mais elle ne porte aucun `results`, et un
+// comptage qui en tirerait 0 ferait annoncer « rien à perdre ».
+//
+// Ce test interroge le faux binaire directement, scénario par scénario : il
+// rattrape le piège dans un scénario existant comme dans un scénario futur.
+func TestFakeNtnAnswersQueryWithAListInEveryScenario(t *testing.T) {
+	// Tous les scénarios qui servent /v1/data_sources/ et répondent en 200.
+	scenarios := []string{
+		"authenticated_database",
+		"archived_database",
+		"authenticated_create",
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario, func(t *testing.T) {
+			withFakeNtn(t, scenario)
+			out, err := exec.Command("ntn", "api", "/v1/data_sources/ds-1/query").Output()
+			if err != nil {
+				t.Fatalf("ntn api: %v", err)
+			}
+			if !strings.Contains(string(out), `"object":"list"`) {
+				t.Errorf("une requête de comptage doit rendre une liste, pas %s", out)
+			}
+			if !strings.Contains(string(out), `"results"`) {
+				t.Errorf("la liste doit porter un champ results, pas %s", out)
+			}
+		})
+	}
+}
+
+// Le comptage doit interroger le data source que le plan vient de LIRE, pas
+// celui que le state a mémorisé. Le plan est calculé contre `refreshed` ; si la
+// mesure interroge un autre objet, elle compte les lignes d'une autre
+// database. Un id périmé encore vivant appartient alors à quelqu'un d'autre,
+// répond 200, et le 0 qui en sort devient « rien à perdre ».
+func TestMeasuredDataSourceIDsPreferTheRefreshedOne(t *testing.T) {
+	snap := &state.Snapshot{
+		Version: state.Version,
+		Databases: map[string]state.Database{
+			"tasks":   {ID: "db-1", DataSourceID: "ds-périmé"},
+			"notes":   {ID: "db-2", DataSourceID: "ds-du-state"},
+			"orphans": {ID: "db-3", DataSourceID: "ds-jamais-relue"},
+		},
+	}
+	refreshed := map[string]diff.Refreshed{
+		"tasks": {Database: state.Database{ID: "db-1", DataSourceID: "ds-frais"}},
+		// Relue, mais sans data source id : le state reste la meilleure réponse
+		// disponible, et vaut mieux que pas de mesure du tout.
+		"notes": {Database: state.Database{ID: "db-2"}},
+	}
+
+	got := measuredDataSourceIDs(snap, refreshed)
+	want := map[string]string{
+		"tasks":   "ds-frais",
+		"notes":   "ds-du-state",
+		"orphans": "ds-jamais-relue",
+	}
+	for key, w := range want {
+		if got[key] != w {
+			t.Errorf("dataSourceIDs[%q] = %q, want %q", key, got[key], w)
+		}
+	}
+}
+
+// Une ressource que le state n'ancre pas mais que le réel a rendue (une
+// orpheline lue par Compute) doit rester mesurable : son id vient alors du seul
+// endroit qui l'ait.
+func TestMeasuredDataSourceIDsIncludesResourcesAbsentFromTheState(t *testing.T) {
+	got := measuredDataSourceIDs(&state.Snapshot{Version: state.Version},
+		map[string]diff.Refreshed{
+			"tasks": {Database: state.Database{ID: "db-1", DataSourceID: "ds-frais"}},
+		})
+	if got["tasks"] != "ds-frais" {
+		t.Errorf("dataSourceIDs[\"tasks\"] = %q, want %q", got["tasks"], "ds-frais")
 	}
 }
 
