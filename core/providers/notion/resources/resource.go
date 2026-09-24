@@ -28,12 +28,42 @@ const (
 	KindDestroy
 )
 
+// Measurement décrit ce qu'il faut compter pour savoir ce qu'un détail coûte.
+//
+// Le comparateur l'ÉMET sans l'exécuter : il reste pur, sans réseau ni horloge,
+// et c'est ce qui permet de le couvrir en table sur des triplets. Une passe
+// séparée exécute les demandes et reclasse.
+//
+// Option vide signifie « compter les valeurs non vides de la colonne », ce dont
+// un changement de type a besoin.
+type Measurement struct {
+	Property     string
+	PropertyType string
+	Option       string
+}
+
 // Detail décrit un changement élémentaire à l'intérieur d'une ressource.
 type Detail struct {
 	Op     string // "+", "~", "-"
 	Target string // `property "Estimate" (number)`
 	Note   string // précision optionnelle
 	Class  change.Class
+
+	// Measure est la demande de mesure, nil quand le détail ne coûte rien.
+	Measure *Measurement
+	// Count est le nombre de lignes concernées. -1 tant que rien n'a été
+	// mesuré : ni 0 ni un compte, mais « on ne sait pas ».
+	Count int
+	// Capped dit que le plafond de pagination a été atteint et que Count est
+	// donc un minorant.
+	Capped bool
+}
+
+// newDetail construit un détail non mesuré. À utiliser SYSTÉMATIQUEMENT : un
+// Detail composé à la main porte Count = 0, donc « aucune ligne concernée »,
+// donc « sûr » — une affirmation que personne n'a vérifiée.
+func newDetail(op, target string, class change.Class) Detail {
+	return Detail{Op: op, Target: target, Class: class, Count: -1}
 }
 
 // Changeset regroupe les changements d'une ressource.

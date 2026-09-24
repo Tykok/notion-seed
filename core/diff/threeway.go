@@ -75,6 +75,7 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 			Target: "database." + key,
 			Note:   "présente dans le state, absente de la configuration",
 			Class:  change.ClassDestructive,
+			Count:  -1,
 		}}
 		return res
 
@@ -132,6 +133,7 @@ func createLines(target *state.Database) []resources.Detail {
 			Op:     "+",
 			Target: fmt.Sprintf("%s %q", f.label, f.value),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 
@@ -141,6 +143,7 @@ func createLines(target *state.Database) []resources.Detail {
 			Op:     "+",
 			Target: fmt.Sprintf("property %q (%s)", name, p.Type),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 		// L'ordre des options est celui du YAML : il est visible dans Notion,
 		// le trier le rendrait faux.
@@ -150,6 +153,7 @@ func createLines(target *state.Database) []resources.Detail {
 				Target: fmt.Sprintf("option %q (propriété %q)", o.Name, name),
 				Note:   optionAttrNote(o),
 				Class:  change.ClassSafe,
+				Count:  -1,
 			})
 		}
 	}
@@ -180,6 +184,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			Target: "name",
 			Note:   fmt.Sprintf("%q → %q", actual.Name, desired.Name),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 	if desired.Description != "" && desired.Description != actual.Description {
@@ -188,6 +193,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			Target: "description",
 			Note:   fmt.Sprintf("%q → %q", actual.Description, desired.Description),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 
@@ -210,6 +216,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				Target: fmt.Sprintf("property %q (%s)", name, want.Type),
 				Note:   note,
 				Class:  change.ClassSafe,
+				Count:  -1,
 			})
 			continue
 		}
@@ -219,7 +226,14 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				Op:     "~",
 				Target: fmt.Sprintf("property %q", name),
 				Note:   fmt.Sprintf("%s → %s", have.Type, want.Type),
-				Class:  change.ClassDestructive,
+				// La table mesurée suffit à classer ; le compte des valeurs non
+				// vides précisera l'ampleur.
+				Class: change.ClassifyTypeChange(have.Type, want.Type),
+				Count: -1,
+				Measure: &resources.Measurement{
+					Property:     name,
+					PropertyType: have.Type,
+				},
 			})
 			continue
 		}
@@ -229,6 +243,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				Target: fmt.Sprintf("property %q", name),
 				Note:   fmt.Sprintf("format %s → %s", have.Format, want.Format),
 				Class:  change.ClassSafe,
+				Count:  -1,
 			})
 		}
 		out = append(out, optionLines(name, want, have, applied.Properties[name])...)
@@ -297,6 +312,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 				Target: fmt.Sprintf("option %q → %q (propriété %q)", current, w.Name, propName),
 				Note:   "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer",
 				Class:  change.ClassMigration,
+				Count:  -1,
 			})
 		} else {
 			// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
@@ -321,6 +337,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			Op:     "+",
 			Target: fmt.Sprintf("option %q (propriété %q)", w.Name, propName),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 
@@ -335,9 +352,16 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			Op:     "-",
 			Target: fmt.Sprintf("option %q (propriété %q)", o.Name, propName),
 			Note:   "absente du YAML : l'API remplace la liste entière des options",
-			// -1 : le nombre de lignes portant cette option n'est pas mesuré à cet
-			// endroit du plan. La mesure existera plus tard, branchée ici même.
+			// Classe et compte viennent de la mesure. Avant elle, on ne sait pas :
+			// -1 dit « non mesuré », et ClassifyOptionRemoval le traduit en impact
+			// inconnu plutôt qu'en « sûr ».
 			Class: change.ClassifyOptionRemoval(have.Type, -1),
+			Count: -1,
+			Measure: &resources.Measurement{
+				Property:     propName,
+				PropertyType: have.Type,
+				Option:       o.Name,
+			},
 		})
 	}
 	return out
@@ -362,6 +386,7 @@ func optionAttrLines(propName string, want, have state.Option) []resources.Detai
 			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
 			Note:   fmt.Sprintf("color %s → %s", have.Color, want.Color),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 	if want.Group != "" && want.Group != have.Group {
@@ -370,6 +395,7 @@ func optionAttrLines(propName string, want, have state.Option) []resources.Detai
 			Target: fmt.Sprintf("option %q (propriété %q)", want.Name, propName),
 			Note:   fmt.Sprintf("group %s → %s", have.Group, want.Group),
 			Class:  change.ClassSafe,
+			Count:  -1,
 		})
 	}
 	return out
@@ -525,9 +551,13 @@ func sortedPropNames(m map[string]state.Property) []string {
 	return out
 }
 
-// worstClass rend la classe la plus grave d'un jeu de détails. L'ordre de
+// WorstClass rend la classe la plus grave d'un jeu de détails. L'ordre de
 // l'énumération va du plus sûr au plus grave, donc le maximum suffit.
-func worstClass(ds []resources.Detail) change.Class {
+//
+// Exportée parce que la passe de mesure, qui reclasse les détails APRÈS Compute,
+// doit recalculer la classe d'en-tête d'une ressource depuis un autre paquet.
+// Un seul exemplaire : la dupliquer laisserait deux règles de gravité diverger.
+func WorstClass(ds []resources.Detail) change.Class {
 	worst := change.ClassSafe
 	for _, d := range ds {
 		if d.Class > worst {

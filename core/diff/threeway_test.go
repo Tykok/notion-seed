@@ -250,13 +250,29 @@ func TestCompareDatabase(t *testing.T) {
 			wantDrift: "hors de notion-seed",
 		},
 		{
-			name:      "type de propriété changé : destructif",
+			// La classe vient désormais de la table MESURÉE, plus du refus par
+			// principe : number → rich_text a été essayé le 2026-09-24 et ne perd
+			// rien (7 devient "7"). L'annoncer destructif serait précisément
+			// l'affirmation invérifiée que ce produit existe pour supprimer.
+			name:      "type de propriété changé : classé par la table mesurée",
 			desired:   db("Estimate", state.Property{Type: "rich_text"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassDestructive,
+			wantClass: change.ClassSafe,
 			wantLine:  "number → rich_text",
+		},
+		{
+			// Hors de la table : personne n'a essayé, donc l'impact est inconnu —
+			// et il domine l'en-tête, parce que ne pas savoir mérite plus
+			// d'attention que savoir que c'est sûr.
+			name:      "type de propriété changé hors de la table : impact inconnu",
+			desired:   db("Estimate", state.Property{Type: "people"}),
+			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
+			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
+			wantKind:  resources.KindUpdate,
+			wantClass: change.ClassUnknownImpact,
+			wantLine:  "number → people",
 		},
 		{
 			name:      "format de number changé : sûr",
@@ -384,7 +400,7 @@ func TestCompareDatabase(t *testing.T) {
 			if got.Changeset.Kind != tc.wantKind {
 				t.Errorf("Kind = %v, want %v", got.Changeset.Kind, tc.wantKind)
 			}
-			if c := worstClass(got.Changeset.Details); c != tc.wantClass {
+			if c := WorstClass(got.Changeset.Details); c != tc.wantClass {
 				t.Errorf("classe = %v, want %v (détails: %+v)", c, tc.wantClass, got.Changeset.Details)
 			}
 			if tc.wantLine != "" && !containsSub(detailStrings(got.Changeset.Details), tc.wantLine) {
@@ -453,7 +469,7 @@ func TestCompareDatabaseRenamedPropertyIsCreationPlusUnmanaged(t *testing.T) {
 	if !containsSub(got.Unmanaged, `"Estimate"`) {
 		t.Errorf("Estimate doit apparaître hors config: %v", got.Unmanaged)
 	}
-	if worstClass(got.Changeset.Details) != change.ClassSafe {
+	if WorstClass(got.Changeset.Details) != change.ClassSafe {
 		t.Error("un renommage de propriété ne détruit rien, il duplique")
 	}
 }
@@ -475,7 +491,7 @@ func TestCompareDatabaseOptionRenameFreesNameForNewOption(t *testing.T) {
 	if got.Changeset.Kind != resources.KindUpdate {
 		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
 	}
-	if c := worstClass(got.Changeset.Details); c != change.ClassMigration {
+	if c := WorstClass(got.Changeset.Details); c != change.ClassMigration {
 		t.Errorf("classe = %v, want ClassMigration (détails: %+v)", c, got.Changeset.Details)
 	}
 
@@ -513,7 +529,7 @@ func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 	if got.Changeset.Kind != resources.KindUpdate {
 		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
 	}
-	if c := worstClass(got.Changeset.Details); c != change.ClassUnknownImpact {
+	if c := WorstClass(got.Changeset.Details); c != change.ClassUnknownImpact {
 		t.Errorf("classe = %v, want ClassUnknownImpact (détails: %+v)", c, got.Changeset.Details)
 	}
 
@@ -523,6 +539,106 @@ func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 	}
 	if !containsSub(lines, `"Obsolète"`) {
 		t.Errorf("le retrait doit apparaître: %v", lines)
+	}
+}
+
+// Un retrait d'option doit porter la DEMANDE de mesure, pas la mesure : le
+// comparateur reste pur, c'est là que vit la sûreté du produit.
+func TestCompareDatabaseRequestsAMeasurementForOptionRemoval(t *testing.T) {
+	desired := state.Database{
+		Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {Type: "status", Options: []state.Option{{Key: "todo", Name: "À faire"}}},
+		},
+	}
+	applied := state.Database{
+		ID: "db-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {ID: "p1", Type: "status", Options: []state.Option{
+				{ID: "o1", Key: "todo", Name: "À faire"},
+				{ID: "o2", Name: "Annulé"},
+			}},
+		},
+	}
+	res := CompareDatabase("tasks", &desired, &applied, &applied)
+
+	var found *resources.Detail
+	for i := range res.Changeset.Details {
+		if res.Changeset.Details[i].Op == "-" {
+			found = &res.Changeset.Details[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("aucune ligne de retrait d'option")
+	}
+	if found.Measure == nil {
+		t.Fatal("la ligne de retrait ne porte aucune demande de mesure")
+	}
+	if found.Measure.Property != "Statut" || found.Measure.Option != "Annulé" ||
+		found.Measure.PropertyType != "status" {
+		t.Errorf("Measure = %+v", *found.Measure)
+	}
+	if found.Count != -1 {
+		t.Errorf("Count = %d, want -1 tant que rien n'a été mesuré", found.Count)
+	}
+	if found.Class != change.ClassUnknownImpact {
+		t.Errorf("Class = %v, want ClassUnknownImpact avant mesure", found.Class)
+	}
+}
+
+// Un changement de type porte lui aussi sa demande — le nombre de valeurs non
+// vides de la colonne — et sa classe vient de la table mesurée.
+func TestCompareDatabaseClassifiesTypeChangeFromTheMeasuredTable(t *testing.T) {
+	desired := state.Database{
+		Name:       "Clients",
+		Properties: map[string]state.Property{"Tags": {Type: "select"}},
+	}
+	applied := state.Database{
+		ID: "db-1", Name: "Clients",
+		Properties: map[string]state.Property{"Tags": {ID: "p1", Type: "multi_select"}},
+	}
+	res := CompareDatabase("clients", &desired, &applied, &applied)
+
+	var found *resources.Detail
+	for i := range res.Changeset.Details {
+		if strings.Contains(res.Changeset.Details[i].Target, `property "Tags"`) {
+			found = &res.Changeset.Details[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("aucune ligne de changement de type")
+	}
+	// multi_select → select : mesuré réécriture silencieuse le 2026-09-24.
+	if found.Class != change.ClassSilentRewrite {
+		t.Errorf("Class = %v, want ClassSilentRewrite", found.Class)
+	}
+	if found.Measure == nil || found.Measure.Option != "" {
+		t.Errorf("Measure = %+v, want une demande de comptage des valeurs non vides", found.Measure)
+	}
+}
+
+// Un ajout d'option ne coûte rien : aucune mesure ne doit être demandée, donc
+// aucun appel ne sera payé.
+func TestCompareDatabaseRequestsNoMeasurementForSafeDetails(t *testing.T) {
+	desired := state.Database{
+		Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {Type: "status", Options: []state.Option{
+				{Key: "todo", Name: "À faire"}, {Key: "new", Name: "Neuve"}}},
+		},
+	}
+	applied := state.Database{
+		ID: "db-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {ID: "p1", Type: "status", Options: []state.Option{
+				{ID: "o1", Key: "todo", Name: "À faire"}}},
+		},
+	}
+	res := CompareDatabase("tasks", &desired, &applied, &applied)
+	for _, d := range res.Changeset.Details {
+		if d.Op == "+" && d.Measure != nil {
+			t.Errorf("la ligne %q demande une mesure alors qu'elle ne coûte rien", d.Target)
+		}
 	}
 }
 

@@ -86,12 +86,21 @@ func Render(w io.Writer, p *Plan) error {
 		if _, err := fmt.Fprintln(w, header); err != nil {
 			return err
 		}
-		for i, line := range c.Lines {
+		for _, d := range c.Details {
+			line := d.Op + " " + d.Target
+			if d.Note != "" {
+				// PAS de %q ici : Note porte déjà ses propres guillemets là où il en
+				// faut (un renommage rend `"Ancien" → "Nouveau"`). Un %q supplémentaire
+				// ré-échappe ces guillemets et l'ensemble de la note, jusqu'à rendre
+				// illisible la seule ligne censée éviter qu'on croie avoir renommé une
+				// propriété alors qu'elle reste hors config.
+				line += " — " + d.Note
+			}
 			suffix := ""
 			// Une ligne sûre dans une ressource par ailleurs dangereuse ne doit pas
 			// hériter de l'étiquette : c'est la ligne qui porte sa classe.
-			if i < len(c.LineClasses) && c.LineClasses[i] != ClassSafe {
-				suffix = fmt.Sprintf("  [%s]", c.LineClasses[i])
+			if d.Class != ClassSafe {
+				suffix = fmt.Sprintf("  [%s]", d.Class)
 			}
 			if _, err := fmt.Fprintf(w, "      %s%s\n", line, suffix); err != nil {
 				return err

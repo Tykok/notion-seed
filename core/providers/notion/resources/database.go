@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
@@ -222,10 +223,9 @@ func DatabaseChangeset(db config.Database, remote RemoteState) Changeset {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			cs.Details = append(cs.Details, Detail{
-				Op:     "+",
-				Target: fmt.Sprintf("property %q (%s)", name, db.Properties[name].Type),
-			})
+			cs.Details = append(cs.Details, newDetail("+",
+				fmt.Sprintf("property %q (%s)", name, db.Properties[name].Type),
+				change.ClassSafe))
 		}
 		return cs
 	}
