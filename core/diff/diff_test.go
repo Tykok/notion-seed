@@ -3,6 +3,7 @@
 package diff
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -188,8 +189,15 @@ func TestComputeListsPropertiesOfCreatedDatabase(t *testing.T) {
 		},
 	}
 	p, _ := Compute(cfg, nil, nil)
-	if len(p.Changes[0].Lines) != 2 {
-		t.Fatalf("lines = %v, want 2 entrées", p.Changes[0].Lines)
+	// Le nom de la database est annoncé lui aussi : il part dans le payload de
+	// création, donc il doit figurer au plan.
+	want := []string{
+		`+ name "Tasks"`,
+		`+ property "Estimate" (number)`,
+		`+ property "Name" (title)`,
+	}
+	if !reflect.DeepEqual(p.Changes[0].Lines, want) {
+		t.Fatalf("lines = %v, want %v", p.Changes[0].Lines, want)
 	}
 }
 
