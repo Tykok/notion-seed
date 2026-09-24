@@ -26,6 +26,11 @@ const (
 	// ClassDestructive : suppression d'une option de select ou multi_select,
 	// suppression d'une propriété, changement de type. La donnée est perdue,
 	// mais aucune fausse valeur n'est écrite.
+	//
+	// select et multi_select partagent la classe, PAS le comportement, et le
+	// rendu les sépare : mesuré le 2026-09-24, un select retiré vide la cellule,
+	// un multi_select ne lui retire que cette valeur — ['Un','Deux'] moins 'Un'
+	// donne ['Deux']. La perte est réelle des deux côtés, son étendue non.
 	ClassDestructive
 
 	// ClassSilentRewrite : suppression d'une option de status. Les lignes qui

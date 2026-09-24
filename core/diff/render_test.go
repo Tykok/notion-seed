@@ -444,6 +444,61 @@ func TestRenderShowsTheMeasuredCount(t *testing.T) {
 	}
 }
 
+// Mesuré le 2026-09-24 contre l'API : retirer une option de `select` VIDE la
+// cellule. La phrase peut donc parler de LEUR valeur, au singulier — la ligne
+// n'en portait qu'une.
+func TestRenderSaysASelectRemovalEmptiesTheCell(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Basse" (propriété "Priorité")`,
+			Class: ClassDestructive, Count: 3,
+			Measure: &resources.Measurement{Property: "Priorité", PropertyType: "select", Option: "Basse"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "3 lignes passeront à vide") {
+		t.Errorf("sortie:\n%s\nun retrait sur select vide bien la cellule", b.String())
+	}
+}
+
+// Mesuré le 2026-09-24 contre l'API, sur une page jetable : une ligne portant
+// ['Un','Deux'] dont on retire 'Un' garde ['Deux'] ; une ligne ne portant que
+// ['Un'] passe à []. Un multi_select perd donc CETTE valeur, et ne se vide que
+// s'il n'en portait pas d'autre.
+//
+// « perdront leur valeur » se lit « la cellule sera vidée » : c'est vrai pour
+// select, faux pour multi_select. Et on ne dit PAS combien de lignes se
+// videront vraiment — la mesure compte les lignes portant l'option, pas celles
+// qui n'en portent qu'elle.
+func TestRenderDoesNotClaimAMultiSelectRemovalEmptiesTheCell(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Un" (propriété "Tags")`,
+			Class: ClassDestructive, Count: 3,
+			Measure: &resources.Measurement{Property: "Tags", PropertyType: "multi_select", Option: "Un"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if strings.Contains(got, "perdront leur valeur") {
+		t.Errorf("sortie:\n%s\n« leur valeur » affirme que la cellule sera vidée, "+
+			"ce qui est faux sur multi_select", got)
+	}
+	for _, want := range []string{"3 lignes perdront cette valeur", "n'en portaient pas d'autre"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sortie:\n%s\nil manque %q", got, want)
+		}
+	}
+}
+
 // 0 ligne : la ligne doit le dire, et être sûre. Sans ça, l'utilisateur ne sait
 // pas que notion-seed a vérifié.
 func TestRenderSaysWhenNoRowIsAffected(t *testing.T) {
