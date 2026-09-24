@@ -122,6 +122,57 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":false,"in_trash":false,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
+			// AVANT le cas de préfixe : /v1/data_sources/ds-1/query porte aussi le
+			// préfixe /v1/data_sources/, et l'ordre inverse ferait rendre le schéma
+			// du data source à une requête de comptage, qui lirait n'importe quoi.
+			case strings.HasSuffix(path, "/query"):
+				// Deux lignes portent l'option "Fait" : de quoi vérifier qu'un
+				// retrait mesuré ressort avec son chiffre.
+				fmt.Fprint(os.Stdout, `{"object":"list","results":[`+
+					`{"object":"page","id":"p1"},{"object":"page","id":"p2"}],`+
+					`"has_more":false}`)
+			case strings.HasPrefix(path, "/v1/data_sources/"):
+				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
+					`"title":[{"plain_text":"Tasks"}],`+
+					`"properties":{`+
+					`"Name":{"id":"title","name":"Name","type":"title"},`+
+					`"Statut":{"id":"p-statut","name":"Statut","type":"status",`+
+					`"status":{"options":[`+
+					`{"id":"o-todo","name":"À faire","color":"blue"},`+
+					`{"id":"o-done","name":"Fait","color":"green"}],`+
+					`"groups":[`+
+					`{"id":"g1","name":"To-do","option_ids":["o-todo"]},`+
+					`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`)
+			default:
+				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			}
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
+	case "authenticated_database_query_403":
+		// Tout est lisible SAUF le comptage, refusé en 403 : couvre le fait
+		// qu'un comptage en échec n'empêche ni le plan ni son rendu, et que sa
+		// cause part sur stderr.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			if strings.HasSuffix(path, "/query") {
+				fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
+					"< 403 Forbidden\n"+
+					"error: Public API request failed (403 Forbidden restricted_resource): "+
+					"Insufficient permissions.\n")
+				os.Exit(5)
+			}
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			switch {
+			case strings.HasPrefix(path, "/v1/databases/"):
+				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
+					`"archived":false,"in_trash":false,`+
+					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
 				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
 					`"title":[{"plain_text":"Tasks"}],`+

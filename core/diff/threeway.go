@@ -196,19 +196,24 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		}
 
 		if want.Type != have.Type {
-			out = append(out, resources.Detail{
-				Op:     "~",
-				Target: fmt.Sprintf("property %q", name),
-				Note:   fmt.Sprintf("%s → %s", have.Type, want.Type),
-				// La table mesurée suffit à classer ; le compte des valeurs non
-				// vides précisera l'ampleur.
-				Class: change.ClassifyTypeChange(have.Type, want.Type),
-				Count: -1,
-				Measure: &resources.Measurement{
+			// La table mesurée suffit à classer ; le compte des valeurs non vides
+			// précisera l'ampleur.
+			class := change.ClassifyTypeChange(have.Type, want.Type)
+			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), class)
+			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
+			// Un couple que la table dit SÛR (select→multi_select,
+			// number→rich_text, status→select, date→rich_text) ne demande aucune
+			// mesure : le compte ne changerait ni sa classe ni la décision, et
+			// notion-seed paierait un appel contre l'API pour un nombre qui ne dit
+			// rien. Ne pas payer d'appels pour rien est une propriété du produit,
+			// pas une optimisation.
+			if class != change.ClassSafe {
+				d.Measure = &resources.Measurement{
 					Property:     name,
 					PropertyType: have.Type,
-				},
-			})
+				}
+			}
+			out = append(out, d)
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
