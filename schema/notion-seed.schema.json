@@ -95,8 +95,13 @@
             "required": ["type"]
           },
           "then": {
+            "comment": "options est obligatoire et non vide sur status : une propriété status créée avec une liste vide se fait peupler par l'API de ses propres options par défaut, que le plan n'a jamais affichées — et dont le retrait ultérieur se classe en réécriture silencieuse, que allow_data_loss ne débloque pas. select et multi_select n'ont pas cette contrainte : leurs options peuvent être gérées à la main sans risque de réassignation.",
+            "required": ["options"],
             "properties": {
-              "options": { "items": { "required": ["name", "group"] } }
+              "options": {
+                "minItems": 1,
+                "items": { "required": ["name", "group"] }
+              }
             }
           },
           "else": {

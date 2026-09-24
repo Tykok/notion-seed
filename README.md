@@ -158,7 +158,14 @@ databases:
             group: Complete
 ```
 
-`group` est **obligatoire** sur chaque option de `status`, et n'accepte que
+Une propriété `status` doit déclarer ses `options`, et `group` est
+**obligatoire** sur chacune. Un `status` créé sans options se fait peupler par
+l'API de ses propres options par défaut, que le plan n'aura pas affichées — et
+leur retrait ultérieur réassigne silencieusement les lignes. `select` et
+`multi_select` n'ont pas cette contrainte : leurs options peuvent être gérées à
+la main sans ce risque.
+
+`group` n'accepte que
 `To-do`, `In progress` ou `Complete`. notion-seed ne choisit pas de groupe à
 votre place : une option envoyée sans `group` est rangée par l'API dans le
 premier groupe, sans erreur — donc une écriture que le plan n'aurait pas
