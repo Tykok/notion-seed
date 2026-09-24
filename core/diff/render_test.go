@@ -556,6 +556,61 @@ func TestRenderSaysWhenAMeasurableLineWasNotMeasured(t *testing.T) {
 	}
 }
 
+// « Non mesurable » et « non mesuré » ne se réparent pas pareil, donc ne se
+// disent pas pareil. Un type que notion-seed ne sait pas filtrer ne se comptera
+// pas davantage au dixième run : promettre « relancez » serait annoncer une
+// action corrective qui n'arrivera jamais — exactement la faute que ce produit
+// existe pour supprimer.
+func TestRenderNeverPromisesARetryOnAnUnmeasurableLine(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Class: ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "~", Target: `property "Notes"`, Note: "rich_text → number",
+			Class: ClassSilentRewrite, Count: -1, Unmeasurable: true,
+			Measure: &resources.Measurement{Property: "Notes", PropertyType: "rich_text"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if strings.Contains(got, "relancez") {
+		t.Errorf("sortie:\n%s\nune ligne non mesurable ne se répare pas en relançant", got)
+	}
+	// Elle doit malgré tout parler, et nommer ce qui bloque.
+	if !strings.Contains(got, "rich_text") {
+		t.Errorf("sortie:\n%s\nla phrase doit nommer le type qu'on ne sait pas compter", got)
+	}
+	if !strings.Contains(got, "inconnu") {
+		t.Errorf("sortie:\n%s\nl'impact réel reste inconnu et doit se dire", got)
+	}
+}
+
+// Le pendant exact : une mesure simplement PAS FAITE (--skip-preflight, 403,
+// 429) se répare bien en relançant, et doit garder sa promesse. Sans ce test,
+// la correction ci-dessus pourrait supprimer le remède partout.
+func TestRenderStillPromisesARetryOnAMerelyUnmeasuredLine(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Class: ClassSilentRewrite,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Annulé" (propriété "Statut")`,
+			Class: ClassSilentRewrite, Count: -1,
+			Measure: &resources.Measurement{
+				Property: "Statut", PropertyType: "status", Option: "Annulé"},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "relancez en ligne pour l'obtenir") {
+		t.Errorf("sortie:\n%s\nune mesure non faite se répare en relançant : dites-le", b.String())
+	}
+}
+
 // Le pendant du test précédent : une ligne sans demande de mesure ne coûte
 // rien, et n'a donc aucune conséquence à annoncer. Sans cette borne, la
 // correction ci-dessus ferait déborder « impact non mesuré » sur chaque ajout

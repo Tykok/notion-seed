@@ -111,6 +111,40 @@ func TestEnrichReportsNoFailureForAnUnfilterableType(t *testing.T) {
 	}
 }
 
+// C'est la passe de mesure qui SAIT quels types elle peut filtrer, donc c'est
+// elle qui marque la ligne. Le rendu ne peut pas le déduire : la liste des
+// types filtrables vit ici, et core/measure importe core/diff — l'inverse
+// créerait un cycle, et recopier la table la ferait diverger.
+//
+// Sans cette marque, le rendu promet « relancez en ligne pour l'obtenir » sur
+// une ligne qui ne se comptera jamais.
+func TestEnrichMarksAnUnfilterableTypeAsUnmeasurable(t *testing.T) {
+	p := planWithRemoval("people", "Quelqu'un")
+	c := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedFilter, "people")
+	})
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if d := p.Changes[0].Details[0]; !d.Unmeasurable {
+		t.Error("Unmeasurable = false : un type non filtrable ne le deviendra pas au prochain run")
+	}
+}
+
+// Une panne, elle, N'EST PAS une impossibilité : un 403 se répare, et la ligne
+// doit rester simplement non mesurée pour que le rendu garde son remède.
+// Confondre les deux ferait disparaître « relancez » là où relancer marche.
+func TestEnrichDoesNotMarkAFailedMeasurementAsUnmeasurable(t *testing.T) {
+	p := planWithRemoval("status", "Annulé")
+	c := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, errors.New("403 restricted_resource")
+	})
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if d := p.Changes[0].Details[0]; d.Unmeasurable {
+		t.Error("Unmeasurable = true sur une panne : un 403 se répare en relançant")
+	}
+}
+
 // Aucune demande de mesure : aucun appel. Ne pas payer d'appels pour rien est
 // une propriété, pas une optimisation.
 func TestEnrichEmitsNoCallWhenNothingNeedsMeasuring(t *testing.T) {

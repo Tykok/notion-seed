@@ -57,6 +57,26 @@ type Detail struct {
 	// Capped dit que le plafond de pagination a été atteint et que Count est
 	// donc un minorant.
 	Capped bool
+
+	// Unmeasurable dit que notion-seed ne sait pas POSER la question : le type
+	// de la propriété n'est pas filtrable, et il ne le deviendra pas au prochain
+	// run. C'est une impossibilité, pas une panne.
+	//
+	// La distinction existe pour le rendu, et elle est de fond : une mesure
+	// simplement pas faite (--skip-preflight, 403, 429) se répare en relançant,
+	// et le rendu peut le promettre ; une mesure impossible ne se répare pas, et
+	// le promettre annoncerait une action corrective qui n'arrivera jamais.
+	//
+	// Seul core/measure pose ce champ : c'est lui qui connaît les types
+	// filtrables, et lui seul. Le rendu ne peut pas le déduire sans recopier
+	// cette table ni créer un cycle d'import.
+	//
+	// La valeur par défaut, false, signifie « mesurable » — le cas majoritaire,
+	// et le cas PRUDENT : un détail laissé à false par erreur retombe sur
+	// « non mesuré », qui propose de relancer, au pire une promesse vaine. Un
+	// détail marqué true à tort ferait au contraire disparaître un remède qui
+	// marche. Le défaut penche donc du bon côté.
+	Unmeasurable bool
 }
 
 // NewDetail construit un détail non mesuré. À utiliser SYSTÉMATIQUEMENT : un

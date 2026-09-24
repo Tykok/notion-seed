@@ -230,12 +230,22 @@ func consequence(d resources.Detail) string {
 	if d.Measure == nil {
 		return ""
 	}
-	// Mesurable, mais pas mesurée. Se taire ici la rendrait indiscernable d'une
-	// ligne sans coût, à côté de voisines qui portent leur chiffre — et une
-	// réécriture silencieuse qu'on croit anodine est le pire malentendu que ce
-	// rendu puisse produire. Le cas n'est pas théorique : un type non filtrable
-	// (rich_text) laisse le compte à -1 sans qu'aucune panne ne soit survenue.
+	// Pas de compte. Se taire ici rendrait la ligne indiscernable d'une ligne
+	// sans coût, à côté de voisines qui portent leur chiffre — et une réécriture
+	// silencieuse qu'on croit anodine est le pire malentendu que ce rendu puisse
+	// produire. Reste à dire LAQUELLE des deux raisons s'applique, parce qu'elles
+	// ne se réparent pas pareil.
 	if d.Count < 0 {
+		// Question impossible à poser : aucun remède à proposer, donc aucun
+		// promis. Annoncer « relancez » ici annoncerait une action corrective qui
+		// n'arrivera jamais.
+		if d.Unmeasurable {
+			return fmt.Sprintf(
+				"impact réel inconnu : notion-seed ne sait pas compter les lignes "+
+					"d'une propriété %s", d.Measure.PropertyType)
+		}
+		// Question posable, réponse pas obtenue (--skip-preflight, 403, 429) :
+		// relancer marche vraiment.
 		return "impact non mesuré ; relancez en ligne pour l'obtenir"
 	}
 	if d.Count == 0 {
