@@ -412,7 +412,7 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 | `unknown` | l'impact n'a pas pu être mesuré : type hors table, comptage en échec, ou hors ligne |
 | `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |
 
-Quatre choses à savoir :
+Cinq choses à savoir :
 
 - La liste est **énumérée, pas un seuil**. `sûr`, `destructif` et `réécriture
   silencieuse` forment bien une échelle, mais `impact inconnu` n'y a pas de
@@ -428,6 +428,13 @@ Quatre choses à savoir :
 - Le déclenchement se fait sur les lignes de détail, avec leur classe mesurée.
   Une option que personne n'utilise est classée `sûr` et n'attrape rien, même
   sur une propriété `status` — c'est tout l'intérêt d'avoir compté.
+- Un comptage **en échec** bascule sa ligne en `impact inconnu`. Un `403`, un
+  `429` qui n'a plus de patience, une réponse que notion-seed ne reconnaît pas :
+  la ligne n'est alors plus classée `destructif` ni `réécriture silencieuse`,
+  donc un `--fail-on=destructive,silent-rewrite` ne l'attrape plus et sort en
+  `0`. Ajoutez `unknown` à votre liste si vous voulez que le garde-fou tienne
+  même quand l'API refuse de compter — sans quoi une CI se croit protégée
+  précisément le jour où elle ne l'est pas.
 
 `--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
 Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne
