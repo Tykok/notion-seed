@@ -13,13 +13,26 @@ import (
 )
 
 // stubTransport rend une réponse par chemin appelé.
+//
+// calls enregistre "MÉTHODE /chemin" — pas le seul chemin — pour qu'un test
+// puisse distinguer un PATCH d'un GET sur la même ressource : Update relit
+// exactement les chemins qu'elle vient d'écrire.
+//
+// errs permet de faire échouer un appel précis sans toucher aux autres : sans
+// lui, un test ne peut faire échouer QUE tous les appels d'un transport, ce
+// qui ne permet pas de vérifier qu'Update s'arrête au bon endroit.
 type stubTransport struct {
 	byPath map[string]string
 	calls  []string
+	errs   map[string]error
 }
 
 func (s *stubTransport) Execute(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
-	s.calls = append(s.calls, req.Path)
+	key := req.Method + " " + req.Path
+	s.calls = append(s.calls, key)
+	if err, ok := s.errs[key]; ok {
+		return transport.APIResponse{}, err
+	}
 	return transport.APIResponse{Status: 200, Body: []byte(s.byPath[req.Path])}, nil
 }
 
@@ -46,7 +59,7 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 		t.Error("Exists() = false, want true")
 	}
 	if len(st.calls) != 2 ||
-		st.calls[0] != "/v1/databases/db1" || st.calls[1] != "/v1/data_sources/ds1" {
+		st.calls[0] != "GET /v1/databases/db1" || st.calls[1] != "GET /v1/data_sources/ds1" {
 		t.Errorf("appels = %v, want database puis data_source", st.calls)
 	}
 	if !strings.Contains(string(gotDB), `"object":"database"`) &&
@@ -267,5 +280,125 @@ func TestCreateRefusesResponseWithoutID(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
+	}
+}
+
+// Update doit écrire la database AVANT le data source, puis relire les deux.
+// L'ordre est l'échec le moins coûteux : un échec du data source laisse un
+// nom et une icône à jour et aucune donnée touchée.
+func TestDatabaseResourceUpdatePatchesDatabaseBeforeDataSource(t *testing.T) {
+	st := &stubTransport{byPath: map[string]string{
+		"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
+		"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Tasks"}],"properties":{}}`,
+	}}
+	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
+		return RemoteDatabase{ID: "db1", DataSourceID: "ds1", Name: "Tasks", Found: true}, nil
+	}
+	r := NewDatabaseResource(st, decode)
+
+	got, err := r.Update(context.Background(), "db1", "ds1",
+		[]byte(`{"title":[]}`), []byte(`{"properties":{}}`))
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !got.DatabaseWritten {
+		t.Error("DatabaseWritten = false alors que dbBody était non vide")
+	}
+	// Les deux PATCH, puis la relecture (database puis data source).
+	want := []string{
+		"PATCH /v1/databases/db1", "PATCH /v1/data_sources/ds1",
+		"GET /v1/databases/db1", "GET /v1/data_sources/ds1",
+	}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Errorf("appels = %v, want %v", st.calls, want)
+	}
+}
+
+// Un corps vide saute son endpoint : une mise à jour qui ne touche que des
+// propriétés n'a rien à écrire sur la database.
+func TestDatabaseResourceUpdateSkipsTheEndpointWithoutABody(t *testing.T) {
+	st := &stubTransport{byPath: map[string]string{
+		"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
+		"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Tasks"}],"properties":{}}`,
+	}}
+	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
+		return RemoteDatabase{ID: "db1", Found: true}, nil
+	}
+	r := NewDatabaseResource(st, decode)
+
+	got, err := r.Update(context.Background(), "db1", "ds1", nil, []byte(`{"properties":{}}`))
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got.DatabaseWritten {
+		t.Error("DatabaseWritten = true alors qu'aucun corps de database n'a été passé")
+	}
+	want := []string{"PATCH /v1/data_sources/ds1", "GET /v1/databases/db1", "GET /v1/data_sources/ds1"}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Errorf("appels = %v, want %v", st.calls, want)
+	}
+}
+
+// Si le PATCH de la database échoue, le data source ne doit RECEVOIR aucun
+// appel : l'écrire alors que le nom n'est pas passé romprait l'ordre D4 qui
+// garantit l'échec le moins coûteux.
+func TestDatabaseResourceUpdateStopsBeforeDataSourceWhenDatabasePatchFails(t *testing.T) {
+	st := &stubTransport{
+		byPath: map[string]string{
+			"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
+			"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Tasks"}],"properties":{}}`,
+		},
+		errs: map[string]error{
+			"PATCH /v1/databases/db1": &transport.APIError{Status: 400, NotionCode: "validation_error"},
+		},
+	}
+	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
+		return RemoteDatabase{ID: "db1", DataSourceID: "ds1", Name: "Tasks", Found: true}, nil
+	}
+	r := NewDatabaseResource(st, decode)
+
+	got, err := r.Update(context.Background(), "db1", "ds1",
+		[]byte(`{"title":[]}`), []byte(`{"properties":{}}`))
+	if err == nil {
+		t.Fatal("Update() error = nil, want l'échec du PATCH database")
+	}
+	if got.DatabaseWritten {
+		t.Error("DatabaseWritten = true alors que le PATCH database a échoué")
+	}
+	want := []string{"PATCH /v1/databases/db1"}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Errorf("appels = %v, want %v : le data source ne doit pas être touché", st.calls, want)
+	}
+}
+
+// Si le PATCH du data source échoue APRÈS que celui de la database ait
+// réussi, DatabaseWritten doit rester true : le nom et l'icône sont écrits,
+// seules les propriétés ne le sont pas, et l'appelant doit pouvoir le dire.
+func TestDatabaseResourceUpdateReportsDatabaseWrittenWhenDataSourcePatchFails(t *testing.T) {
+	st := &stubTransport{
+		byPath: map[string]string{
+			"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
+			"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Tasks"}],"properties":{}}`,
+		},
+		errs: map[string]error{
+			"PATCH /v1/data_sources/ds1": &transport.APIError{Status: 404, NotionCode: "object_not_found"},
+		},
+	}
+	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
+		return RemoteDatabase{ID: "db1", DataSourceID: "ds1", Name: "Tasks", Found: true}, nil
+	}
+	r := NewDatabaseResource(st, decode)
+
+	got, err := r.Update(context.Background(), "db1", "ds1",
+		[]byte(`{"title":[]}`), []byte(`{"properties":{}}`))
+	if err == nil {
+		t.Fatal("Update() error = nil, want l'échec du PATCH data source")
+	}
+	if !got.DatabaseWritten {
+		t.Error("DatabaseWritten = false alors que le PATCH database a réussi")
+	}
+	want := []string{"PATCH /v1/databases/db1", "PATCH /v1/data_sources/ds1"}
+	if !reflect.DeepEqual(st.calls, want) {
+		t.Errorf("appels = %v, want %v", st.calls, want)
 	}
 }

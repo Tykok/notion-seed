@@ -202,6 +202,76 @@ func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedData
 	return out, nil
 }
 
+// UpdatedDatabase porte le résultat d'une mise à jour.
+//
+// DatabaseWritten dit si le PATCH de la database est passé. Sans lui, un échec
+// du PATCH du data source ne saurait pas dire que le nom, lui, est écrit — et
+// l'utilisateur ne saurait pas ce qui reste à faire.
+type UpdatedDatabase struct {
+	DatabaseWritten bool
+	Remote          RemoteDatabase
+	ReadErr         error
+}
+
+// Update écrit une database existante, puis relit le résultat.
+//
+// ORDRE : la database d'abord, le data source ensuite. Un échec du second laisse
+// alors un nom et une icône à jour et AUCUNE donnée touchée — l'échec le moins
+// coûteux. L'ordre inverse écrirait le schéma, donc les lignes, avant de rater
+// le cosmétique.
+//
+// Mesuré le 2026-09-24, et c'est une seconde raison de cet ordre : sur une
+// database dont la page ancêtre est à la corbeille, le PATCH de la database rend
+// un 400 qui NOMME la cause (« archived ancestor »), là où le PATCH du data
+// source rend un 404 qui accuse le partage avec l'intégration. L'ordre fait
+// donc tomber l'utilisateur sur le message juste.
+//
+// Un corps vide saute son endpoint : une mise à jour qui ne touche que des
+// propriétés n'a rien à écrire sur la database.
+//
+// La relecture rapporte les ids des options neuves, sans lesquels le state est
+// aveugle à la dérive, et permet à l'appelant de confronter le réel à ce que le
+// plan avait annoncé.
+func (r *DatabaseResource) Update(
+	ctx context.Context, id, dsID string, dbBody, dsBody []byte,
+) (UpdatedDatabase, error) {
+	var out UpdatedDatabase
+
+	if len(dbBody) > 0 {
+		if _, err := r.tr.Execute(ctx, transport.APIRequest{
+			Method: "PATCH",
+			Path:   "/v1/databases/" + id,
+			Body:   dbBody,
+		}); err != nil {
+			return out, err
+		}
+		out.DatabaseWritten = true
+	}
+
+	if len(dsBody) > 0 {
+		if _, err := r.tr.Execute(ctx, transport.APIRequest{
+			Method: "PATCH",
+			Path:   "/v1/data_sources/" + dsID,
+			Body:   dsBody,
+		}); err != nil {
+			return out, err
+		}
+	}
+
+	remote, err := r.Read(ctx, id)
+	if err != nil {
+		out.ReadErr = err
+		return out, nil
+	}
+	rd, ok := remote.(RemoteDatabase)
+	if !ok {
+		out.ReadErr = fmt.Errorf("relecture de %s : type inattendu %T", id, remote)
+		return out, nil
+	}
+	out.Remote = rd
+	return out, nil
+}
+
 // Diff compare une database désirée à son état distant. Au MVP 0, l'état
 // distant est toujours absent : tout ressort en création.
 func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, error) {
