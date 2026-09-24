@@ -216,6 +216,107 @@ func TestRunKeepsIdentityWhenReadBackFails(t *testing.T) {
 	}
 }
 
+// Un plan bloqué ne doit JAMAIS être écrit, et la garde doit vivre dans le
+// paquet qui écrit — pas seulement dans la commande. Un plan peut être bloqué
+// par une autre ressource que celles qu'il s'apprête à créer : sans cette
+// garde, un second appelant écrirait les créations d'un plan refusé.
+func TestRunRefusesABlockedPlan(t *testing.T) {
+	dir := t.TempDir()
+	p := &diff.Plan{
+		Changes:        []diff.Change{createChange("projects", "Projects")},
+		Blocked:        true,
+		BlockedReasons: []string{"database.tasks : réécriture silencieuse"},
+	}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{
+		Dir: dir, ParentPageID: testParentPageID, Creator: refuseToCreate(t),
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want le refus d'un plan bloqué")
+	}
+	if !strings.Contains(err.Error(), "  → ") {
+		t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+	}
+	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
+		t.Error("un state a été écrit malgré un plan bloqué")
+	}
+}
+
+// Le message d'issue inconnue doit nommer la page parente : l'utilisateur va y
+// aller vérifier, au moment précis où son workspace est indéterminé. Aller
+// rechercher l'id dans workspace.yaml est un travail que la commande peut faire.
+func TestRunUnknownOutcomeNamesTheParentPage(t *testing.T) {
+	dir := t.TempDir()
+	p := &diff.Plan{Changes: []diff.Change{createChange("projects", "Projects")}}
+
+	creator := creatorFunc(func(context.Context, []byte) (resources.CreatedDatabase, error) {
+		return resources.CreatedDatabase{}, &transport.OutcomeUnknownError{Cause: context.DeadlineExceeded}
+	})
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{
+		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want l'issue inconnue")
+	}
+	if !strings.Contains(err.Error(), testParentPageID) {
+		t.Errorf("message = %q, il doit nommer la page parente %s", err.Error(), testParentPageID)
+	}
+}
+
+// Une option que l'API a écrite EN TROP doit se lire comme telle. Réutiliser la
+// note du plan telle quelle donnait « l'API n'a pas écrit - option "Fait" —
+// absente du YAML », qui décrit l'inverse de ce qui s'est passé.
+func TestRunReportsExtraOptionAsWrittenInExcess(t *testing.T) {
+	dir := t.TempDir()
+	target := &state.Database{
+		Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Statut": {Type: "select", Options: []state.Option{
+				{Key: "todo", Name: "À faire"},
+			}},
+		},
+	}
+	p := &diff.Plan{Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks",
+		Kind: resources.KindCreate, Target: target,
+	}}}
+
+	// L'API rend une option de plus que ce qui était annoncé.
+	creator := creatorFunc(func(context.Context, []byte) (resources.CreatedDatabase, error) {
+		return resources.CreatedDatabase{
+			ID: "db-1", DataSourceID: "ds-1",
+			Remote: resources.RemoteDatabase{
+				ID: "db-1", DataSourceID: "ds-1", Name: "Tasks", Found: true,
+				Properties: map[string]resources.RemoteProperty{
+					"Statut": {ID: "p1", Type: "select", Options: []resources.RemoteOption{
+						{ID: "o1", Name: "À faire"},
+						{ID: "o2", Name: "Fait"},
+					}},
+				},
+			},
+		}, nil
+	})
+
+	rep, err := Run(context.Background(), p, emptySnapshot(), Options{
+		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	joined := strings.Join(rep.Mismatches, "\n")
+	if !strings.Contains(joined, "Fait") {
+		t.Fatalf("Mismatches = %v, il doit nommer l'option en trop", rep.Mismatches)
+	}
+	if strings.Contains(joined, "n'a pas écrit") {
+		t.Errorf("écart = %q : une option écrite en trop ne peut pas se lire "+
+			"« l'API n'a pas écrit »", joined)
+	}
+	if !strings.Contains(joined, "en trop") {
+		t.Errorf("écart = %q, il doit dire que l'option est en trop", joined)
+	}
+}
+
 // Une entrée de state obsolète est retirée : ça n'écrit rien dans Notion et ça
 // fait converger le plan.
 func TestRunCleansStaleStateEntries(t *testing.T) {

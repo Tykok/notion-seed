@@ -65,6 +65,17 @@ func (r Report) Converged() bool {
 // personne n'a demandée.
 func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) (Report, error) {
 	var rep Report
+
+	// La garde vit ICI, dans le paquet qui écrit, et pas seulement dans la
+	// commande. Un plan peut être bloqué par une AUTRE ressource que celles
+	// qu'on s'apprête à créer : sans cette ligne, un second appelant écrirait
+	// les créations d'un plan refusé, et aucun test ne le verrait.
+	if p.Blocked {
+		return rep, fmt.Errorf(
+			"plan bloqué, rien n'a été appliqué\n" +
+				"  → levez chaque blocage listé par `notion-seed plan` avant de relancer")
+	}
+
 	if snap.Databases == nil {
 		snap.Databases = map[string]state.Database{}
 	}
@@ -83,7 +94,7 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 
 		created, err := opts.Creator.Create(ctx, body)
 		if err != nil {
-			return rep, creationError(c, rep, err)
+			return rep, creationError(c, rep, err, opts.ParentPageID)
 		}
 
 		if created.ReadErr != nil {
@@ -143,19 +154,35 @@ func mismatchLines(c diff.Change, adopted state.Database) []string {
 	gap := diff.CompareDatabase(c.Key, c.Target, &adopted, &adopted)
 	out := make([]string, 0, len(gap.Changeset.Details))
 	for _, d := range gap.Changeset.Details {
-		line := fmt.Sprintf("%s — l'API n'a pas écrit %s %s", c.Resource, d.Op, d.Target)
-		if d.Note != "" {
-			line += " — " + d.Note
-		}
-		out = append(out, line)
+		// La Note des détails est écrite pour le contexte du PLAN — « absente du
+		// YAML », par exemple — et se lit à l'envers ici : ce qui manquait au YAML
+		// est ce que l'API a écrit en trop. On ne la reprend donc pas, et on dit
+		// le sens réel à partir de l'opération.
+		out = append(out, fmt.Sprintf("%s — %s : %s",
+			c.Resource, mismatchVerb(d.Op), d.Target))
 	}
 	return out
+}
+
+// mismatchVerb traduit l'opération du plan en ce qui s'est réellement passé
+// pendant l'écriture. `-` est le cas qui se lisait à l'envers : dans un plan il
+// veut dire « à retirer », ici il veut dire « l'API l'a écrit alors que la
+// cible ne le portait pas ».
+func mismatchVerb(op string) string {
+	switch op {
+	case "-":
+		return "l'API a écrit en trop"
+	case "~":
+		return "l'API a écrit une autre valeur que celle annoncée"
+	default:
+		return "l'API n'a pas écrit"
+	}
 }
 
 // creationError rend l'échec d'une création en nommant ce qui est acquis et ce
 // qui ne l'est pas. Un message qui ne dit pas où s'est arrêtée la série laisse
 // l'utilisateur deviner l'état de son workspace.
-func creationError(c diff.Change, rep Report, err error) error {
+func creationError(c diff.Change, rep Report, err error, parentPageID string) error {
 	acquired := "aucune création n'avait abouti avant celle-ci"
 	if len(rep.Created) > 0 {
 		names := make([]string, 0, len(rep.Created))
@@ -172,10 +199,10 @@ func creationError(c diff.Change, rep Report, err error) error {
 		// la création suivante travaillerait à l'aveugle.
 		return fmt.Errorf(
 			"création de %s : issue inconnue: %w\n"+
-				"  → ouvrez la page parente dans Notion. Si la database %q existe, "+
+				"  → ouvrez la page parente %s dans Notion. Si la database %q existe, "+
 				"adoptez-la avec `notion-seed import %s <url>` ; sinon relancez apply. "+
 				"%s",
-			c.Resource, err, c.Target.Name, c.Resource, acquired)
+			c.Resource, err, parentPageID, c.Target.Name, c.Resource, acquired)
 	}
 	return fmt.Errorf(
 		"création de %s impossible: %w\n"+
