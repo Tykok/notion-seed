@@ -1412,3 +1412,27 @@ func TestRunRefusesADestroyWithoutATrasher(t *testing.T) {
 		}
 	}
 }
+
+// L'absence de Trasher se voit AVANT la première écriture : sinon un plan qui
+// crée puis détruit écrirait la création, puis s'arrêterait sur la
+// destruction, à moitié appliqué.
+func TestRunRefusesAMissingWriterBeforeAnyWrite(t *testing.T) {
+	dir := t.TempDir()
+	snap := orphanSnapshot("tasks")
+	p := &diff.Plan{Changes: []diff.Change{
+		createChange("projects", "Projects"),
+		destroyChange("tasks"),
+	}}
+	rep, err := Run(context.Background(), p, snap, Options{Dir: dir, Creator: refuseToCreate(t)})
+	if err == nil {
+		t.Fatal("error = nil, want un défaut interne nommé")
+	}
+	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+	if len(rep.Created) != 0 {
+		t.Errorf("Created = %v, want aucune création avant le refus", rep.Created)
+	}
+}

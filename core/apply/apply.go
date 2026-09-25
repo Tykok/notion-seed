@@ -117,6 +117,31 @@ func Check(p *diff.Plan, snap *state.Snapshot) error {
 	return nil
 }
 
+// checkWriters refuse un plan dont un changement autorisé n'a personne pour
+// l'écrire. Seul un appelant mal câblé y arrive : c'est un défaut interne.
+func checkWriters(p *diff.Plan, opts Options) error {
+	for _, c := range p.Changes {
+		if c.Withheld != "" {
+			continue
+		}
+		var missing string
+		switch {
+		case c.Kind == resources.KindCreate && opts.Creator == nil:
+			missing = "une création est à écrire mais aucun Creator n'est branché"
+		case c.Kind == resources.KindUpdate && opts.Updater == nil:
+			missing = "une modification est à écrire mais aucun Updater n'est branché"
+		case c.Kind == resources.KindDestroy && opts.Trasher == nil:
+			missing = "une destruction est à écrire mais aucun Trasher n'est branché"
+		default:
+			continue
+		}
+		return fmt.Errorf("%s : %s, rien n'a été appliqué\n"+
+			"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
+			"sortie de `notion-seed plan`", c.Resource, missing)
+	}
+	return nil
+}
+
 // Run écrit les créations, les modifications et les destructions du plan, une
 // ressource à la fois.
 //
@@ -145,6 +170,11 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 	// Check AVANT la première écriture : un changement autorisé qu'apply ne
 	// saurait pas écrire arrête le plan entier, pas la moitié de la série.
 	if err := Check(p, snap); err != nil {
+		return rep, err
+	}
+	// De même pour ce qui écrit : un Trasher absent, découvert à la
+	// destruction, laisserait écrites les créations qui la précèdent.
+	if err := checkWriters(p, opts); err != nil {
 		return rep, err
 	}
 
@@ -615,12 +645,6 @@ func genericUpdateError(c diff.Change, err error, here, acquired string, dbWritt
 // Run ne lit pas Acknowledged : lifecycle.prevent_destroy est un accusé de
 // lecture du plan, pas une interdiction d'écrire.
 func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
-	if opts.Trasher == nil {
-		return fmt.Errorf(
-			"%s : une destruction est à écrire mais aucun Trasher n'est branché\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", c.Resource)
-	}
 	id := snap.Databases[c.Key].ID
 
 	trashed, err := opts.Trasher.Trash(ctx, id)
