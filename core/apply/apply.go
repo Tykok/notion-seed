@@ -663,13 +663,15 @@ func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Sna
 		// L'API a déjà confirmé la corbeille : le %w de state.Save dit « l'ancien
 		// state est intact », ce qui est vrai pour le FICHIER mais tairait que la
 		// database, elle, est déjà partie. Le dire ici évite l'inverse de
-		// destroyError : un lecteur qui croirait n'avoir rien à faire.
+		// destroyError : un lecteur qui croirait n'avoir rien à faire. `plan` ne
+		// fait que relire et classer, jamais écrire : c'est un `apply` suivant,
+		// sur son StaleState, qui retire l'entrée.
 		return fmt.Errorf(
 			"%s a bien été mise à la corbeille dans Notion, mais son entrée n'a pas "+
 				"pu être retirée de %s: %w\n"+
 				"  → relancez `notion-seed plan` : la database s'y lira comme à la "+
-				"corbeille, son entrée sera reconnue comme entrée de state obsolète et "+
-				"nettoyée sans rien écrire dans Notion",
+				"corbeille, son entrée apparaîtra comme entrée de state obsolète, qu'un "+
+				"`apply` suivant retirera sans rien écrire dans Notion",
 			c.Resource, state.FileName, err)
 	}
 	rep.Destroyed = append(rep.Destroyed, fmt.Sprintf(
@@ -715,8 +717,9 @@ func destroyError(c diff.Change, rep Report, err error) error {
 					"  → soit restaurez la page parente dans Notion, puis relancez apply ; "+
 					"soit supprimez définitivement la page parente depuis la corbeille de "+
 					"Notion, puis relancez `notion-seed plan` : si Notion ne connaît plus la "+
-					"database, son entrée sera nettoyée comme entrée de state obsolète, sans "+
-					"rien écrire. Son entrée de state est gardée. %s",
+					"database, son entrée apparaîtra comme entrée de state obsolète, qu'un "+
+					"`apply` suivant retirera sans rien écrire. Son entrée de state est "+
+					"gardée. %s",
 				c.Resource, acquired)
 		case apiErr.Status == 404:
 			// Le plan venait de la lire. Ce 404 n'est pas une preuve de
