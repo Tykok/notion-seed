@@ -1316,7 +1316,7 @@ func TestRunWarnsWhenTrashSucceedsButStateSaveFails(t *testing.T) {
 
 	for _, want := range []string{
 		"database.tasks", "corbeille", "  → ", "notion-seed plan",
-		"entrée de state obsolète",
+		"entrée de state obsolète", "`apply` suivant retirera",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("erreur = %q, want contenant %q", err.Error(), want)
@@ -1359,7 +1359,7 @@ func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 					"unarchive the ancestor before editing page."},
 			want: []string{"page ancêtre", "restaurez la page parente", "relancez apply",
 				"supprimez définitivement la page parente", "notion-seed plan",
-				"entrée de state obsolète"},
+				"entrée de state obsolète", "`apply` suivant retirera"},
 		},
 		{
 			name: "issue inconnue",
