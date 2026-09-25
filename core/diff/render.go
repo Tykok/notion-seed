@@ -244,6 +244,9 @@ func consequence(d resources.Detail) string {
 	if d.Measure == nil {
 		return ""
 	}
+	if d.Measure.AllRows {
+		return destroyedRows(d)
+	}
 	// Pas de compte. Se taire ici rendrait la ligne indiscernable d'une ligne
 	// sans coût, à côté de voisines qui portent leur chiffre — et une réécriture
 	// silencieuse qu'on croit anodine est le pire malentendu que ce rendu puisse
@@ -322,6 +325,20 @@ func consequence(d resources.Detail) string {
 	return count + " non vides dans cette colonne"
 }
 
+// destroyedRows dit combien de lignes une database mise à la corbeille emporte.
+// Non mesuré — comptage refusé, épuisé ou incompris —, il le dit : se taire
+// rendrait la ligne indiscernable d'une database vide.
+func destroyedRows(d resources.Detail) string {
+	switch {
+	case d.Count < 0:
+		return "nombre de lignes qui partent à la corbeille avec elle non mesuré ; " +
+			"relancez pour l'obtenir"
+	case d.Count == 0:
+		return "aucune ligne ne part à la corbeille avec elle"
+	}
+	return bound(d.Count, d.Capped) + " ligne(s) partent à la corbeille avec elle"
+}
+
 // removalFate dit de quel type le sort des lignes suit, pour une option qui
 // part. C'est l'ancien type, sauf quand l'option disparaît avec un changement de
 // type depuis status : il est alors traité comme un select, une perte.
@@ -377,14 +394,17 @@ func WritableImpact(p *Plan) string {
 // seule règle d'agrégat, deux périmètres. Deux règles finiraient par diverger,
 // et plan et apply par annoncer deux coûts différents pour la même écriture.
 func impactOf(changes []Change) string {
-	reassigned, lost, weakened, destroyed := 0, 0, 0, 0
+	reassigned, lost, weakened := 0, 0, 0
 	var reassignedCapped, lostCapped, weakenedCapped bool
+	var trash trashedRows
 	for _, c := range changes {
 		if c.Kind == resources.KindDestroy {
-			destroyed++
+			trash.add(c)
 		}
 		for _, d := range c.Details {
-			if d.Measure == nil || d.Count <= 0 {
+			// Le compte d'une destruction est agrégé par trash, à part : ce sont
+			// des lignes, pas des valeurs, et elles ne se mêlent à aucune famille.
+			if d.Measure == nil || d.Measure.AllRows || d.Count <= 0 {
 				continue
 			}
 			// Une ligne de migration retient sa ressource : rien n'est écrit, donc
@@ -426,11 +446,48 @@ func impactOf(changes []Change) string {
 			parts = append(parts, fmt.Sprintf("jusqu'à %d valeurs appauvries sans trace", weakened))
 		}
 	}
-	if destroyed > 0 {
-		parts = append(parts, fmt.Sprintf("%d database(s) à la corbeille", destroyed))
+	if trash.databases > 0 {
+		parts = append(parts, trash.String())
 	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return "Impact : " + strings.Join(parts, ", ") + "."
+}
+
+// trashedRows agrège les databases mises à la corbeille et les lignes qu'elles
+// emportent.
+//
+// Ici, et ici seulement, le total parle de LIGNES : chaque ligne appartient à
+// un seul data source, donc deux databases détruites ne comptent jamais deux
+// fois la même. Un compte inconnu n'est jamais pris pour 0 : il est nommé, et le
+// total connu devient un minorant.
+type trashedRows struct {
+	databases, rows, unknown int
+	capped                   bool
+}
+
+func (t *trashedRows) add(c Change) {
+	t.databases++
+	for _, d := range c.Details {
+		if d.Measure != nil && d.Measure.AllRows && d.Count >= 0 {
+			t.rows += d.Count
+			t.capped = t.capped || d.Capped
+			return
+		}
+	}
+	// Aucun compte obtenu pour cette database : ni 0, ni rien.
+	t.unknown++
+}
+
+func (t trashedRows) String() string {
+	head := fmt.Sprintf("%d database(s) à la corbeille", t.databases)
+	switch {
+	case t.unknown == t.databases:
+		return head + ", lignes non comptées"
+	case t.unknown > 0:
+		return fmt.Sprintf("%s avec au moins %d ligne(s), lignes non comptées pour %d d'entre elles",
+			head, t.rows, t.unknown)
+	}
+	return head + " avec " + bound(t.rows, t.capped) + " ligne(s)"
 }

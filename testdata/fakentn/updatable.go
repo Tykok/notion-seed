@@ -100,6 +100,14 @@ func runUpdatable() {
 	case strings.HasSuffix(path, "/query"):
 		fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
 			"< 200 OK\n< content-type: application/json\n")
+		// Sans filtre, c'est le compte de TOUTES les lignes — celui d'une
+		// destruction. La database en porte trois, dont deux portent « Fait » :
+		// un compte différent de queryTwoRows prouve que la requête est bien
+		// partie sans filtre.
+		if isUnfilteredQuery(body) {
+			fmt.Fprint(os.Stdout, queryThreeRows)
+			return
+		}
 		fmt.Fprint(os.Stdout, queryTwoRows)
 		return
 	case strings.HasPrefix(path, "/v1/databases/"):
@@ -129,6 +137,22 @@ func runUpdatable() {
 		"< 200 OK\n< content-type: application/json\n")
 	b, _ := json.Marshal(out)
 	fmt.Fprint(os.Stdout, string(b))
+}
+
+// queryThreeRows est toute la database du scénario : trois lignes.
+const queryThreeRows = `{"object":"list","results":[` +
+	`{"object":"page","id":"p1"},{"object":"page","id":"p2"},` +
+	`{"object":"page","id":"p3"}],"has_more":false}`
+
+// isUnfilteredQuery dit si le corps d'une requête de comptage ne porte aucun
+// filtre.
+func isUnfilteredQuery(body []byte) bool {
+	var q map[string]any
+	if json.Unmarshal(body, &q) != nil {
+		return false
+	}
+	_, filtered := q["filter"]
+	return !filtered
 }
 
 func loadUpdatable() (*updatableState, error) {

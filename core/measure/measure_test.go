@@ -277,3 +277,29 @@ func TestCountRefusesHasMoreWithoutACursor(t *testing.T) {
 		t.Errorf("error = %v, elle doit porter une action corrective", err)
 	}
 }
+
+// AllRows compte TOUTES les lignes du data source : une database mise à la
+// corbeille les emporte toutes, avec ou sans valeur dans telle colonne. Aucun
+// filtre ne part, pas même vide.
+func TestCountAllRowsSendsNoFilter(t *testing.T) {
+	var sent map[string]any
+	var path string
+	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+		path = req.Path
+		_ = json.Unmarshal(req.Body, &sent)
+		return transport.APIResponse{Status: 200, Body: pageOf(3, "")}, nil
+	})
+	res, err := NewCounter(tr).Count(context.Background(), Request{DataSourceID: "ds-1", AllRows: true})
+	if err != nil {
+		t.Fatalf("Count() error = %v", err)
+	}
+	if _, ok := sent["filter"]; ok {
+		t.Errorf("corps = %v, want aucun filtre", sent)
+	}
+	if path != "/v1/data_sources/ds-1/query" {
+		t.Errorf("chemin = %q", path)
+	}
+	if res.Count != 3 || res.Capped {
+		t.Errorf("Result = %+v, want {3 false}", res)
+	}
+}
