@@ -148,6 +148,27 @@ func TestCompareDoesNotMarkAMissingFigureAsRetryableUnlessTheCountFailed(t *test
 	}
 }
 
+// Minor 1 (final review): a line reviewed unmeasured never had a figure —
+// counted(r.Bound) is true for BoundUnmeasured too, since a measurement was
+// attempted, but saying it "was counted" claims the opposite of what the
+// reviewer saw. The verdict is unchanged (still a refusal: unknown impact is
+// not what is proposed now), only the wording must not lie about which
+// direction the line moved.
+func TestCompareNamesALineThatCostsNothingNowWhenItWasNeverMeasured(t *testing.T) {
+	target := `property "Notes" (rich_text → number)`
+	unmeasuredPlan := &diff.Plan{ToChange: 1, Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{boundDetail(BoundUnmeasured, 12)},
+	}}}
+	freePlan := &diff.Plan{ToChange: 1, Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{resources.NewDetail("~", target, change.ClassSafe)},
+	}}}
+	assertDrift(t, reviewed(t, unmeasuredPlan), freePlan,
+		`database.tasks: property "Notes" (rich_text → number) — `+
+			`had no figure when reviewed, now costs nothing to count`)
+}
+
 // typeChangePlan is a measured type change of "Prio" from the given source
 // type, with its count.
 func typeChangePlan(from string, count int) *diff.Plan {
