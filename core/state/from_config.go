@@ -4,10 +4,10 @@ package state
 
 import "github.com/tykok/notion-seed/core/config"
 
-// FromConfig projette une database déclarée dans le type pivot.
+// FromConfig projects a declared database into the pivot type.
 //
-// Le résultat ne porte aucun id : la configuration ne connaît que des key.
-// C'est la voie « desired » du diff à trois voies.
+// The result carries no id: the configuration only knows keys. It is the
+// "desired" side of the three-way diff.
 func FromConfig(db config.Database) Database {
 	out := Database{
 		Name:        db.Name,

@@ -4,7 +4,7 @@
   "title": "notion-seed configuration",
   "type": "object",
   "additionalProperties": false,
-  "comment": "version n'est volontairement PAS dans un `required` : la validation est par document, et seul workspace.yaml porte ce champ — les fichiers de databases/ ne le portent pas. L'exigence de sa présence dans workspace.yaml est portée par le chargeur.",
+  "comment": "version is deliberately NOT in a `required`: validation is per document, and only workspace.yaml holds this field — the files of databases/ do not. Requiring it in workspace.yaml is the loader's job.",
   "properties": {
     "version": { "const": 1 },
     "workspace": {
@@ -15,7 +15,7 @@
         "parent_page_id": {
           "type": "string",
           "pattern": "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$",
-          "description": "UUID de la page parente, avec ou sans tirets. Contraint ici pour que la config soit rejetée avant l'appel : l'API répond sinon un 400 validation_error dont le message est moins clair, et un id en forme de chemin relatif produirait une URL qui vise un autre endpoint."
+          "description": "UUID of the parent page, with or without dashes. Constrained here so the config is rejected before the call: otherwise the API answers a 400 validation_error whose message is less clear, and an id shaped like a relative path would produce a URL targeting another endpoint."
         }
       }
     },
@@ -67,7 +67,7 @@
         },
         "format": {
           "type": "string",
-          "description": "number uniquement"
+          "description": "number only"
         },
         "options": {
           "type": "array",
@@ -89,13 +89,13 @@
           "else": { "not": { "required": ["options"] } }
         },
         {
-          "comment": "group n'existe que sur status, et y est obligatoire. Obligatoire parce que notion-seed ne substitue aucune valeur par défaut : une option de status sans group partirait dans le payload sans group, et l'API rangerait TOUTES les options dans le premier groupe, sans erreur — une écriture que le plan n'aurait pas annoncée. Interdit ailleurs, pour la même raison que `format` hors number.",
+          "comment": "group exists only on status, and is required there. Required because notion-seed substitutes no default value: a status option without a group would go into the payload without a group, and the API would put ALL the options in the first group, without an error — a write the plan would not have announced. Forbidden elsewhere, for the same reason as `format` outside number.",
           "if": {
             "properties": { "type": { "const": "status" } },
             "required": ["type"]
           },
           "then": {
-            "comment": "options est obligatoire et non vide sur status : une propriété status créée avec une liste vide se fait peupler par l'API de ses propres options par défaut, que le plan n'a jamais affichées — et dont le retrait ultérieur se classe en réécriture silencieuse, que allow_data_loss ne débloque pas. select et multi_select n'ont pas cette contrainte : leurs options peuvent être gérées à la main sans risque de réassignation.",
+            "comment": "options is required and non-empty on status: a status property created with an empty list gets filled by the API with its own default options, which the plan never showed — and whose later removal is classified as a silent rewrite, which allow_data_loss does not unblock. select and multi_select do not have this constraint: their options can be managed by hand without risk of reassignment.",
             "required": ["options"],
             "properties": {
               "options": {
@@ -127,7 +127,7 @@
         },
         "group": {
           "enum": ["To-do", "In progress", "Complete"],
-          "description": "status uniquement. L'API n'accepte que ces trois groupes, à la création comme à la modification. Les groupes nommés librement ne sont pas supportés."
+          "description": "status only. The API accepts only these three groups, on creation as on update. Freely named groups are not supported."
         }
       }
     }

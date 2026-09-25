@@ -12,8 +12,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// DeriveKey construit une key à partir d'un nom affiché : minuscules, accents
-// retirés, tout ce qui n'est pas alphanumérique remplacé par un tiret.
+// DeriveKey builds a key from a display name: lowercase, accents removed,
+// everything that is not alphanumeric replaced with a dash.
 func DeriveKey(name string) string {
 	folded, _, err := transform.String(
 		transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC),
@@ -23,7 +23,7 @@ func DeriveKey(name string) string {
 	}
 
 	var b strings.Builder
-	lastDash := true // évite un tiret en tête
+	lastDash := true // avoids a leading dash
 	for _, r := range strings.ToLower(folded) {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
@@ -38,20 +38,20 @@ func DeriveKey(name string) string {
 	}
 	key := strings.Trim(b.String(), "-")
 	if key == "" {
-		// Pas de key vide : elle sert d'identité, il faut toujours quelque chose
-		// que la résolution de collision puisse suffixer.
+		// No empty key: it serves as identity, there must always be something
+		// the collision resolution can suffix.
 		return "resource"
 	}
-	// Le schéma exige un premier caractère alphanumérique ; le Trim le garantit.
+	// The schema requires an alphanumeric first character; the Trim guarantees it.
 	return key
 }
 
-// ResolveKeys remplit les key manquantes et lève les collisions selon la
-// stratégie décidée : dérivation du nom, puis préfixe par le nom de la page
-// parente, puis suffixe numérique.
+// ResolveKeys fills in the missing keys and resolves collisions following the
+// chosen strategy: derivation from the name, then a prefix with the parent
+// page's name, then a numeric suffix.
 //
-// Les key explicites sont intouchables : elles sont réservées d'abord, et une
-// key dérivée qui les percute est celle qui bouge.
+// Explicit keys are untouchable: they are reserved first, and a derived key
+// that collides with them is the one that moves.
 func ResolveKeys(dbs []Database, parentName string) []Database {
 	out := make([]Database, len(dbs))
 	copy(out, dbs)

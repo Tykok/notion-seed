@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package schema porte le JSON Schema de validation de la configuration.
+// Package schema holds the JSON Schema that validates the configuration.
 package schema
 
 import _ "embed"
 
-// Bytes est le JSON Schema embarqué dans le binaire : notion-seed ne dépend
-// d'aucun fichier externe pour valider une config.
+// Bytes is the JSON Schema embedded in the binary: notion-seed depends on no
+// external file to validate a config.
 //
 //go:embed notion-seed.schema.json
 var Bytes []byte

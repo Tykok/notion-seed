@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 )
 
-// Load lit le fichier de state d'un dossier de configuration.
+// Load reads the state file of a configuration directory.
 //
-// Un fichier absent n'est pas une erreur : c'est l'état de départ de tout
-// projet, et c'est ce qui fait que `plan` sans state se comporte exactement
-// comme avant l'existence de ce paquet.
+// A missing file is not an error: it is the starting point of every project,
+// and it is what makes `plan` without a state behave exactly as it did before
+// this package existed.
 func Load(dir string) (*Snapshot, error) {
 	path := Path(dir)
 	raw, err := os.ReadFile(path)
@@ -24,25 +24,25 @@ func Load(dir string) (*Snapshot, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf(
-			"lecture de %s impossible: %w\n"+
-				"  → vérifiez les droits sur le fichier, ou retirez-le pour repartir "+
-				"d'un state vide (les ressources devront être ré-importées)", path, err)
+			"failed to read %s: %w\n"+
+				"  → check the permissions on the file, or remove it to start over "+
+				"from an empty state (the resources will have to be imported again)", path, err)
 	}
 
 	var s Snapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, fmt.Errorf(
-			"%s illisible: %w\n"+
-				"  → le fichier est tronqué ou mal fusionné. Restaurez-le depuis git "+
-				"(`git checkout -- %s`) plutôt que de le supprimer : le supprimer ferait "+
-				"recréer les databases au lieu de les reconnaître",
+			"unreadable %s: %w\n"+
+				"  → the file is truncated or badly merged. Restore it from git "+
+				"(`git checkout -- %s`) rather than deleting it: deleting it would make "+
+				"the databases be re-created instead of recognized",
 			FileName, err, FileName)
 	}
 	if s.Version != Version {
 		return nil, fmt.Errorf(
-			"%s est en version %d, cette version de notion-seed lit la version %d\n"+
-				"  → mettez notion-seed à jour ; ne modifiez pas le fichier à la main, "+
-				"ses identités seraient fausses",
+			"%s is at version %d, this version of notion-seed reads version %d\n"+
+				"  → update notion-seed; do not edit the file by hand, "+
+				"its identities would be wrong",
 			FileName, s.Version, Version)
 	}
 	if s.Databases == nil {
@@ -51,62 +51,62 @@ func Load(dir string) (*Snapshot, error) {
 	return &s, nil
 }
 
-// Save écrit le state de façon atomique et déterministe.
+// Save writes the state atomically and deterministically.
 //
-// Atomique : un state tronqué par une interruption est une identité perdue,
-// donc une database recréée en double au premier apply. On écrit un fichier
-// temporaire dans le MÊME dossier (pour que rename ne traverse pas de système
-// de fichiers), on le synchronise, puis on le renomme.
+// Atomic: a state truncated by an interruption is a lost identity, hence a
+// database re-created as a duplicate on the first apply. A temporary file is
+// written in the SAME directory (so rename does not cross file systems),
+// synced, then renamed.
 //
-// Déterministe : json.Marshal trie les clés de map, l'indentation est fixe et
-// le fichier se termine par un newline. Un fichier versionné dont l'ordre bouge
-// à chaque écriture est illisible en revue.
+// Deterministic: json.Marshal sorts map keys, the indentation is fixed and the
+// file ends with a newline. A versioned file whose order moves on every write
+// is unreadable in review.
 func Save(dir string, s *Snapshot) error {
 	s.Version = Version
 
 	body, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf(
-			"sérialisation du state impossible: %w\n"+
-				"  → c'est un bug de notion-seed, pas une erreur de configuration : "+
-				"signalez-le", err)
+			"failed to serialize the state: %w\n"+
+				"  → this is a notion-seed bug, not a configuration error: "+
+				"report it", err)
 	}
 	body = append(body, '\n')
 
 	tmp, err := os.CreateTemp(dir, ".notion-seed.state.*.json")
 	if err != nil {
 		return fmt.Errorf(
-			"écriture de %s impossible: %w\n"+
-				"  → vérifiez les droits d'écriture sur %s ; l'ancien state est intact",
+			"failed to write %s: %w\n"+
+				"  → check the write permissions on %s; the previous state is intact",
 			FileName, err, dir)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op après un rename réussi
+	defer os.Remove(tmpName) // no-op after a successful rename
 
 	if _, err := tmp.Write(body); err != nil {
 		tmp.Close()
-		return fmt.Errorf("écriture de %s impossible: %w\n"+
-			"  → l'ancien state est intact", FileName, err)
+		return fmt.Errorf("failed to write %s: %w\n"+
+			"  → the previous state is intact", FileName, err)
 	}
-	// os.CreateTemp crée le fichier en 0600 ; ce n'est pas le mode d'un
-	// fichier destiné à être versionné, relu en revue et lu par la CI.
+	// os.CreateTemp creates the file as 0600; that is not the mode of a file
+	// meant to be versioned, reviewed and read by the CI.
 	if err := tmp.Chmod(0o644); err != nil {
 		tmp.Close()
-		return fmt.Errorf("changement de permissions de %s impossible: %w\n"+
-			"  → l'ancien state est intact", FileName, err)
+		return fmt.Errorf("failed to change the permissions of %s: %w\n"+
+			"  → the previous state is intact", FileName, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return fmt.Errorf("synchronisation de %s impossible: %w\n"+
-			"  → l'ancien state est intact", FileName, err)
+		return fmt.Errorf("failed to sync %s: %w\n"+
+			"  → the previous state is intact", FileName, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("fermeture de %s impossible: %w\n"+
-			"  → l'ancien state est intact", FileName, err)
+		return fmt.Errorf("failed to close %s: %w\n"+
+			"  → the previous state is intact", FileName, err)
 	}
 	if err := os.Rename(tmpName, filepath.Join(dir, FileName)); err != nil {
-		return fmt.Errorf("remplacement de %s impossible: %w\n"+
-			"  → l'ancien state est intact", FileName, err)
+		return fmt.Errorf("failed to replace %s: %w\n"+
+			"  → the previous state is intact", FileName, err)
 	}
 	return nil
 }

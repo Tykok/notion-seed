@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package config charge et valide la configuration YAML de notion-seed.
+// Package config loads and validates notion-seed's YAML configuration.
 package config
 
-// StatusGroups énumère les seuls groupes de status acceptés par l'API Notion,
-// à la création comme à la modification. Les groupes nommés librement ne sont
-// pas supportés : l'API répond 400 validation_error.
+// StatusGroups lists the only status groups the Notion API accepts, on
+// creation as on update. Freely named groups are not supported: the API
+// answers 400 validation_error.
 var StatusGroups = []string{"To-do", "In progress", "Complete"}
 
-// SupportedPropertyTypes liste les types gérés au MVP 0. Ce qui n'est pas
-// déclaré n'est pas touché ; ce qui est déclaré avec un autre type est rejeté.
+// SupportedPropertyTypes lists the types handled in MVP 0. What is not
+// declared is not touched; what is declared with another type is rejected.
 var SupportedPropertyTypes = []string{
 	"title", "rich_text", "number", "url", "select",
 	"status", "multi_select", "date", "checkbox", "people",
 }
 
-// Config est la configuration complète, après fusion de tous les fichiers.
+// Config is the full configuration, after merging all the files.
 type Config struct {
 	Version   int        `yaml:"version"`
 	Workspace Workspace  `yaml:"workspace"`
@@ -34,8 +34,8 @@ type Database struct {
 	Icon        string              `yaml:"icon"`
 	Properties  map[string]Property `yaml:"properties"`
 
-	// SourceFile est le fichier d'où vient cette database. Sert aux messages
-	// d'erreur d'unicité de key, qui doivent nommer les deux fichiers en cause.
+	// SourceFile is the file this database comes from. Used by the key
+	// uniqueness error messages, which must name both files involved.
 	SourceFile string `yaml:"-"`
 }
 

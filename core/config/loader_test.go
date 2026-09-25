@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// writeConfig monte une arborescence de config dans un dossier temporaire.
-// Les clés sont des chemins relatifs, les valeurs le contenu YAML.
+// writeConfig sets up a config tree in a temporary directory. The keys are
+// relative paths, the values the YAML content.
 func writeConfig(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -67,22 +67,22 @@ databases:
 	if len(cfg.Databases) != 2 {
 		t.Fatalf("databases = %d, want 2", len(cfg.Databases))
 	}
-	// lifecycle vient de workspace.yaml comme le reste de la config globale.
-	// Sans cette assertion, supprimer la fusion de lifecycle ne casserait aucun
-	// test, alors que prevent_destroy est un garde-fou de sécurité.
+	// lifecycle comes from workspace.yaml like the rest of the global config.
+	// Without this assertion, removing the lifecycle merge would break no
+	// test, even though prevent_destroy is a safety safeguard.
 	if len(cfg.Lifecycle.PreventDestroy) != 1 || cfg.Lifecycle.PreventDestroy[0] != "projects" {
 		t.Errorf("Lifecycle.PreventDestroy = %v, want [projects]", cfg.Lifecycle.PreventDestroy)
 	}
-	// Ordre déterministe : par key triée. Il n'y a pas de graphe au MVP 0,
-	// mais la sortie de plan doit être stable entre deux runs.
+	// Deterministic order: by sorted key. There is no graph in MVP 0, but the
+	// plan output must be stable between two runs.
 	if cfg.Databases[0].Key != "projects" || cfg.Databases[1].Key != "tasks" {
-		t.Errorf("ordre = %q, %q ; want projects, tasks",
+		t.Errorf("order = %q, %q; want projects, tasks",
 			cfg.Databases[0].Key, cfg.Databases[1].Key)
 	}
 }
 
-// Le test central de cette tâche : deux fichiers valides séparément, en
-// collision une fois fusionnés.
+// The central test of this task: two files valid separately, colliding once
+// merged.
 func TestLoadRejectsDuplicateKeyAcrossFiles(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
 		"workspace.yaml": workspaceYAML,
@@ -113,11 +113,11 @@ databases:
 		t.Errorf("Key = %q, want %q", dup.Key, "projects")
 	}
 	msg := err.Error()
-	// Le message doit nommer les DEUX fichiers, sinon l'utilisateur doit
-	// chercher lui-même le doublon.
+	// The message must name BOTH files, otherwise the user has to hunt for the
+	// duplicate themselves.
 	for _, want := range []string{"a.yaml", "b.yaml", "projects"} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("message = %q, il doit contenir %q", msg, want)
+			t.Errorf("message = %q, it must contain %q", msg, want)
 		}
 	}
 }
@@ -136,10 +136,10 @@ databases:
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load() error = nil, want une erreur de validation")
+		t.Fatal("Load() error = nil, want a validation error")
 	}
 	if !strings.Contains(err.Error(), "broken.yaml") {
-		t.Errorf("message = %q, il doit nommer le fichier fautif", err.Error())
+		t.Errorf("message = %q, it must name the offending file", err.Error())
 	}
 }
 
@@ -168,16 +168,16 @@ func TestLoadRequiresVersionInWorkspaceFile(t *testing.T) {
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load() error = nil, want une erreur sur version manquante")
+		t.Fatal("Load() error = nil, want an error on missing version")
 	}
 	for _, want := range []string{"version", "workspace.yaml"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
-	// Ne pas exposer "trouvé 0" : c'est un détail d'implémentation (zéro Go), pas ce qu'a écrit l'utilisateur.
-	if strings.Contains(err.Error(), "trouvé 0") {
-		t.Errorf("message = %q, ne doit pas rapporter la version absente comme « trouvé 0 »", err.Error())
+	// Do not expose "found 0": it is an implementation detail (Go zero value), not what the user wrote.
+	if strings.Contains(err.Error(), "found 0") {
+		t.Errorf("message = %q, must not report the missing version as \"found 0\"", err.Error())
 	}
 }
 
@@ -188,14 +188,14 @@ func TestLoadRejectsWrongVersionWithADifferentHint(t *testing.T) {
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load() error = nil, want un rejet de version: 2")
+		t.Fatal("Load() error = nil, want version: 2 rejected")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "remplacez") {
-		t.Errorf("message = %q : quand le champ est présent mais faux, le conseil doit dire de le REMPLACER", msg)
+	if !strings.Contains(msg, "replace") {
+		t.Errorf("message = %q: when the field is present but wrong, the advice must say to REPLACE it", msg)
 	}
-	if strings.Contains(msg, "ajoutez") {
-		t.Errorf("message = %q : « ajoutez » envoie chercher un champ déjà présent", msg)
+	if strings.Contains(msg, "add `version") {
+		t.Errorf("message = %q: \"add\" sends the user looking for a field that is already there", msg)
 	}
 }
 
@@ -206,10 +206,10 @@ func TestLoadRequiresWorkspaceFile(t *testing.T) {
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load() error = nil, want une erreur sur workspace.yaml manquant")
+		t.Fatal("Load() error = nil, want an error on missing workspace.yaml")
 	}
 	if !strings.Contains(err.Error(), "workspace.yaml") {
-		t.Errorf("message = %q, il doit nommer workspace.yaml", err.Error())
+		t.Errorf("message = %q, it must name workspace.yaml", err.Error())
 	}
 }
 
@@ -235,11 +235,11 @@ databases:
 	}
 	keys := []string{cfg.Databases[0].Key, cfg.Databases[1].Key}
 	if keys[0] == keys[1] {
-		t.Fatalf("les deux key sont identiques: %q", keys[0])
+		t.Fatalf("both keys are identical: %q", keys[0])
 	}
 	for _, k := range keys {
 		if k == "" {
-			t.Error("une key est restée vide après résolution")
+			t.Error("a key stayed empty after resolution")
 		}
 	}
 }
@@ -266,10 +266,10 @@ databases:
 	}
 }
 
-// Démontré avant correction : `databases/z.yaml` déclarant
-// `workspace.parent_page_id: "HIJACKED"` produisait un GET /v1/pages/HIJACKED
-// alors que workspace.yaml disait autre chose, sans un avertissement. Le fichier
-// de databases/ gagne toujours, puisque workspace.yaml est fusionné en premier.
+// Demonstrated before the fix: `databases/z.yaml` declaring
+// `workspace.parent_page_id: "HIJACKED"` produced a GET /v1/pages/HIJACKED
+// while workspace.yaml said something else, without a warning. The databases/
+// file always wins, since workspace.yaml is merged first.
 func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -279,37 +279,37 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 		wantNotInMsg []string
 	}{
 		{
-			name: "workspace détourne la cible d'écriture",
+			name: "workspace hijacks the write target",
 			content: "workspace:\n  parent_page_id: \"00000000-0000-0000-0000-000000000000\"\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
 			section:   "workspace",
-			wantInMsg: []string{"déplacez", "détourne la cible d'écriture"},
-			// Rien à supprimer ici : la section se déplace, elle ne disparaît pas.
-			wantNotInMsg: []string{"supprimez"},
+			wantInMsg: []string{"move", "hijacks the write target"},
+			// Nothing to delete here: the section moves, it does not disappear.
+			wantNotInMsg: []string{"delete"},
 		},
 		{
-			name: "lifecycle efface le garde-fou",
+			name: "lifecycle erases the safeguard",
 			content: "lifecycle:\n  prevent_destroy: []\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
 			section:      "lifecycle",
-			wantInMsg:    []string{"déplacez", "efface le garde-fou"},
-			wantNotInMsg: []string{"supprimez"},
+			wantInMsg:    []string{"move", "erases the prevent_destroy safeguard"},
+			wantNotInMsg: []string{"delete"},
 		},
 		{
-			// Résidu de re-review : un utilisateur suivant le conseil "déplacez"
-			// pour une offense `version` seule copierait une ligne déjà présente
-			// dans workspace.yaml — la bonne action est de la supprimer, et la
-			// justification sur parent_page_id/lifecycle n'a rien à faire là,
-			// puisque ni l'un ni l'autre n'est en cause ici.
-			name: "version hors de workspace.yaml",
+			// Re-review leftover: a user following the "move" advice for a lone
+			// `version` offense would copy a line already present in
+			// workspace.yaml — the right action is to delete it, and the
+			// justification about parent_page_id/lifecycle does not belong
+			// there, since neither is involved here.
+			name: "version outside workspace.yaml",
 			content: "version: 2\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
 			section:   "version",
-			wantInMsg: []string{"supprimez"},
+			wantInMsg: []string{"delete"},
 			wantNotInMsg: []string{
-				"déplacez",
-				"détourne la cible d'écriture",
-				"efface le garde-fou",
+				"move",
+				"hijacks the write target",
+				"erases the prevent_destroy safeguard",
 			},
 		},
 	}
@@ -322,31 +322,31 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 
 			_, err := Load(dir)
 			if err == nil {
-				t.Fatalf("Load() error = nil, want un rejet de la section %q", tt.section)
+				t.Fatalf("Load() error = nil, want section %q rejected", tt.section)
 			}
-			// Le fichier ET la section fautive doivent être nommés, sinon
-			// l'utilisateur ne sait pas lequel de ses fichiers a gagné la fusion.
+			// The file AND the offending section must be named, otherwise the
+			// user does not know which of their files won the merge.
 			for _, want := range []string{"z.yaml", tt.section, WorkspaceFile} {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+					t.Errorf("message = %q, it must contain %q", err.Error(), want)
 				}
 			}
 			for _, want := range tt.wantInMsg {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+					t.Errorf("message = %q, it must contain %q", err.Error(), want)
 				}
 			}
 			for _, notWant := range tt.wantNotInMsg {
 				if strings.Contains(err.Error(), notWant) {
-					t.Errorf("message = %q, il ne doit pas contenir %q", err.Error(), notWant)
+					t.Errorf("message = %q, it must not contain %q", err.Error(), notWant)
 				}
 			}
 		})
 	}
 }
 
-// Le garde-fou ne doit pas se retourner contre workspace.yaml lui-même, qui
-// porte légitimement les trois sections.
+// The safeguard must not turn against workspace.yaml itself, which
+// legitimately holds all three sections.
 func TestLoadStillAcceptsGlobalSectionsInWorkspaceFile(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
 		"workspace.yaml": workspaceYAML,
@@ -359,10 +359,10 @@ func TestLoadStillAcceptsGlobalSectionsInWorkspaceFile(t *testing.T) {
 	}
 }
 
-// Démontré avant correction : une database avec deux propriétés `title` et une
-// avec zéro produisaient toutes deux `+ create` et un exit 0. L'API n'accepte
-// qu'exactement une propriété title par data source, donc plan annonçait quelque
-// chose qui ne peut pas se produire.
+// Demonstrated before the fix: a database with two `title` properties and one
+// with zero both produced `+ create` and exit 0. The API accepts exactly one
+// title property per data source, so plan announced something that cannot
+// happen.
 func TestLoadRejectsDatabasesWithoutExactlyOneTitle(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -370,12 +370,12 @@ func TestLoadRejectsDatabasesWithoutExactlyOneTitle(t *testing.T) {
 		wantInMsg  []string
 	}{
 		{
-			"deux title",
+			"two titles",
 			"      Name:\n        type: title\n      Autre:\n        type: title\n",
 			[]string{"z.yaml", `"Autre"`, `"Name"`, "2"},
 		},
 		{
-			"zéro title",
+			"zero titles",
 			"      Estimate:\n        type: number\n",
 			[]string{"z.yaml", "title"},
 		},
@@ -390,21 +390,22 @@ func TestLoadRejectsDatabasesWithoutExactlyOneTitle(t *testing.T) {
 
 			_, err := Load(dir)
 			if err == nil {
-				t.Fatal("Load() error = nil, want un rejet : l'API exige exactement une propriété title")
+				t.Fatal("Load() error = nil, want a rejection: the API requires exactly one title property")
 			}
 			for _, want := range tt.wantInMsg {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+					t.Errorf("message = %q, it must contain %q", err.Error(), want)
 				}
 			}
 		})
 	}
 }
 
-// Deux options de même key désigneraient la même option distante, dont l'id
-// partirait deux fois ; deux options de même nom feraient partir la seconde en
-// option neuve, refusée par l'API APRÈS l'écriture de la database. Les deux
-// s'arrêtent au chargement, avec la database, la propriété et le doublon nommés.
+// Two options with the same key would designate the same remote option, whose
+// id would go out twice; two options with the same name would send the second
+// one out as a new option, rejected by the API AFTER the database is written.
+// Both stop at load time, with the database, the property and the duplicate
+// named.
 func TestLoadRejectsDuplicateOptionsInAProperty(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -412,21 +413,21 @@ func TestLoadRejectsDuplicateOptionsInAProperty(t *testing.T) {
 		wantInMsg []string
 	}{
 		{
-			"même key",
+			"same key",
 			"          - key: haute\n            name: \"Haute\"\n" +
 				"          - key: haute\n            name: \"Très haute\"\n",
 			[]string{"z.yaml", `"Z"`, `"Prio"`, `key "haute"`, "  → "},
 		},
 		{
-			"même nom",
+			"same name",
 			"          - key: haute\n            name: \"Haute\"\n" +
 				"          - key: autre\n            name: \"Haute\"\n",
-			[]string{"z.yaml", `"Z"`, `"Prio"`, `nom "Haute"`, "  → "},
+			[]string{"z.yaml", `"Z"`, `"Prio"`, `name "Haute"`, "  → "},
 		},
 		{
-			"même nom, sans key",
+			"same name, no key",
 			"          - name: \"Haute\"\n          - name: \"Haute\"\n",
-			[]string{`"Prio"`, `nom "Haute"`, "  → "},
+			[]string{`"Prio"`, `name "Haute"`, "  → "},
 		},
 	}
 	for _, tt := range tests {
@@ -439,19 +440,19 @@ func TestLoadRejectsDuplicateOptionsInAProperty(t *testing.T) {
 			})
 			_, err := Load(dir)
 			if err == nil {
-				t.Fatal("Load() error = nil, want un rejet du doublon d'option")
+				t.Fatal("Load() error = nil, want the duplicate option rejected")
 			}
 			for _, want := range tt.wantInMsg {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+					t.Errorf("message = %q, it must contain %q", err.Error(), want)
 				}
 			}
 		})
 	}
 }
 
-// Une même key d'option dans DEUX propriétés est licite : l'identité d'une
-// option est locale à sa propriété.
+// The same option key in TWO properties is allowed: an option's identity is
+// local to its property.
 func TestLoadAcceptsTheSameOptionKeyInTwoProperties(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
 		"workspace.yaml": workspaceYAML,
@@ -467,9 +468,9 @@ func TestLoadAcceptsTheSameOptionKeyInTwoProperties(t *testing.T) {
 	}
 }
 
-// parent_page_id porte un motif UUID : un id en forme de chemin relatif
-// produirait une URL qui vise un autre endpoint, et l'erreur de l'API sur un id
-// mal formé est moins claire que celle-ci.
+// parent_page_id carries a UUID pattern: an id shaped like a relative path
+// would produce a URL targeting another endpoint, and the API's error on a
+// malformed id is less clear than this one.
 func TestLoadRejectsMalformedParentPageID(t *testing.T) {
 	for _, bad := range []string{"page1", "../../v1/users", "3cdf830d"} {
 		dir := writeConfig(t, map[string]string{
@@ -478,16 +479,16 @@ func TestLoadRejectsMalformedParentPageID(t *testing.T) {
 
 		_, err := Load(dir)
 		if err == nil {
-			t.Fatalf("Load() error = nil pour parent_page_id = %q", bad)
+			t.Fatalf("Load() error = nil for parent_page_id = %q", bad)
 		}
 		if !strings.Contains(err.Error(), "UUID") {
-			t.Errorf("message = %q pour %q, il doit dire où trouver l'UUID", err.Error(), bad)
+			t.Errorf("message = %q for %q, it must say where to find the UUID", err.Error(), bad)
 		}
 	}
 }
 
-// Un parent_page_id sans tirets est accepté : l'API Notion le tolère, et les
-// URL de Notion le rendent sous cette forme.
+// A parent_page_id without dashes is accepted: the Notion API tolerates it,
+// and Notion URLs show it in that form.
 func TestLoadAcceptsParentPageIDWithoutHyphens(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
 		"workspace.yaml": "version: 1\nworkspace:\n  parent_page_id: \"3cdf830dbf9f81618d11c08cacf79fa2\"\n",
@@ -498,12 +499,12 @@ func TestLoadAcceptsParentPageIDWithoutHyphens(t *testing.T) {
 	}
 }
 
-// Résidu de re-review : la passe laxiste `map[string]any` tourne maintenant
-// AVANT ValidateDocument pour tous les fichiers. Un fichier de databases/
-// écrit comme une séquence YAML à la racine — l'erreur plausible d'oublier
-// la clé `databases:` — ne doit donc pas dégénérer en message brut du
-// décodeur ; le schéma ne voit jamais ce fichier assez tôt pour nommer
-// l'erreur lui-même.
+// Re-review leftover: the loose `map[string]any` pass now runs BEFORE
+// ValidateDocument for every file. A databases/ file written as a YAML
+// sequence at the root — the plausible mistake of forgetting the
+// `databases:` key — must therefore not degenerate into the decoder's raw
+// message; the schema never sees this file early enough to name the error
+// itself.
 func TestLoadReportsNonMappingRootInProjectVoice(t *testing.T) {
 	dir := writeConfig(t, map[string]string{
 		"workspace.yaml": workspaceYAML,
@@ -513,21 +514,21 @@ func TestLoadReportsNonMappingRootInProjectVoice(t *testing.T) {
 
 	_, err := Load(dir)
 	if err == nil {
-		t.Fatal("Load() error = nil, want un rejet de la racine non-mapping")
+		t.Fatal("Load() error = nil, want the non-mapping root rejected")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "z.yaml") {
-		t.Errorf("message = %q, il doit nommer le fichier fautif", msg)
+		t.Errorf("message = %q, it must name the offending file", msg)
 	}
 	if !strings.Contains(msg, "mapping") {
-		t.Errorf("message = %q, il doit dire dans sa propre voix que la racine n'est pas un mapping", msg)
+		t.Errorf("message = %q, it must say in its own voice that the root is not a mapping", msg)
 	}
 	if !strings.Contains(msg, "databases:") {
-		t.Errorf("message = %q, il doit nommer la cause plausible : la clé `databases:` oubliée", msg)
+		t.Errorf("message = %q, it must name the plausible cause: the forgotten `databases:` key", msg)
 	}
-	// Le texte brut du décodeur reste disponible comme cause, à la manière des
-	// autres erreurs de ce fichier — mais il ne doit pas être le SEUL message.
+	// The decoder's raw text stays available as the cause, like the other
+	// errors of this file — but it must not be the ONLY message.
 	if !strings.Contains(msg, "cannot unmarshal") {
-		t.Errorf("message = %q, il doit garder le texte brut du décodeur comme cause", msg)
+		t.Errorf("message = %q, it must keep the decoder's raw text as the cause", msg)
 	}
 }
