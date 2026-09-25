@@ -1,165 +1,167 @@
 # notion-seed
 
-Déclare la structure d'un workspace Notion en YAML, et mesure contre l'API, en
-nombre de lignes, ce que chaque changement va coûter à vos données.
+[Version française](README.fr.md)
 
-## Pourquoi
+Declare the structure of a Notion workspace in YAML, and measure against the
+API, in number of rows, what each change will cost your data.
 
-Déclarer un workspace Notion en fichiers n'est pas le problème difficile. Le
-problème difficile, c'est de savoir ce que l'API va faire de vos données quand
-la déclaration change.
+## Why
 
-Six comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
-la requête ne vous signale pas :
+Declaring a Notion workspace in files is not the hard problem. The hard problem
+is knowing what the API will do to your data when the declaration changes.
 
-| Changement | Ce que fait l'API |
+Six behaviors measured against the API, which a tool that just sends the
+request does not warn you about:
+
+| Change | What the API does |
 |---|---|
-| Renommer une option (avec son id) | Répond `200`, ne change rien |
-| Retirer une option de `select` | Les lignes concernées passent à vide |
-| Retirer une option de `multi_select` | Les lignes concernées perdent **cette valeur** — elles ne passent à vide que si elles n'en portaient pas d'autre |
-| Retirer une option de `status` | **Réassigne les lignes à une autre option**, sans erreur |
-| `multi_select` → `select` | **Ne garde qu'une valeur** sur les lignes qui en portaient plusieurs |
-| `select` → `multi_select` | Recrée les options : une ligne ne garde sa valeur que si le YAML redéclare une option **de même nom** ; les autres passent à vide |
+| Rename an option (with its id) | Returns `200`, changes nothing |
+| Remove a `select` option | The affected rows are emptied |
+| Remove a `multi_select` option | The affected rows lose **this value** — they are emptied only if they held no other |
+| Remove a `status` option | **Reassigns the rows to another option**, without an error |
+| `multi_select` → `select` | **Keeps only one value** on rows that held several |
+| `select` → `multi_select` | Recreates the options: a row keeps its value only if the YAML redeclares an option **with the same name**; the others are emptied |
 
-Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies — le
-dernier le 2026-09-25.
+Measured on 2026-09-24 against API `2025-09-03`, on populated rows — the last
+one on 2026-09-25.
 
-Le retrait d'option de `status` et `multi_select` → `select` sont ceux qui
-justifient l'outil : la donnée n'est pas perdue, elle est remplacée par une
-valeur plausible et fausse, indistinguable après coup.
+Removing a `status` option and `multi_select` → `select` are the ones that
+justify the tool: the data is not lost, it is replaced by a plausible, wrong
+value, indistinguishable after the fact.
 
-`notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
-de lignes sont concernées. Une option de `status` retirée du YAML, deux lignes
-la portent :
+`notion-seed` does not stop you. It tells you, **before writing**, how many
+rows are affected. A `status` option removed from the YAML, held by two rows:
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
 
 Plan: 0 to add, 1 to change, 0 to destroy
 
-  ~ database.tasks  [réécriture silencieuse]
-      - option "Fait" (propriété "Statut") — absente du YAML : l'API remplace la liste entière des options  [réécriture silencieuse]
-          → 2 lignes seront réassignées à une autre option, sans trace.
+  ~ database.tasks  [silent rewrite]
+      - option "Fait" (property "Statut") — absent from the YAML: the API replaces the whole list of options  [silent rewrite]
+          → 2 rows will be reassigned to another option, without a trace.
 
-Impact : 2 valeurs réassignées sans trace.
+Impact: 2 values reassigned without a trace.
 ```
 
-Le chiffre est mesuré, pas déduit : la même ligne serait classée `sûr`, avec
-`0 ligne concernée`, si personne n'utilisait cette option. C'est ce qu'un refus
-par principe ne savait pas voir, et pourquoi il a été remplacé par une mesure.
-Ce qui n'a pas pu être compté — hors ligne, ou quand la requête échoue —
-ressort en `impact inconnu`, jamais en « rien à perdre ».
+The number is measured, not inferred: the same line would be classified
+`safe`, with `0 rows affected`, if nobody used that option. That is what a
+refusal on principle could not see, and why it was replaced by a measurement.
+What could not be counted — offline, or when the query fails — comes out as
+`unknown impact`, never as "nothing to lose".
 
-### Ce qui peut être compté, et ce qui ne peut pas
+### What can be counted, and what cannot
 
-Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
-`select`, `status` et `multi_select`.
+Counting takes a filter, and `notion-seed` can only build one for `select`,
+`status` and `multi_select`.
 
-Un **retrait d'option** est donc toujours chiffré : les options n'existent que
-sur ces trois types.
+An **option removal** is therefore always quantified: options only exist on
+these three types.
 
-Une **destruction** l'est aussi, sans filtre : le compte porte sur toutes les
-lignes du data source de la database — celui que le plan vient de relire —,
-celles qui partent à la corbeille avec elle. Une database qui porte plusieurs
-data sources les emporte tous, mais un seul est compté : la ligne et l'agrégat
-disent alors « au moins N ligne(s) », et combien de data sources n'ont pas été
-comptés. Elle reste `destructif` quel que soit ce compte, 0 compris.
+A **destruction** is too, without a filter: the count covers every row of the
+database's data source — the one the plan just read back —, the rows that go
+to the trash with it. A database that holds several data sources takes them
+all with it, but only one is counted: the line and the aggregate then say "at
+least N row(s)", and how many data sources were not counted. It stays
+`destructive` whatever the count, 0 included.
 
-Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
-d'eux. Des trois couples dangereux mesurés plus haut, un seul l'est :
+A **type change** is quantified only if the source column is of one of them.
+Of the three dangerous pairs measured above, only one is:
 
-| Couple | Chiffré ? |
+| Pair | Quantified? |
 |---|---|
-| `multi_select` → `select` | oui — la colonne de départ est filtrable |
-| `rich_text` → `number` | non |
-| `checkbox` → `number` | non |
+| `multi_select` → `select` | yes — the source column can be filtered |
+| `rich_text` → `number` | no |
+| `checkbox` → `number` | no |
 
-Dans les deux derniers cas, la ligne ne porte pas de chiffre mais le dit :
+In the last two cases, the line carries no number but says so:
 
 ```
-      ~ property "Notes" — rich_text → number  [réécriture silencieuse]
-          → impact réel inconnu : notion-seed ne sait pas compter les lignes d'une propriété rich_text.
+      ~ property "Notes" — rich_text → number  [silent rewrite]
+          → actual impact unknown: notion-seed cannot count the rows of a rich_text property.
 ```
 
-La classe reste celle de la mesure — vous savez que le changement est dangereux,
-vous ne savez pas sur combien de lignes. Et `--fail-on=unknown` les attrape.
+The class stays the one from the measurement — you know the change is
+dangerous, you do not know on how many rows. And `--fail-on=unknown` catches
+them.
 
-Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
-appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
+You are responsible for your database. notion-seed is responsible for what you
+know when you press enter. In CI, [`--fail-on`](#in-ci) hands the decision to
+the workflow.
 
-### Ce que l'API ne sait pas faire
+### What the API cannot do
 
-Deux changements sont inexprimables, mesurés le 2026-09-24 :
+Two changes are not expressible, measured on 2026-09-24:
 
-| Changement | Ce que fait l'API |
+| Change | What the API does |
 |---|---|
-| Renommer une option | Répond `200`, ne change rien |
-| Changer la couleur d'une option | Répond `400`, que l'option soit désignée par son id ou par son nom, et tout le PATCH de la propriété échoue |
+| Rename an option | Returns `200`, changes nothing |
+| Change an option's color | Returns `400`, whether the option is designated by its id or by its name, and the whole PATCH of the property fails |
 
-`notion-seed` ne les écrit donc pas, et retient la database entière tant qu'ils
-sont déclarés. Les autres databases du plan s'appliquent. La procédure est
-nommée, avec le nombre de lignes à migrer :
+`notion-seed` therefore does not write them, and withholds the whole database
+as long as they are declared. The other databases of the plan are applied. The
+procedure is named, with the number of rows to migrate:
 
-1. créer la nouvelle option dans Notion ;
-2. y déplacer les lignes que le plan a comptées ;
-3. retirer l'ancienne option, puis relancer.
+1. create the new option in Notion;
+2. move the rows the plan counted to it;
+3. remove the old option, then rerun.
 
 ```
-  ~ database.tasks  [migration requise]
-      ~ option "Fait" → "Terminé" (propriété "Statut") — l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer  [migration requise]
-          → 2 lignes portent "Fait" : à migrer à la main avant d'appliquer.
+  ~ database.tasks  [migration required]
+      ~ option "Fait" → "Terminé" (property "Statut") — the API returns 200 without changing anything: create, migrate the rows, then remove  [migration required]
+          → 2 rows hold "Fait": migrate them by hand before applying.
 
-Retenu — migration requise
+Withheld — migration required
 
   ~ database.tasks
-      une option doit être migrée à la main : l'API ne sait ni renommer une option ni changer sa couleur
-      → créez la nouvelle option dans Notion, déplacez-y les lignes comptées ci-dessus, retirez l'ancienne, puis relancez
+      an option must be migrated by hand: the API can neither rename an option nor change its color
+      → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
 ```
 
-C'est le seul changement déclaré que notion-seed refuse d'écrire — et ce n'est
-pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
-inscrirait dans le state un état que Notion ne porte pas, et chaque run suivant
-afficherait une dérive fantôme.
+It is the only declared change notion-seed refuses to write — and it is not a
+judgment on the cost, it is a limit of the API. Writing anyway would record in
+the state a state Notion does not hold, and every following run would show
+phantom drift.
 
-## État actuel
+## Current status
 
-`apply` crée les databases déclarées et absentes de Notion, modifie celles qui
-existent déjà — nom, description, icône et propriétés déclarées — et met à la
-corbeille celles que le YAML ne déclare plus. Le state est mis à jour après
-chaque ressource écrite. Deux changements d'option, que l'API ne sait pas
-exprimer, sont retenus avec la migration à faire à la main, et `apply` sort en
-code non nul tant qu'ils restent — voir
-[Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire).
+`apply` creates the databases that are declared and absent from Notion, updates
+the ones that already exist — name, description, icon and declared properties
+— and moves to the trash the ones the YAML no longer declares. The state is
+updated after each resource written. Two option changes, which the API cannot
+express, are withheld with the migration to do by hand, and `apply` exits with
+a non-zero code as long as they remain — see
+[What the API cannot do](#what-the-api-cannot-do).
 
 | | |
 |---|---|
-| `init`, `version`, `plan`, `diff`, `import` | disponibles |
-| `apply` | créations, modifications et destructions — voir [Appliquer](#appliquer) |
-| fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
-| `--fail-on` | le garde-fou de CI — voir [En CI](#en-ci) |
+| `init`, `version`, `plan`, `diff`, `import` | available |
+| `apply` | creations, updates and destructions — see [Applying](#applying) |
+| state file | `notion-seed.state.json`, written by `import` and `apply` |
+| `lifecycle.prevent_destroy` / `allow_data_loss` | acknowledgements — see [lifecycle](#lifecycle--acknowledgements) |
+| `--fail-on` | the CI safeguard — see [In CI](#in-ci) |
 
-## Prérequis
+## Requirements
 
-`notion-seed` ne gère pas l'authentification : il délègue les appels à
-[`ntn`](https://www.npmjs.com/package/ntn), qui stocke le jeton dans le
-keychain de l'OS.
+`notion-seed` does not handle authentication: it delegates the calls to
+[`ntn`](https://www.npmjs.com/package/ntn), which stores the token in the OS
+keychain.
 
 ```sh
 npm i -g ntn@0.22.11
 ntn login
 ```
 
-La version est épinglée : `0.22.11` est la seule sur laquelle le format de
-sortie de `ntn` a été mesuré, et `notion-seed` refuse de tourner en dessous.
+The version is pinned: `0.22.11` is the only one on which the output format of
+`ntn` was measured, and `notion-seed` refuses to run below it.
 
 ## Installation
 
-Binaire publié — Linux, macOS et Windows, en amd64 et arm64 — depuis la page
-[Releases](https://github.com/tykok/notion-seed/releases) :
+Published binary — Linux, macOS and Windows, on amd64 and arm64 — from the
+[Releases](https://github.com/tykok/notion-seed/releases) page:
 
 ```sh
-# macOS arm64, à adapter à votre plateforme
+# macOS arm64, adapt to your platform
 curl -fsSL https://github.com/tykok/notion-seed/releases/latest/download/notion-seed_<version>_darwin_arm64.tar.gz \
   | tar -xz notion-seed
 ```
@@ -172,8 +174,8 @@ brew install tykok/tap/notion-seed
 
 ### Debian, Ubuntu
 
-apt n'a pas de mécanisme de tap par utilisateur, mais un dépôt apt n'est qu'un
-arbre de fichiers statiques : celui-ci est hébergé sur GitHub Pages et signé.
+apt has no per-user tap mechanism, but an apt repository is only a tree of
+static files: this one is hosted on GitHub Pages and signed.
 
 ```sh
 sudo install -d /etc/apt/keyrings
@@ -184,35 +186,35 @@ echo "deb [signed-by=/etc/apt/keyrings/notion-seed.asc] https://tykok.github.io/
 sudo apt update && sudo apt install notion-seed
 ```
 
-`signed-by` restreint la clé à ce seul dépôt : sans lui, la clé vaudrait pour
-toutes les sources apt de la machine.
+`signed-by` restricts the key to this repository alone: without it, the key
+would be trusted for every apt source on the machine.
 
-Un `.deb`, `.rpm` ou `.apk` est aussi attaché à chaque release, si vous préférez
-ne rien ajouter aux sources :
+A `.deb`, `.rpm` or `.apk` is also attached to each release, if you would
+rather not add anything to your sources:
 
 ```sh
 sudo apt install ./notion-seed_<version>_linux_amd64.deb
 ```
 
-### Depuis les sources
+### From source
 
 ```sh
 go install github.com/tykok/notion-seed@latest
 ```
 
-Le binaire installé par `go install` annonce `0.0.0-dev` : la version n'est
-injectée qu'au build de release.
+The binary installed by `go install` reports `0.0.0-dev`: the version is only
+injected by the release build.
 
-## Démarrage
+## Getting started
 
 ```sh
-notion-seed init    # vérifie que ntn est présent, assez récent et authentifié
-notion-seed plan    # affiche les changements
+notion-seed init    # checks that ntn is present, recent enough and authenticated
+notion-seed plan    # shows the changes
 ```
 
 ## Configuration
 
-Un dossier, un fichier de workspace, un fichier YAML par database :
+One directory, one workspace file, one YAML file per database:
 
 ```
 .
@@ -222,10 +224,10 @@ Un dossier, un fichier de workspace, un fichier YAML par database :
     └── tasks.yaml
 ```
 
-`workspace.yaml` porte les sections globales — `version`, `workspace`,
-`lifecycle`. Un fichier de `databases/` ne déclare que des databases : sans
-cette règle, un fichier quelconque pourrait détourner la cible d'écriture ou
-effacer une déclaration, et le dernier chargé gagnerait.
+`workspace.yaml` holds the global sections — `version`, `workspace`,
+`lifecycle`. A file in `databases/` only declares databases: without this rule,
+any file could divert the write target or erase a declaration, and the last one
+loaded would win.
 
 ```yaml
 # workspace.yaml
@@ -259,280 +261,268 @@ databases:
             group: Complete
 ```
 
-Une propriété `status` doit déclarer ses `options`, et `group` est
-**obligatoire** sur chacune. Un `status` créé sans options se fait peupler par
-l'API de ses propres options par défaut, que le plan n'aura pas affichées — et
-leur retrait ultérieur réassigne silencieusement les lignes. `select` et
-`multi_select` n'ont pas cette contrainte : leurs options peuvent être gérées à
-la main sans ce risque.
+A `status` property must declare its `options`, and `group` is **required** on
+each of them. A `status` created without options gets populated by the API with
+its own default options, which the plan will not have shown — and removing them
+later silently reassigns the rows. `select` and `multi_select` do not have this
+constraint: their options can be managed by hand without that risk.
 
-`group` n'accepte que
-`To-do`, `In progress` ou `Complete`. notion-seed ne choisit pas de groupe à
-votre place : une option envoyée sans `group` est rangée par l'API dans le
-premier groupe, sans erreur — donc une écriture que le plan n'aurait pas
-annoncée. Sur les autres types, `group` est refusé, comme `format` hors
-`number`.
+`group` only accepts
+`To-do`, `In progress` or `Complete`. notion-seed does not choose a group for
+you: an option sent without `group` is put by the API in the first group,
+without an error — hence a write the plan would not have announced. On the
+other types, `group` is rejected, like `format` outside `number`.
 
-La `key` est ce qui ancre l'identité d'une option à travers un renommage : sans
-elle, une option renommée dans le YAML ressort en retrait suivi d'un ajout —
-`destructif` ou `réécriture silencieuse` selon le type et le nombre de lignes
-concernées — faute de pouvoir la suivre à travers le changement de nom.
+The `key` is what anchors an option's identity across a rename: without it, an
+option renamed in the YAML comes out as a removal followed by an addition —
+`destructive` or `silent rewrite` depending on the type and the number of rows
+affected — since it cannot be followed across the name change.
 
-L'`icon` — un emoji — est écrite sur la database, jamais sur son data source :
-mesuré, écrire sur la database met les deux à jour, écrire sur le data source les
-fait diverger. `notion-seed` ne lit que l'icône de la database : si celle du data
-source est changée à part, dans Notion, il ne la voit pas.
+The `icon` — an emoji — is written on the database, never on its data source:
+measured, writing on the database updates both, writing on the data source
+makes them diverge. `notion-seed` only reads the database's icon: if the data
+source's is changed separately, in Notion, it does not see it.
 
-Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
+The full JSON schema is in [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
 
-### `lifecycle` — des accusés de lecture
+### `lifecycle` — acknowledgements
 
-`prevent_destroy` et `allow_data_loss` ne bloquent **plus rien**. Malgré son
-nom, `prevent_destroy` n'empêche pas la destruction : ces deux clés ne sont que
-des accusés de lecture, affichés sous la ressource qu'elles nomment. Une
-database sortie du YAML, déclarée dans `prevent_destroy` :
+`prevent_destroy` and `allow_data_loss` **no longer block anything**. Despite
+its name, `prevent_destroy` does not prevent destruction: these two keys are
+only acknowledgements, shown under the resource they name. A database removed
+from the YAML, declared in `prevent_destroy`:
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
 
 Plan: 0 to add, 0 to change, 1 to destroy
 
-  - database.tasks  [destructif]
-      - database.tasks — présente dans le state, absente de la configuration  [destructif]
-          → 12 ligne(s) partent à la corbeille avec elle.
-      → déclarée dans lifecycle.prevent_destroy.
+  - database.tasks  [destructive]
+      - database.tasks — present in the state, absent from the configuration  [destructive]
+          → 3 row(s) go to the trash with it.
+      → declared in lifecycle.prevent_destroy.
 
-Impact : 1 database(s) à la corbeille avec 12 ligne(s).
+Impact: 1 database(s) in the trash with 3 row(s).
 ```
 
-Elles disent « je sais ce que cette ressource porte », et rien de plus. `apply`
-met donc à la corbeille une database déclarée dans `prevent_destroy` exactement
-comme une autre, en affichant la mention. C'est écrit noir sur blanc parce
-qu'une clé nommée `prevent_destroy` qu'on croirait bloquante serait un piège :
-vous compteriez sur elle, et elle ne vous retiendrait pas.
+They say "I know what this resource holds", and nothing more. `apply`
+therefore moves a database declared in `prevent_destroy` to the trash exactly
+like any other, showing the mention. It is spelled out because a key named
+`prevent_destroy` that one would believe to be blocking would be a trap: you
+would rely on it, and it would not hold you back.
 
-Ce qui arrête une commande, désormais, c'est ce que vous demandez dans votre
-workflow : [`--fail-on`](#en-ci). Ce qui informe, c'est la mesure. Ce qui
-décide, c'est vous.
+What stops a command, from now on, is what you ask for in your workflow:
+[`--fail-on`](#in-ci). What informs is the measurement. What decides is you.
 
 ## State
 
-`notion-seed.state.json`, à côté de `workspace.yaml`, retient l'identité Notion
-de chaque ressource gérée et son dernier état appliqué. **Versionnez-le** : il
-ne contient aucun secret, et c'est lui qui rend le plan reproductible entre
-machines et en CI.
+`notion-seed.state.json`, next to `workspace.yaml`, keeps the Notion identity
+of each managed resource and its last applied state. **Commit it**: it holds no
+secret, and it is what makes the plan reproducible across machines and in CI.
 
-Sans lui, `notion-seed` n'a aucune ancre d'identité : toute database déclarée
-ressort en création, même si elle existe déjà dans Notion.
+Without it, `notion-seed` has no identity anchor: every declared database comes
+out as a creation, even if it already exists in Notion.
 
-C'est ce fichier qui permet de distinguer « le YAML a changé » de « quelqu'un a
-changé Notion à la main ». Le second cas s'affiche sous la section `Dérive
-détectée hors de notion-seed`, avant le plan qui ramène le réel vers le YAML.
+This file is what makes it possible to tell "the YAML changed" from "someone
+changed Notion by hand". The second case is shown under the `Drift detected
+outside notion-seed` section, before the plan that brings the actual state back
+to the YAML.
 
-Seules les commandes `import` et `apply` l'écrivent. `plan` et `diff` lisent le
-réel mais n'y touchent jamais : un `plan` en CI ne peut donc pas produire un
-diff git surprise, et une dérive ne s'efface pas d'elle-même.
+Only the `import` and `apply` commands write it. `plan` and `diff` read the
+actual state but never touch it: a `plan` in CI therefore cannot produce a
+surprise git diff, and drift does not erase itself.
 
-## Adopter une database existante
+## Adopting an existing database
 
 ```sh
 notion-seed import database.tasks https://www.notion.so/space/Tasks-1b2c3d4e5f60...
 ```
 
-La key doit être déclarée dans `databases/`. `import` adopte la database telle
-qu'elle est, sans exiger qu'elle corresponde déjà au YAML — c'est le `plan`
-suivant qui affiche l'écart.
+The key must be declared in `databases/`. `import` adopts the database as it
+is, without requiring it to already match the YAML — it is the next `plan` that
+shows the mismatch.
 
-Les `key` d'options sont accrochées à cet instant, en joignant sur le nom.
-Une option présente dans Notion et absente du YAML est enregistrée sans key et
-comptée dans la sortie :
+Option `key`s are attached at that moment, by joining on the name. An option
+present in Notion and absent from the YAML is recorded without a key and
+counted in the output:
 
 ```
-database.tasks importée — id 1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d (8 propriétés, 2 options sans key de config)
+database.tasks imported — id 1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d (8 properties, 2 options without a config key)
 ```
 
-### Ce qui n'est pas déclaré
+### What is not declared
 
-Une **propriété** présente dans Notion et absente du YAML n'est jamais touchée :
-elle apparaît sous `Hors config — présent dans Notion, non touché`. L'API
-modifie les propriétés une par une, donc ne pas la déclarer suffit à ne pas y
-toucher.
+A **property** present in Notion and absent from the YAML is never touched: it
+appears under `Unmanaged — present in Notion, left untouched`. The API updates
+properties one by one, so not declaring it is enough to leave it alone.
 
-Une **option** présente dans Notion et absente du YAML, elle, sera détruite dès
-qu'on écrit sa propriété : l'API remplace la liste entière des options au lieu
-de la fusionner. Le plan la fait donc ressortir en retrait, avec le nombre de
-lignes qui la portent : `destructif` pour `select` et `multi_select`,
-`réécriture silencieuse` pour `status` — et `sûr` si ce nombre est nul.
+An **option** present in Notion and absent from the YAML, on the other hand,
+will be destroyed as soon as its property is written: the API replaces the
+whole list of options instead of merging it. The plan therefore shows it as a
+removal, with the number of rows that hold it: `destructive` for `select` and
+`multi_select`, `silent rewrite` for `status` — and `safe` if that number is
+zero.
 
-Autrement dit, « non déclaré = non touché » est vrai pour les propriétés et faux
-pour les options. C'est exactement le genre d'écart que cet outil existe pour
-rendre visible.
+In other words, "not declared = not touched" is true for properties and false
+for options. It is exactly the kind of gap this tool exists to make visible.
 
-## Appliquer
+## Applying
 
 ```sh
 notion-seed apply
 ```
 
-`apply` recalcule le plan, l'affiche, demande confirmation, puis écrit. Il ne
-prend aucun argument : il n'y a pas de fichier de plan à rejouer, donc pas de
-plan périmé à appliquer par mégarde.
+`apply` recomputes the plan, shows it, asks for confirmation, then writes. It
+takes no argument: there is no plan file to replay, hence no stale plan to
+apply by mistake.
 
-### Ce qu'il écrit
+### What it writes
 
-Les **créations**. Une database déclarée dans le YAML et absente du state est
-créée dans la page parente, relue, puis inscrite dans le state. Le state est
-sauvegardé après *chaque* création : une interruption laisse un fichier
-exactement vrai, jamais une database créée sans ancre — donc jamais un doublon
-au run suivant.
+**Creations.** A database declared in the YAML and absent from the state is
+created in the parent page, read back, then recorded in the state. The state is
+saved after *each* creation: an interruption leaves an exactly true file, never
+a database created without an anchor — hence never a duplicate on the next run.
 
-La relecture n'est pas du zèle. Elle rapporte les ids d'options, sans lesquels
-le state est aveugle à la dérive, et elle confronte le réel à ce qui avait été
-annoncé. Si l'API n'a pas écrit ce que le plan promettait, `apply` le dit — sur
-sa propre écriture.
+The read-back is not overzealousness. It brings back the option ids, without
+which the state is blind to drift, and it checks the actual state against what
+was announced. If the API did not write what the plan promised, `apply` says so
+— about its own write.
 
-Les **modifications**. Une database déjà ancrée par le state est écrite en deux
-appels, toujours dans cet ordre :
+**Updates.** A database already anchored by the state is written in two calls,
+always in this order:
 
-1. `PATCH /v1/databases/{id}` — le nom, la description et l'icône, s'ils
-   changent ;
-2. `PATCH /v1/data_sources/{id}` — les propriétés qui portent une ligne dans le
-   plan, et elles seules.
+1. `PATCH /v1/databases/{id}` — the name, the description and the icon, if they
+   change;
+2. `PATCH /v1/data_sources/{id}` — the properties that carry a line in the
+   plan, and only those.
 
-Ce qui part est exactement ce que le plan a affiché : une propriété déclarée
-mais identique au réel ne part pas, une propriété non déclarée non plus. Les
-options existantes sont transmises avec leur id, les neuves sans : l'API leur en
-crée un, que la relecture rapporte au state. Sous un changement de type, les
-options sont recréées : seules celles du YAML partent, sans id, et chaque option
-actuelle que le YAML ne redéclare pas sous le même nom ressort en `-`, avec le
-nombre de lignes qu'elle vide. Seul `select` → `multi_select` a été mesuré ; les
-autres couples entre `select`, `multi_select` et `status` suivent la même règle,
-sans l'avoir été.
+What goes out is exactly what the plan showed: a property that is declared but
+identical to the actual state does not go out, nor does an undeclared
+property. Existing options are sent with their id, new ones without: the API
+creates one for them, which the read-back brings back to the state. Under a
+type change, the options are recreated: only the YAML's go out, without an id,
+and each current option the YAML does not redeclare under the same name comes
+out as `-`, with the number of rows it empties. Only `select` → `multi_select`
+was measured; the other pairs among `select`, `multi_select` and `status`
+follow the same rule, without having been measured.
 
-L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
-sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins
-coûteux. `apply` le dit, et inscrit dans le state ce qui est passé.
+The order is chosen for failure. If the second call fails, the name and the
+icon are up to date and **no row data was touched** — the least costly failure.
+`apply` says so, and records in the state what went through.
 
-Les **destructions**. Une database que le state ancre, que le YAML ne déclare
-plus et que Notion porte encore est mise à la corbeille par un seul appel,
-`PATCH /v1/databases/{id}` avec `{"in_trash":true}`, puis son entrée est retirée
-du state. L'entrée n'est retirée que si la réponse de l'API confirme la
-corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
-`plan` et `apply` disent avant combien de lignes partent avec elle ; si le
-comptage échoue, la ligne dit que ce nombre n'est pas mesuré, jamais 0.
-`lifecycle.prevent_destroy` n'y change rien — voir
-[lifecycle](#lifecycle--des-accusés-de-lecture). Une database mise à la corbeille
-se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
-nouveau, redéclarez-la puis lancez `notion-seed import`.
+**Destructions.** A database the state anchors, that the YAML no longer
+declares and that Notion still holds is moved to the trash by a single call,
+`PATCH /v1/databases/{id}` with `{"in_trash":true}`, then its entry is removed
+from the state. The entry is removed only if the API response confirms the
+trash: otherwise it is kept, and `apply` reports it as a mismatch. `plan` and
+`apply` say beforehand how many rows go with it; if the count fails, the line
+says that number is not measured, never 0. `lifecycle.prevent_destroy` changes
+nothing about it — see [lifecycle](#lifecycle--acknowledgements). A database
+moved to the trash is restored from the Notion trash; for notion-seed to manage
+it again, redeclare it then run `notion-seed import`.
 
-Renommer la `key` d'une database dans le YAML n'est pas un renommage pour
-notion-seed, qui n'a que la key pour ancrer l'identité : l'ancienne key en
-ressort orpheline et part à la corbeille, la nouvelle est créée vide, et
-`plan` montre les deux séparément. Pour garder la database, gardez sa `key` —
-`name` peut changer librement — ou, si la key a déjà changé, ré-attachez la
-database existante à la nouvelle key avec `notion-seed import` avant de
-lancer `apply`.
+Renaming a database's `key` in the YAML is not a rename for notion-seed, which
+only has the key to anchor the identity: the old key comes out orphaned and
+goes to the trash, the new one is created empty, and `plan` shows both
+separately. To keep the database, keep its `key` — `name` can change freely —
+or, if the key has already changed, reattach the existing database to the new
+key with `notion-seed import` before running `apply`.
 
-Il retire aussi les **entrées de state obsolètes** : une ressource que le YAML
-ne déclare plus et qui a déjà été supprimée dans Notion. C'est un nettoyage
-local, rien n'est écrit dans Notion — à ne pas confondre avec une destruction,
-qui écrit, et que la confirmation annonce sur sa propre ligne.
+It also removes **stale state entries**: a resource the YAML no longer declares
+and that has already been deleted in Notion. It is a local cleanup, nothing is
+written to Notion — not to be confused with a destruction, which writes, and
+which the confirmation announces on its own line.
 
-### Ce qu'il retient
+### What it withholds
 
-Ce que l'API ne sait pas exprimer ressort sous `Retenu — migration requise` : ce
-n'est pas une limite de cette version, et attendre n'y changera rien — voir
-[Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire). `apply` sort en
-code non nul tant qu'il reste une ressource retenue — un apply qui ne converge
-pas doit être bruyant en CI.
+What the API cannot express comes out under `Withheld — migration required`:
+it is not a limit of this version, and waiting will change nothing — see
+[What the API cannot do](#what-the-api-cannot-do). `apply` exits with a
+non-zero code as long as a withheld resource remains — an apply that does not
+converge must be loud in CI.
 
-Une ressource retenue n'est pas touchée du tout : aucun appel ne part pour elle.
-Une ressource écrite l'est en entier, à une exception près, qui n'est jamais
-silencieuse : une modification peut s'arrêter entre ses deux appels — voir
-[En cas d'échec](#en-cas-déchec).
+A withheld resource is not touched at all: no call goes out for it. A written
+resource is written in full, with one exception, which is never silent: an
+update can stop between its two calls — see [On failure](#on-failure).
 
-### La confirmation
+### Confirmation
 
-Le mot `apply`, tapé en entier, après le plan et ce qui va se passer, par
-nature : créations, modifications, mises à la corbeille, et entrées de state
-obsolètes à retirer — chacune sur sa ligne, puisque la dernière n'écrit rien
-dans Notion. La ligne `Impact` qu'affiche `apply` ne compte que les ressources
-qu'il va écrire : une ressource retenue en est exclue, puisqu'`apply` ne causera
-pas ce qu'elle coûterait. Sans ressource retenue, elle est identique à celle de
-`plan`.
+The word `apply`, typed in full, after the plan and what is going to happen, by
+nature: creations, updates, moves to the trash, and stale state entries to
+remove — each on its own line, since the last one writes nothing to Notion. The
+`Impact` line `apply` shows only counts the resources it is going to write: a
+withheld resource is excluded from it, since `apply` will not cause what it
+would cost. Without a withheld resource, it is identical to `plan`'s.
 
 ```
-Impact : 1 database(s) à la corbeille avec 12 ligne(s).
+Impact: 1 database(s) in the trash with 3 row(s).
 
-1 database(s) vont être mises à la corbeille dans Notion.
-Confirmez en tapant « apply » :
+1 database(s) will be moved to the trash in Notion.
+Type "apply" to confirm:
 ```
 
-Elle ne lève rien de ce qui arrête la commande : un plan bloqué — une ressource
-gérée que Notion ne connaît plus — ou une classe refusée par `--fail-on`
-n'atteint jamais le prompt.
+It clears none of what stops the command: a blocked plan — a managed resource
+Notion no longer knows — or a class rejected by `--fail-on` never reaches the
+prompt.
 
-Hors terminal, `apply` exige `--auto-approve` plutôt que de s'exécuter parce que
-personne ne répondait.
+Outside a terminal, `apply` requires `--auto-approve` rather than running
+because nobody answered.
 
-Dans un terminal, une fin d'entrée au prompt — `Ctrl-D` — refuse elle aussi,
-avec son propre message : `confirmation interrompue (fin d'entrée) : rien n'a
-été appliqué`. Une entrée branchée sur `/dev/null` n'est pas un terminal, et
-réclame `--auto-approve`.
+In a terminal, an end of input at the prompt — `Ctrl-D` — declines too, with
+its own message: `confirmation interrupted (end of input): nothing was
+applied`. An input wired to `/dev/null` is not a terminal, and asks for
+`--auto-approve`.
 
-| Flag | Défaut | Rôle |
+| Flag | Default | Role |
 |---|---|---|
-| `--auto-approve` | `false` | applique sans demander confirmation (mode CI) |
+| `--auto-approve` | `false` | applies without asking for confirmation (CI mode) |
 
-`apply` partage `--dir`, `--rate`, `--burst` et `--fail-on` avec `plan`, et
-refuse `--skip-preflight` : écrire hors ligne n'a pas de sens. `--fail-on` y
-est vérifié **avant** la confirmation et avant la moindre écriture.
+`apply` shares `--dir`, `--rate`, `--burst` and `--fail-on` with `plan`, and
+rejects `--skip-preflight`: writing offline makes no sense. `--fail-on` is
+checked there **before** the confirmation and before any write.
 
-### En cas d'échec
+### On failure
 
-Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
-personne n'a demandée. Ce qui a été créé, modifié ou mis à la corbeille reste
-écrit, et le state le reflète.
+No rollback: archiving what was just created would be a destruction nobody
+asked for. What was created, updated or moved to the trash stays written, and
+the state reflects it.
 
-Une modification peut s'arrêter **entre ses deux appels** : le nom, la
-description ou l'icône sont passés, les propriétés non, et aucune donnée de ligne
-n'a été touchée. `apply` nomme ce qui est passé, l'inscrit dans le state, et
-relancer `notion-seed plan` montre ce qui reste.
+An update can stop **between its two calls**: the name, the description or the
+icon went through, the properties did not, and no row data was touched.
+`apply` names what went through, records it in the state, and running
+`notion-seed plan` again shows what is left.
 
-Une database dont une page ancêtre est à la corbeille se lit comme vivante, mais
-refuse toute écriture. `apply` le diagnostique et demande de restaurer la page
-parente, plutôt que de relayer le `404` de l'API, qui accuse à tort le partage
-avec l'intégration.
+A database with an ancestor page in the trash reads as live, but rejects any
+write. `apply` diagnoses it and asks to restore the parent page, rather than
+relaying the API's `404`, which wrongly blames sharing with the integration.
 
-Quand c'est la page de `workspace.parent_page_id` elle-même qui est à la
-corbeille, `plan` et `apply` s'arrêtent dès la vérification de départ, avant
-tout plan et donc avant toute écriture : restaurez-la, ou faites pointer
-`parent_page_id` vers une page vivante. C'est vrai aussi quand c'est une page
-au-dessus d'elle qui est à la corbeille : Notion le signale sur la page
-parente. `--skip-preflight` saute cette vérification comme les autres.
+When it is the `workspace.parent_page_id` page itself that is in the trash,
+`plan` and `apply` stop at the initial check, before any plan and hence before
+any write: restore it, or point `parent_page_id` to a live page. It is also true
+when a page above it is in the trash: Notion reports it on the parent page.
+`--skip-preflight` skips this check like the others.
 
-Une mise à la corbeille qui échoue — refus de l'API, `404`, issue inconnue —
-laisse l'entrée de state **en place** : `apply` s'arrête et renvoie à
-`notion-seed plan`, qui relit le réel. Une database déjà partie y ressort en
-entrée de state obsolète, qu'un `apply` suivant retire sans rien écrire ; une
-database encore là y ressort en destruction. Abandonner l'identité sur la foi
-d'un échec rendrait invisible une database peut-être encore vivante.
+A move to the trash that fails — API rejection, `404`, unknown outcome — leaves
+the state entry **in place**: `apply` stops and points to `notion-seed plan`,
+which reads the actual state back. A database already gone comes out there as a
+stale state entry, which a following `apply` removes without writing anything; a
+database still there comes out as a destruction. Dropping the identity on the
+strength of a failure would make a possibly still live database invisible.
 
-Sous une page ancêtre déjà à la corbeille, Notion refuse aussi la mise à la
-corbeille, et la database y part de toute façon avec sa page. `apply` propose
-les deux issues : restaurer la page parente puis relancer `apply`, ou supprimer
-définitivement la page parente depuis la corbeille de Notion, puis relancer
-`notion-seed plan` : si Notion ne connaît plus la database, son entrée y
-ressort en entrée de state obsolète, qu'un `apply` suivant retire sans rien
-écrire.
+Under an ancestor page already in the trash, Notion also rejects the move to
+the trash, and the database goes there anyway with its page. `apply` offers
+both outcomes: restore the parent page then rerun `apply`, or permanently
+delete the parent page from the Notion trash, then run `notion-seed plan`
+again: if Notion no longer knows the database, its entry comes out there as a
+stale state entry, which a following `apply` removes without writing anything.
 
-Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
-a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
-database, la page parente et la marche à suivre : vérifier dans Notion, puis
-`notion-seed import` si elle existe. Pour une modification, l'identité est déjà
-dans le state : `notion-seed plan` suffit à voir ce que Notion porte.
+If the outcome of a creation is **unknown** — a timeout does not say whether the
+server applied the mutation — `apply` stops short without chaining, and names
+the database, the parent page and the steps to follow: check in Notion, then
+`notion-seed import` if it exists. For an update, the identity is already in
+the state: `notion-seed plan` is enough to see what Notion holds.
 
-## Sortie
+## Output
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
@@ -549,81 +539,80 @@ Plan: 2 to add, 0 to change, 0 to destroy
       + property "Name" (title)
 ```
 
-Texte brut, sans couleur : la sortie doit rester lisible dans un pipe et en
-CI. Le plan part sur stdout, les attentes de retry sur stderr — stdout ne
-porte que le plan, pour qu'il reste identique entre deux runs.
+Plain text, no color: the output must stay readable in a pipe and in CI. The
+plan goes to stdout, the retry waits to stderr — stdout carries only the plan,
+so that it stays identical between two runs.
 
-Un plan bloqué sort en code non nul — une ressource gérée que Notion ne connaît
-plus, par exemple. Le coût mesuré, lui, ne fait sortir en erreur que si vous
-l'avez demandé avec [`--fail-on`](#en-ci).
+A blocked plan exits with a non-zero code — a managed resource Notion no longer
+knows, for example. The measured cost, on the other hand, only makes it exit
+with an error if you asked for it with [`--fail-on`](#in-ci).
 
-## Flags de `plan` et `diff`
+## `plan` and `diff` flags
 
-| Flag | Défaut | Rôle |
+| Flag | Default | Role |
 |---|---|---|
-| `--dir` | `.` | dossier de configuration |
-| `--skip-preflight` | `false` | mode entièrement hors ligne : ni vérification de `ntn`, ni vérification de la page parente. Valide la configuration et rend le plan sans aucun appel réseau — les ressources déjà importées ne sont pas comparées au réel dans ce mode, et ressortent sous `Non comparé` plutôt que sous `Aucun changement` |
-| `--rate` | `5` | plafond d'appels API par seconde |
-| `--burst` | `10` | appels tolérés en rafale |
-| `--fail-on` | vide | classes de changement qui font sortir en code non nul — voir [En CI](#en-ci). Vide : rien ne fait échouer |
+| `--dir` | `.` | configuration directory |
+| `--skip-preflight` | `false` | fully offline mode: neither the `ntn` check nor the parent page check. Validates the configuration and renders the plan without any network call — resources already imported are not compared to the actual state in this mode, and come out under `Not compared` rather than under `No changes` |
+| `--rate` | `5` | ceiling of API calls per second |
+| `--burst` | `10` | calls tolerated in a burst |
+| `--fail-on` | empty | change classes that make it exit with a non-zero code — see [In CI](#in-ci). Empty: nothing makes it fail |
 
-`import` prend `--dir`, `--rate` et `--burst`, mais refuse `--skip-preflight` —
-la commande lit l'état réel, elle n'a aucun sens hors ligne — et `--fail-on`,
-puisqu'elle ne calcule aucun plan.
+`import` takes `--dir`, `--rate` and `--burst`, but rejects `--skip-preflight`
+— the command reads the actual state, it makes no sense offline — and
+`--fail-on`, since it computes no plan.
 
-`diff` est aujourd'hui identique à `plan`, puisque `plan` n'écrit pas encore
-de state. Les deux restent distinctes pour que l'usage en CI soit stable le
-jour où `plan` y touchera.
+`diff` is identical to `plan` today, since `plan` does not write any state yet.
+Both stay distinct so that CI usage is stable the day `plan` touches it.
 
-## En CI
+## In CI
 
-Par défaut, un plan qui coûte cher s'affiche et sort en `0` : notion-seed
-mesure, il ne décide pas. `--fail-on` énumère les classes sur lesquelles
-*votre* workflow, lui, veut s'arrêter.
+By default, a costly plan is shown and exits with `0`: notion-seed measures, it
+does not decide. `--fail-on` lists the classes on which *your* workflow wants
+to stop.
 
 ```sh
 notion-seed diff --fail-on=silent-rewrite,destructive
 ```
 
-| Valeur | Ce qu'elle attrape |
+| Value | What it catches |
 |---|---|
-| `destructive` | une donnée est perdue, sans qu'aucune fausse valeur soit écrite |
-| `silent-rewrite` | une donnée est remplacée par une autre, sans trace |
-| `unknown` | l'impact n'a pas pu être mesuré : type hors table, comptage en échec, ou hors ligne |
-| `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |
+| `destructive` | data is lost, without any wrong value being written |
+| `silent-rewrite` | data is replaced by other data, without a trace |
+| `unknown` | the impact could not be measured: type outside the table, failed count, or offline |
+| `migration` | the API accepts the request and changes nothing: the rows must be migrated by hand |
 
-Cinq choses à savoir :
+Five things to know:
 
-- La liste est **énumérée, pas un seuil**. `sûr`, `destructif` et `réécriture
-  silencieuse` forment bien une échelle, mais `impact inconnu` n'y a pas de
-  place : un changement non mesuré peut se révéler anodin comme catastrophique.
-  Demander `destructive` ne demande donc pas « tout ce qui est au moins aussi
-  grave » — nommez chaque classe que vous voulez attraper.
-- Une valeur inconnue — une faute de frappe dans un nom de classe — est refusée
-  **avant le moindre appel réseau**, et le message liste les valeurs acceptées.
-  Sinon une CI mal configurée passerait au vert en croyant se protéger, ce qui
-  est le pire mode d'échec possible pour ce flag.
-- Le plan est **rendu quand même** avant la sortie en erreur : le code de retour
-  dit qu'il faut regarder, la sortie dit quoi.
-- Le déclenchement se fait sur les lignes de détail, avec leur classe mesurée.
-  Une option que personne n'utilise est classée `sûr` et n'attrape rien, même
-  sur une propriété `status` — c'est tout l'intérêt d'avoir compté.
-- Un comptage **en échec** bascule sa ligne en `impact inconnu`. Un `403`, un
-  `429` qui n'a plus de patience, une réponse que notion-seed ne reconnaît pas :
-  la ligne n'est alors plus classée `destructif` ni `réécriture silencieuse`,
-  donc un `--fail-on=destructive,silent-rewrite` ne l'attrape plus et sort en
-  `0`. Ajoutez `unknown` à votre liste si vous voulez que le garde-fou tienne
-  même quand l'API refuse de compter — sans quoi une CI se croit protégée
-  précisément le jour où elle ne l'est pas. Seule exception : une destruction
-  dont le comptage de lignes échoue reste `destructif`, puisque la database
-  part à la corbeille quel qu'en soit le compte.
+- The list is **enumerated, not a threshold**. `safe`, `destructive` and
+  `silent rewrite` do form a scale, but `unknown impact` has no place in it: an
+  unmeasured change can turn out harmless as well as catastrophic. Asking for
+  `destructive` therefore does not ask for "everything at least as serious" —
+  name each class you want to catch.
+- An unknown value — a typo in a class name — is rejected **before any network
+  call**, and the message lists the accepted values. Otherwise a misconfigured
+  CI would go green believing it is protected, which is the worst possible
+  failure mode for this flag.
+- The plan is **rendered anyway** before exiting with an error: the exit code
+  says there is something to look at, the output says what.
+- The trigger works on the detail lines, with their measured class. An option
+  nobody uses is classified `safe` and catches nothing, even on a `status`
+  property — that is the whole point of having counted.
+- A **failed** count switches its line to `unknown impact`. A `403`, a `429`
+  that ran out of patience, a response notion-seed does not recognize: the line
+  is then no longer classified `destructive` nor `silent rewrite`, so a
+  `--fail-on=destructive,silent-rewrite` no longer catches it and exits with
+  `0`. Add `unknown` to your list if you want the safeguard to hold even when
+  the API refuses to count — otherwise a CI believes it is protected precisely
+  the day it is not. Only exception: a destruction whose row count fails stays
+  `destructive`, since the database goes to the trash whatever the count.
 
-`--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
-Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne
-qui aurait pu coûter ressort en `impact inconnu` — un `--fail-on=destructive`
-n'y attrape donc plus rien, alors que `--fail-on=unknown` les attrape toutes.
+`--fail-on` also applies to `apply`, where it is checked before any write.
+Beware of `--skip-preflight`: offline, nothing is counted, and every line that
+could have cost comes out as `unknown impact` — a `--fail-on=destructive`
+therefore no longer catches anything there, whereas `--fail-on=unknown` catches
+them all.
 
-## Développement
+## Development
 
 ```sh
 go test ./...
@@ -632,13 +621,12 @@ go vet ./...
 ./scripts/check-spdx.sh
 ```
 
-Les quatre tournent en CI sur chaque push et chaque pull request.
+All four run in CI on every push and every pull request.
 
-Les mises à jour de dépendances arrivent par Dependabot, groupées une fois par
-semaine. Elles sont fusionnées automatiquement dès que la CI passe, sans
-relecture : ce sont les quatre commandes ci-dessus qui font office de revue. Une
-CI rouge laisse la PR ouverte.
+Dependency updates come through Dependabot, grouped once a week. They are
+merged automatically as soon as CI passes, without review: the four commands
+above act as the review. A red CI leaves the PR open.
 
-## Licence
+## License
 
-GPL-3.0-or-later. Voir [`LICENSE`](LICENSE).
+GPL-3.0-or-later. See [`LICENSE`](LICENSE).
