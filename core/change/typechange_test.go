@@ -169,3 +169,61 @@ func TestClassUnknownImpactHasItsOwnLabel(t *testing.T) {
 		t.Errorf("String() = %q, want \"unknown impact\"", got)
 	}
 }
+
+// Every counted pair gets the filter and the bound the campaign measured.
+func TestTypeChangeOfCountsWithTheMeasuredFilter(t *testing.T) {
+	tests := []struct {
+		from, to string
+		declared []string
+		count    Count
+		bound    Bound
+		except   []string
+	}{
+		// Everything is lost: is_not_empty is exact.
+		{"number", "date", nil, CountNonEmpty, BoundExact, nil},
+		{"people", "select", []string{"Tykok"}, CountNonEmpty, BoundExact, nil},
+		{"status", "checkbox", nil, CountNonEmpty, BoundExact, nil},
+		// rich_text: blank text escapes is_not_empty — a lower bound.
+		{"rich_text", "people", nil, CountNonEmpty, BoundAtLeast, nil},
+		{"rich_text", "select", nil, CountNonEmpty, BoundAtLeast, nil},
+		{"rich_text", "select", []string{"Un"}, CountNonEmpty, BoundAtLeast, []string{"Un"}},
+		// Some values survive by parsing: an upper bound.
+		{"url", "number", nil, CountNonEmpty, BoundAtMost, nil},
+		{"select", "date", nil, CountNonEmpty, BoundAtMost, nil},
+		{"multi_select", "select", nil, CountNonEmpty, BoundAtMost, nil},
+		// No sound filter: not counted.
+		{"rich_text", "number", nil, CountUnsound, BoundExact, nil},
+		{"rich_text", "date", nil, CountUnsound, BoundExact, nil},
+		{"status", "select", []string{"Done"}, CountUnsound, BoundExact, nil},
+		{"status", "rich_text", nil, CountUnsound, BoundExact, nil},
+		// checkbox: only checked rows lose information.
+		{"checkbox", "number", nil, CountChecked, BoundExact, nil},
+		{"checkbox", "select", []string{"No"}, CountChecked, BoundExact, nil},
+		{"checkbox", "status", []string{"Yes"}, CountUnchecked, BoundExact, nil},
+		{"checkbox", "status", nil, CountEveryRow, BoundExact, nil},
+		// Toward status, every row gets a value.
+		{"date", "status", nil, CountEveryRow, BoundExact, nil},
+		{"rich_text", "status", nil, CountEveryRow, BoundExact, nil},
+		{"rich_text", "status", []string{"Un"}, CountEveryRow, BoundAtLeast, []string{"Un"}},
+		{"select", "status", nil, CountEmpty, BoundExact, nil},
+		{"multi_select", "status", nil, CountEveryRow, BoundAtMost, nil},
+		// number: only a canonical decimal writing can hold a number.
+		{"number", "select", []string{"7", "7.0", "High", "-3.5"}, CountNonEmpty, BoundExact, []string{"7", "-3.5"}},
+		{"number", "status", []string{"7"}, CountEveryRow, BoundExact, []string{"7"}},
+	}
+	for _, tt := range tests {
+		tc := TypeChangeOf(tt.from, tt.to, tt.declared)
+		if tc.Count != tt.count || tc.Bound != tt.bound ||
+			strings.Join(tc.Except, "|") != strings.Join(tt.except, "|") {
+			t.Errorf("%s → %s %q = {Count:%v Bound:%v Except:%q}, want {%v %v %q}",
+				tt.from, tt.to, tt.declared, tc.Count, tc.Bound, tc.Except,
+				tt.count, tt.bound, tt.except)
+		}
+		if tc.Bound != BoundExact && tc.Caveat == "" {
+			t.Errorf("%s → %s: a bound without its reason", tt.from, tt.to)
+		}
+		if tc.Count == CountUnsound && tc.Caveat == "" {
+			t.Errorf("%s → %s: not countable, without saying why", tt.from, tt.to)
+		}
+	}
+}

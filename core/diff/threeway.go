@@ -426,6 +426,11 @@ func typeChangeLines(name string, want, have state.Property) []resources.Detail 
 		d.Measure = &resources.Measurement{
 			Property:     name,
 			PropertyType: have.Type,
+			TargetType:   want.Type,
+			Count:        tc.Count,
+			Bound:        tc.Bound,
+			Except:       tc.Except,
+			Caveat:       tc.Caveat,
 		}
 	}
 	out := []resources.Detail{d}
@@ -605,7 +610,9 @@ func retypedRemovalLines(propName string, want, have state.Property) []resources
 		if declared[o.Name] {
 			continue
 		}
-		out = append(out, removalLine(propName, have.Type, o.Name, true))
+		d := removalLine(propName, have.Type, o.Name, true)
+		d.Measure.TargetType = want.Type
+		out = append(out, d)
 	}
 	return out
 }
@@ -619,7 +626,8 @@ func removalLine(propName, propType, option string, retyped bool) resources.Deta
 	class := change.ClassifyOptionRemoval(propType, -1)
 	note := "absent from the YAML: the API replaces the whole list of options"
 	if retyped {
-		class = change.ClassifyRetypedOptionRemoval(-1)
+		// Not measured yet: -1 gives unknown impact whatever the new type.
+		class = change.ClassifyRetypedOptionRemoval("", -1)
 		// A key kept under another name saves nothing here: "absent from the
 		// YAML" would be wrong, it is the name that is missing.
 		note = "not redeclared under this name: the type change re-creates the options"

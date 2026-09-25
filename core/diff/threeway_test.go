@@ -1330,8 +1330,9 @@ func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 	// the write, and the current name that finds them.
 	wantMeasure := resources.Measurement{
 		Property: "Prio", PropertyType: "select", Option: "Basse", Retyped: true,
+		TargetType: "multi_select",
 	}
-	if *removed[0].Measure != wantMeasure {
+	if !reflect.DeepEqual(*removed[0].Measure, wantMeasure) {
 		t.Errorf("Measure = %+v, want %+v", *removed[0].Measure, wantMeasure)
 	}
 	// The target stays the one the 2026-09-25 measurement says is right: only
@@ -1494,5 +1495,49 @@ func TestTypeChangeLineSaysWhatSurvives(t *testing.T) {
 	// A declared option brings the cut at the first comma: a rewrite.
 	if res.Changeset.Details[0].Class != change.ClassSilentRewrite {
 		t.Errorf("Class = %v, want silent rewrite", res.Changeset.Details[0].Class)
+	}
+}
+
+// The property line carries the count the measured table prescribes: the
+// filter, its bound, the declared options whose rows survive, and why the
+// figure is only a bound.
+func TestTypeChangeCarriesTheMeasuredCount(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{"Notes": {ID: "p1", Type: "rich_text"}},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Notes": {Type: "select", Options: []state.Option{{Name: "Un"}, {Name: "Deux"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	m := res.Changeset.Details[0].Measure
+	if m == nil {
+		t.Fatal("no measurement request on the type change")
+	}
+	want := change.TypeChangeOf("rich_text", "select", []string{"Un", "Deux"})
+	if m.PropertyType != "rich_text" || m.TargetType != "select" ||
+		m.Count != want.Count || m.Bound != change.BoundAtLeast ||
+		!reflect.DeepEqual(m.Except, []string{"Un", "Deux"}) || m.Caveat == "" {
+		t.Errorf("Measure = %+v", *m)
+	}
+}
+
+// Toward status, the removal lines of a type change carry the new type: it
+// decides the fate of the rows.
+func TestRetypedRemovalTowardStatusCarriesTheNewType(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio": sel(state.Option{ID: "o1", Name: "Haute"}, state.Option{ID: "o2", Name: "Basse"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Prio": {Type: "status", Options: []state.Option{{Name: "Haute", Group: "To-do"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	for _, d := range res.Changeset.Details {
+		if d.Op == "-" && (d.Measure == nil || d.Measure.TargetType != "status") {
+			t.Errorf("%s: Measure = %+v, want TargetType status", d.Target, d.Measure)
+		}
 	}
 }
