@@ -170,6 +170,42 @@ func main() {
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
+	case "authenticated_database_select":
+		// La database d'authenticated_database, avec une propriété select au
+		// lieu du status : couvre de bout en bout le changement de type
+		// select → multi_select, dont les options non redéclarées perdent leurs
+		// lignes (mesuré le 2026-09-25).
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			switch {
+			case strings.HasPrefix(path, "/v1/databases/"):
+				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
+					`"archived":false,"in_trash":false,`+
+					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
+			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			case strings.HasSuffix(path, "/query"):
+				fmt.Fprint(os.Stdout, queryTwoRows)
+			case strings.HasPrefix(path, "/v1/data_sources/"):
+				fmt.Fprint(os.Stdout, `{"object":"data_source","id":"ds-1",`+
+					`"title":[{"plain_text":"Tasks"}],`+
+					`"properties":{`+
+					`"Name":{"id":"title","name":"Name","type":"title"},`+
+					`"Prio":{"id":"p-prio","name":"Prio","type":"select",`+
+					`"select":{"options":[`+
+					`{"id":"o-haute","name":"Haute","color":"red"},`+
+					`{"id":"o-basse","name":"Basse","color":"blue"}]}}}}`)
+			default:
+				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			}
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
 	case "authenticated_database_updatable":
 		// La database d'authenticated_database, qui retient ce qu'on lui écrit :
 		// couvre l'update d'apply de bout en bout, relecture comprise. Voir

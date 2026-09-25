@@ -887,3 +887,35 @@ func TestRenderWithoutImpactOmitsTheAggregateLine(t *testing.T) {
 		t.Errorf("sortie:\n%s\nle plan lui-même doit rester rendu", without.String())
 	}
 }
+
+// Une option de status qui disparaît dans un CHANGEMENT DE TYPE n'est pas un
+// retrait d'option de status : rien ne reste où réassigner la ligne. Mesuré sur
+// select → multi_select le 2026-09-25, la ligne perd la valeur dont le nom ne
+// revient pas ; l'annoncer « réassignée » affirmerait un sort qui n'est pas le
+// sien, et la rangerait dans le mauvais total.
+func TestRenderSaysARetypedStatusOptionEmptiesTheCell(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Fait" (propriété "Statut")`,
+			Class: ClassDestructive, Count: 2,
+			Measure: &resources.Measurement{
+				Property: "Statut", PropertyType: "status", Option: "Fait", Retyped: true,
+			},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if !strings.Contains(got, "2 lignes passeront à vide") {
+		t.Errorf("sortie:\n%s\nil manque « 2 lignes passeront à vide »", got)
+	}
+	if strings.Contains(got, "réassignées") {
+		t.Errorf("sortie:\n%s\nune option qui disparaît avec son type ne réassigne rien", got)
+	}
+	if !strings.Contains(got, "Impact : 2 valeurs perdues.") {
+		t.Errorf("sortie:\n%s\nle total doit compter une perte, pas une réassignation", got)
+	}
+}

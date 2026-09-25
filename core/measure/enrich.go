@@ -77,6 +77,8 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				// ClassSafe/ClassDestructive/ClassSilentRewrite selon le compte, et
 				// `--fail-on=migration` cesserait de se déclencher sur un simple
 				// renommage.
+			case d.Measure.Option != "" && d.Measure.Retyped:
+				d.Class = change.ClassifyRetypedOptionRemoval(res.Count)
 			case d.Measure.Option != "":
 				d.Class = change.ClassifyOptionRemoval(d.Measure.PropertyType, res.Count)
 			case res.Count == 0:

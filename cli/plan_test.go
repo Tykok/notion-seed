@@ -772,6 +772,7 @@ func TestFakeNtnAnswersQueryWithAListInEveryScenario(t *testing.T) {
 	// Tous les scénarios qui servent /v1/data_sources/ et répondent en 200.
 	scenarios := []string{
 		"authenticated_database",
+		"authenticated_database_select",
 		"authenticated_database_updatable",
 		"archived_database",
 		"authenticated_create",
@@ -1015,5 +1016,53 @@ func TestPlanFailOnIsEnumeratedNotAThreshold(t *testing.T) {
 	// et `migration` ne doit rien attraper.
 	if out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=destructive,migration"); err != nil {
 		t.Fatalf("plan error = %v, want nil : aucune classe demandée n'est au plan\n%s", err, out)
+	}
+}
+
+// select → multi_select est classé sûr par la table des couples, et il l'est
+// pour les options redéclarées. Celles que le YAML omet disparaissent, et leurs
+// lignes passent à vide (mesuré le 2026-09-25). Avant, le plan ne le disait
+// nulle part et --fail-on=destructive laissait passer : c'est la perte que ce
+// produit existe pour annoncer.
+func TestPlanFailsOnDestructiveWhenATypeChangeDropsAnOption(t *testing.T) {
+	withFakeNtn(t, "authenticated_database_select")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		"databases/all.yaml": `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Prio:
+        type: multi_select
+        options:
+          - key: haute
+            name: "Haute"
+            color: red
+`,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=destructive")
+	if err == nil {
+		t.Fatalf("plan error = nil, want un échec\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "destructi") {
+		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+	}
+	for _, want := range []string{
+		`- option "Basse" (propriété "Prio")`,
+		"2 lignes passeront à vide",
+		"Impact : 2 valeurs perdues.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("il manque %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, `- option "Haute"`) {
+		t.Errorf("une option redéclarée sous le même nom garde ses lignes:\n%s", out)
 	}
 }

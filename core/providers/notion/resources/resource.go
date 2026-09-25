@@ -36,10 +36,18 @@ const (
 //
 // Option vide signifie « compter les valeurs non vides de la colonne », ce dont
 // un changement de type a besoin.
+//
+// Retyped dit que l'option disparaît parce que sa propriété change de type, et
+// non parce qu'on la retire d'une liste qui reste. Le sort des lignes n'est pas
+// le même : mesuré le 2026-09-25 sur select → multi_select, la ligne perd sa
+// valeur faute d'option de même nom dans le payload, là où un simple retrait
+// d'option de status l'aurait réassignée. PropertyType reste l'ANCIEN type :
+// c'est lui qui filtre les lignes, puisqu'on compte avant d'écrire.
 type Measurement struct {
 	Property     string
 	PropertyType string
 	Option       string
+	Retyped      bool
 }
 
 // Detail décrit un changement élémentaire à l'intérieur d'une ressource.
