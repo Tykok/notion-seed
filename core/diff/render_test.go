@@ -651,7 +651,8 @@ func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 	destroyed := Change{
 		Resource: "database.archive", Kind: resources.KindDestroy, Class: ClassDestructive,
 		Details: []resources.Detail{{
-			Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1,
+			Op: "-", Target: "database.archive", Class: ClassDestructive, Count: 5,
+			Measure: &resources.Measurement{AllRows: true},
 		}},
 	}
 	withheld := Change{
@@ -665,7 +666,7 @@ func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 		},
 	}
 
-	const writtenOnly = "Impact : 3 valeurs perdues, 1 database(s) à la corbeille."
+	const writtenOnly = "Impact : 3 valeurs perdues, 1 database(s) à la corbeille avec 5 ligne(s)."
 
 	clean := &Plan{Changes: []Change{written, destroyed}}
 	if got := Impact(clean); got != writtenOnly {
@@ -677,7 +678,7 @@ func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 	}
 
 	mixed := &Plan{Changes: []Change{written, destroyed, withheld}}
-	if got, want := Impact(mixed), "Impact : 7 valeurs perdues, 1 database(s) à la corbeille."; got != want {
+	if got, want := Impact(mixed), "Impact : 7 valeurs perdues, 1 database(s) à la corbeille avec 5 ligne(s)."; got != want {
 		t.Errorf("Impact = %q, want %q : plan agrège tout, retenu compris", got, want)
 	}
 	if got := WritableImpact(mixed); got != writtenOnly {
@@ -998,5 +999,73 @@ func TestRenderStaysCautiousOnARetypedMultiSelectOption(t *testing.T) {
 	}
 	if strings.Contains(got, "n'en portaient pas d'autre") {
 		t.Errorf("sortie:\n%s\nun sort non mesuré est décrit", got)
+	}
+}
+
+func destroyOf(key string, count int, capped bool) Change {
+	return Change{
+		Resource: "database." + key, Key: key, Kind: resources.KindDestroy, Class: ClassDestructive,
+		Details: []resources.Detail{{
+			Op: "-", Target: "database." + key, Class: ClassDestructive,
+			Count: count, Capped: capped,
+			Measure: &resources.Measurement{AllRows: true},
+		}},
+	}
+}
+
+// La ligne d'une destruction dit combien de lignes partent avec la database —
+// ou qu'on ne le sait pas. Se taire la rendrait indiscernable d'une database
+// vide.
+func TestRenderSaysHowManyRowsADestroyTakesWithIt(t *testing.T) {
+	tests := []struct {
+		count  int
+		capped bool
+		want   string
+	}{
+		{1, false, "→ 1 ligne(s) partent à la corbeille avec elle."},
+		{0, false, "→ aucune ligne ne part à la corbeille avec elle."},
+		{300, true, "→ plus de 300 ligne(s) partent à la corbeille avec elle."},
+		{-1, false, "→ nombre de lignes qui partent à la corbeille avec elle non mesuré ; " +
+			"relancez pour l'obtenir."},
+	}
+	for _, tt := range tests {
+		p := &Plan{ToDestroy: 1, Changes: []Change{destroyOf("b", tt.count, tt.capped)}}
+		var b bytes.Buffer
+		if err := Render(&b, p); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), tt.want) {
+			t.Errorf("count=%d:\n%s\nwant %q", tt.count, b.String(), tt.want)
+		}
+		if !strings.Contains(b.String(), "[destructif]") {
+			t.Errorf("count=%d : la destruction a perdu sa classe:\n%s", tt.count, b.String())
+		}
+	}
+}
+
+// L'agrégat compte les lignes des databases détruites. Un compte inconnu ne
+// devient jamais 0 : il est dit, et le total connu devient un minorant.
+func TestImpactCountsTheRowsOfDestroyedDatabases(t *testing.T) {
+	tests := []struct {
+		name    string
+		changes []Change
+		want    string
+	}{
+		{"une", []Change{destroyOf("b", 1, false)},
+			"Impact : 1 database(s) à la corbeille avec 1 ligne(s)."},
+		{"somme", []Change{destroyOf("a", 2, false), destroyOf("b", 3, false)},
+			"Impact : 2 database(s) à la corbeille avec 5 ligne(s)."},
+		{"plafond", []Change{destroyOf("a", 300, true), destroyOf("b", 3, false)},
+			"Impact : 2 database(s) à la corbeille avec plus de 303 ligne(s)."},
+		{"inconnu", []Change{destroyOf("b", -1, false)},
+			"Impact : 1 database(s) à la corbeille, lignes non comptées."},
+		{"partiel", []Change{destroyOf("a", 2, false), destroyOf("b", -1, false)},
+			"Impact : 2 database(s) à la corbeille avec au moins 2 ligne(s), " +
+				"lignes non comptées pour 1 d'entre elles."},
+	}
+	for _, tt := range tests {
+		if got := Impact(&Plan{Changes: tt.changes}); got != tt.want {
+			t.Errorf("%s : Impact = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

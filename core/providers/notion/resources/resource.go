@@ -43,11 +43,16 @@ const (
 // valeur faute d'option de même nom dans le payload, là où un simple retrait
 // d'option de status l'aurait réassignée. PropertyType reste l'ANCIEN type :
 // c'est lui qui filtre les lignes, puisqu'on compte avant d'écrire.
+//
+// AllRows demande de compter TOUTES les lignes du data source, sans filtre :
+// c'est ce qu'une database mise à la corbeille emporte avec elle. Property,
+// PropertyType et Option restent alors vides.
 type Measurement struct {
 	Property     string
 	PropertyType string
 	Option       string
 	Retyped      bool
+	AllRows      bool
 }
 
 // Detail décrit un changement élémentaire à l'intérieur d'une ressource.

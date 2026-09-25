@@ -45,11 +45,24 @@ var ErrUnreadableCount = errors.New("réponse de comptage incomprise")
 
 // Request décrit UNE mesure. Option vide signifie « compter les valeurs non
 // vides de la colonne », ce dont un changement de type a besoin.
+//
+// AllRows compte toutes les lignes du data source, sans filtre : c'est ce
+// qu'une destruction emporte. Property, PropertyType et Option sont alors
+// ignorés.
 type Request struct {
 	DataSourceID string
 	Property     string
 	PropertyType string
 	Option       string
+	AllRows      bool
+}
+
+// subject nomme ce qu'on compte, pour les messages d'erreur.
+func (r Request) subject() string {
+	if r.AllRows {
+		return "la database"
+	}
+	return fmt.Sprintf("%q", r.Property)
 }
 
 // Result porte le compte. Capped dit que le plafond de pagination a été atteint
@@ -106,15 +119,23 @@ func filterFor(r Request) (map[string]any, error) {
 
 // Count rend le nombre de lignes concernées, plafonné.
 func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
-	filter, err := filterFor(r)
-	if err != nil {
-		return Result{}, err
+	// Pas de filtre du tout pour AllRows — pas même un filtre vide, dont l'API
+	// n'a pas été mesurée.
+	var filter map[string]any
+	if !r.AllRows {
+		var err error
+		if filter, err = filterFor(r); err != nil {
+			return Result{}, err
+		}
 	}
 
 	var out Result
 	cursor := ""
 	for page := 0; page < MaxCountedPages; page++ {
-		body := map[string]any{"filter": filter, "page_size": CountPageSize}
+		body := map[string]any{"page_size": CountPageSize}
+		if filter != nil {
+			body["filter"] = filter
+		}
 		if cursor != "" {
 			body["start_cursor"] = cursor
 		}
@@ -133,9 +154,9 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf(
-				"comptage des lignes de %q impossible: %w\n"+
+				"comptage des lignes de %s impossible: %w\n"+
 					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez "+
-					"pour obtenir le compte", r.Property, err)
+					"pour obtenir le compte", r.subject(), err)
 		}
 
 		// Results est un POINTEUR de tranche, délibérément : une tranche nue
@@ -161,19 +182,19 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		// concernée, rien à perdre » sur une réponse dont rien n'a été compris.
 		if decoded.Object != "list" {
 			return Result{}, fmt.Errorf(
-				"%w pour %q: l'API a répondu un objet %q, pas une liste de lignes\n"+
+				"%w pour %s: l'API a répondu un objet %q, pas une liste de lignes\n"+
 					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.Property, decoded.Object)
+				ErrUnreadableCount, r.subject(), decoded.Object)
 		}
 		if decoded.Results == nil {
 			return Result{}, fmt.Errorf(
-				"%w pour %q: la liste rendue par l'API ne porte aucun champ results\n"+
+				"%w pour %s: la liste rendue par l'API ne porte aucun champ results\n"+
 					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.Property)
+				ErrUnreadableCount, r.subject())
 		}
 
 		out.Count += len(*decoded.Results)
@@ -188,11 +209,11 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		// Mieux vaut ne rien annoncer que garantir un nombre inventé.
 		if decoded.NextCursor == "" {
 			return Result{}, fmt.Errorf(
-				"%w pour %q: l'API annonce une page suivante sans curseur pour l'atteindre\n"+
+				"%w pour %s: l'API annonce une page suivante sans curseur pour l'atteindre\n"+
 					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.Property)
+				ErrUnreadableCount, r.subject())
 		}
 		cursor = decoded.NextCursor
 	}

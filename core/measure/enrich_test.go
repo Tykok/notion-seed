@@ -277,3 +277,54 @@ func TestEnrichClassifiesARetypedStatusOptionAsDestructive(t *testing.T) {
 		t.Errorf("Detail = {Count:%d Class:%v}, want {2 destructif}", d.Count, d.Class)
 	}
 }
+
+func planWithDestroy() *diff.Plan {
+	return &diff.Plan{ToDestroy: 1, Changes: []diff.Change{{
+		Resource: "database.tasks", Key: "tasks", Kind: resources.KindDestroy,
+		Class: change.ClassDestructive,
+		Details: []resources.Detail{{
+			Op: "-", Target: "database.tasks", Class: change.ClassDestructive, Count: -1,
+			Measure: &resources.Measurement{AllRows: true},
+		}},
+	}}}
+}
+
+// Une destruction reste destructive quel que soit son compte : 0 ligne ne la
+// rend pas sûre (la database part quand même), et un compte n'en change pas la
+// nature. Le compte dit seulement ce qui part avec elle.
+func TestEnrichCountsTheRowsOfADestroyWithoutReclassifyingIt(t *testing.T) {
+	for _, n := range []int{0, 5} {
+		p := planWithDestroy()
+		var got Request
+		c := counterFunc(func(_ context.Context, r Request) (Result, error) {
+			got = r
+			return Result{Count: n}, nil
+		})
+		if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
+			t.Fatalf("échecs = %v", fails)
+		}
+		if !got.AllRows || got.DataSourceID != "ds-1" {
+			t.Errorf("requête = %+v, want AllRows sur ds-1", got)
+		}
+		d := p.Changes[0].Details[0]
+		if d.Count != n || d.Class != change.ClassDestructive || p.Changes[0].Class != change.ClassDestructive {
+			t.Errorf("n=%d : Detail = {Count:%d Class:%v}, ressource %v, want destructif",
+				n, d.Count, d.Class, p.Changes[0].Class)
+		}
+	}
+}
+
+// Un comptage en échec laisse le compte inconnu, la classe intacte, et sa cause
+// rendue.
+func TestEnrichKeepsADestroyDestructiveWhenCountingFails(t *testing.T) {
+	p := planWithDestroy()
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{}, errors.New("403") })
+	fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if len(fails) != 1 {
+		t.Errorf("échecs = %v, want un", fails)
+	}
+	d := p.Changes[0].Details[0]
+	if d.Count != -1 || d.Class != change.ClassDestructive {
+		t.Errorf("Detail = {Count:%d Class:%v}, want {-1 destructif}", d.Count, d.Class)
+	}
+}

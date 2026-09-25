@@ -663,6 +663,28 @@ func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 	}
 }
 
+// Mesuré le 2026-09-25 : la destruction s'annonçait sans dire combien de lignes
+// la database emporte. Le faux ntn en porte 3 — et 2 seulement portent « Fait »,
+// donc un 2 trahirait une requête filtrée au lieu du compte de toutes les
+// lignes.
+func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
+	dir := importThenDeclare(t, orphanYAML)
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err != nil {
+		t.Fatalf("plan: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"  - database.tasks  [destructif]",
+		"          → 3 ligne(s) partent à la corbeille avec elle.",
+		"Impact : 1 database(s) à la corbeille avec 3 ligne(s).",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sortie:\n%s\nwant %q", out, want)
+		}
+	}
+}
+
 // Review Focus #4 : prevent_destroy est un accusé de lecture. La destruction
 // part, et la mention reste affichée.
 func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
@@ -711,7 +733,7 @@ func TestApplyFailOnDestructiveTrashesNothing(t *testing.T) {
 // exactement l'agrégat de plan — destruction comprise, maintenant qu'il l'écrit.
 func TestApplyShowsTheSameImpactAsPlanWhenNothingIsWithheld(t *testing.T) {
 	dir := importThenDeclare(t, orphanYAML)
-	const want = "Impact : 1 database(s) à la corbeille."
+	const want = "Impact : 1 database(s) à la corbeille avec 3 ligne(s)."
 
 	planOut, perr := runCmd(t, "plan", "--dir", dir)
 	if perr != nil {

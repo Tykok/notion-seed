@@ -33,9 +33,11 @@ const createdDataSource = `{"object":"data_source","id":"ds-new",` +
 	`"title":[{"plain_text":"Projects"}],` +
 	`"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`
 
-// queryTwoRows est la réponse de TOUTE requête de comptage
-// (`POST /v1/data_sources/<id>/query`). Deux lignes portent l'option "Fait" :
-// de quoi vérifier qu'un retrait mesuré ressort avec son chiffre.
+// queryTwoRows est la réponse de toute requête de comptage
+// (`POST /v1/data_sources/<id>/query`), sauf le comptage sans filtre du
+// scénario authenticated_database_updatable (voir queryThreeRows). Deux lignes
+// portent l'option "Fait" : de quoi vérifier qu'un retrait mesuré ressort avec
+// son chiffre.
 //
 // PIÈGE D'ORDRE, valable pour tous les scénarios : le chemin
 // `/v1/data_sources/ds-1/query` porte AUSSI le préfixe `/v1/data_sources/`. Un
