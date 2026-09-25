@@ -116,7 +116,7 @@ measured, writing on the database updates both, writing on the data source
 makes them diverge. `notion-seed` only reads the database's icon: if the data
 source's is changed separately, in Notion, it does not see it.
 
-## lifecycle — acknowledgements
+## lifecycle — acknowledgements {#lifecycle-acknowledgements}
 
 ::: danger prevent_destroy prevents nothing
 Despite its name, a database listed in `prevent_destroy` goes to the trash like

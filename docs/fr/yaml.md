@@ -118,7 +118,7 @@ mesuré, écrire sur la database met les deux à jour, écrire sur le data sourc
 fait diverger. `notion-seed` ne lit que l'icône de la database : si celle du data
 source est changée à part, dans Notion, il ne la voit pas.
 
-## lifecycle — des accusés de lecture
+## lifecycle — des accusés de lecture {#lifecycle-des-accuses-de-lecture}
 
 ::: danger prevent_destroy n'empêche rien
 Malgré son nom, une database listée dans `prevent_destroy` part à la corbeille
