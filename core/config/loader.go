@@ -147,6 +147,9 @@ func Load(dir string) (*Config, error) {
 			if err := checkExactlyOneTitle(db); err != nil {
 				return nil, err
 			}
+			if err := checkUniqueOptions(db); err != nil {
+				return nil, err
+			}
 			cfg.Databases = append(cfg.Databases, db)
 		}
 	}
@@ -306,6 +309,58 @@ func checkExactlyOneTitle(db Database) error {
 				db.Name, len(titles), quotedList(titles)),
 			Hint: "l'API Notion n'en accepte qu'une par database — gardez-en une seule et " +
 				"donnez un autre type aux autres (`rich_text` pour du texte libre)",
+		}
+	}
+	return nil
+}
+
+// checkUniqueOptions refuse deux options de même key, ou de même nom, dans une
+// même propriété. JSON Schema ne sait pas exprimer l'unicité d'un champ dans
+// une liste d'objets, donc la vérification est ici.
+//
+// Les deux doublons cassent l'appariement aux options distantes, et chacun à
+// sa façon :
+//   - deux keys identiques désignent la MÊME option distante, dont l'id
+//     partirait deux fois dans un seul PATCH ;
+//   - deux noms identiques : le second ne trouve plus de position libre et part
+//     en option neuve portant un nom qui existe déjà — un 400 de l'API, APRÈS
+//     que le PATCH database est passé.
+//
+// Refuser au chargement arrête les deux avant le moindre appel.
+func checkUniqueOptions(db Database) error {
+	names := make([]string, 0, len(db.Properties))
+	for name := range db.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, prop := range names {
+		keys := map[string]bool{}
+		optNames := map[string]bool{}
+		for _, o := range db.Properties[prop].Options {
+			if o.Key != "" {
+				if keys[o.Key] {
+					return &ValidationError{
+						Path: db.SourceFile,
+						Message: fmt.Sprintf(
+							"la database %q, propriété %q : deux options portent la key %q",
+							db.Name, prop, o.Key),
+						Hint: "la key d'une option est son identité : donnez à chaque option " +
+							"de la propriété une key distincte",
+					}
+				}
+				keys[o.Key] = true
+			}
+			if optNames[o.Name] {
+				return &ValidationError{
+					Path: db.SourceFile,
+					Message: fmt.Sprintf(
+						"la database %q, propriété %q : deux options portent le nom %q",
+						db.Name, prop, o.Name),
+					Hint: "deux options de même nom sont indiscernables, pour Notion comme " +
+						"pour notion-seed : renommez l'une des deux, ou retirez le doublon",
+				}
+			}
+			optNames[o.Name] = true
 		}
 	}
 	return nil

@@ -401,6 +401,72 @@ func TestLoadRejectsDatabasesWithoutExactlyOneTitle(t *testing.T) {
 	}
 }
 
+// Deux options de même key désigneraient la même option distante, dont l'id
+// partirait deux fois ; deux options de même nom feraient partir la seconde en
+// option neuve, refusée par l'API APRÈS l'écriture de la database. Les deux
+// s'arrêtent au chargement, avec la database, la propriété et le doublon nommés.
+func TestLoadRejectsDuplicateOptionsInAProperty(t *testing.T) {
+	tests := []struct {
+		name      string
+		options   string
+		wantInMsg []string
+	}{
+		{
+			"même key",
+			"          - key: haute\n            name: \"Haute\"\n" +
+				"          - key: haute\n            name: \"Très haute\"\n",
+			[]string{"z.yaml", `"Z"`, `"Prio"`, `key "haute"`, "  → "},
+		},
+		{
+			"même nom",
+			"          - key: haute\n            name: \"Haute\"\n" +
+				"          - key: autre\n            name: \"Haute\"\n",
+			[]string{"z.yaml", `"Z"`, `"Prio"`, `nom "Haute"`, "  → "},
+		},
+		{
+			"même nom, sans key",
+			"          - name: \"Haute\"\n          - name: \"Haute\"\n",
+			[]string{`"Prio"`, `nom "Haute"`, "  → "},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeConfig(t, map[string]string{
+				"workspace.yaml": workspaceYAML,
+				"databases/z.yaml": "databases:\n  - key: z\n    name: \"Z\"\n    properties:\n" +
+					"      Name:\n        type: title\n" +
+					"      Prio:\n        type: select\n        options:\n" + tt.options,
+			})
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("Load() error = nil, want un rejet du doublon d'option")
+			}
+			for _, want := range tt.wantInMsg {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// Une même key d'option dans DEUX propriétés est licite : l'identité d'une
+// option est locale à sa propriété.
+func TestLoadAcceptsTheSameOptionKeyInTwoProperties(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": workspaceYAML,
+		"databases/z.yaml": "databases:\n  - key: z\n    name: \"Z\"\n    properties:\n" +
+			"      Name:\n        type: title\n" +
+			"      Prio:\n        type: select\n        options:\n" +
+			"          - key: haute\n            name: \"Haute\"\n" +
+			"      Tags:\n        type: multi_select\n        options:\n" +
+			"          - key: haute\n            name: \"Haute\"\n",
+	})
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
 // parent_page_id porte un motif UUID : un id en forme de chemin relatif
 // produirait une URL qui vise un autre endpoint, et l'erreur de l'API sur un id
 // mal formé est moins claire que celle-ci.
