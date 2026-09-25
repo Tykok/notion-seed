@@ -373,7 +373,7 @@ func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Sna
 			out[key] = diff.Refreshed{Missing: true, Reason: "archivée ou en corbeille"}
 			continue
 		}
-		out[key] = diff.Refreshed{Database: state.FromRemote(rd)}
+		out[key] = diff.Refreshed{Database: state.FromRemote(rd), DataSources: rd.DataSourceCount}
 	}
 	return out, nil
 }

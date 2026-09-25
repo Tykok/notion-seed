@@ -129,6 +129,30 @@ func TestComputeStillPlansDestroyWhenOrphanExists(t *testing.T) {
 	}
 }
 
+// Une database à deux data sources part à la corbeille avec les deux, mais le
+// comptage n'en interroge qu'un : la destruction doit le savoir.
+func TestComputeMarksTheUncountedDataSourcesOfADestroy(t *testing.T) {
+	cfg := &config.Config{}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", DataSourceID: "ds-1"}},
+	}
+	for _, tt := range []struct{ sources, want int }{{0, 0}, {1, 0}, {2, 1}, {3, 2}} {
+		actual := map[string]Refreshed{"tasks": {
+			Database:    state.Database{ID: "db-1", DataSourceID: "ds-1"},
+			DataSources: tt.sources,
+		}}
+		p, err := Compute(cfg, applied, actual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := p.Changes[0].Details[0].Measure
+		if m == nil || !m.AllRows || m.UncountedDataSources != tt.want {
+			t.Errorf("%d data sources : Measure = %+v, want %d non compté(s)", tt.sources, m, tt.want)
+		}
+	}
+}
+
 // Sans refresh (--skip-preflight), on ne sait rien de l'orpheline : ni la
 // détruire, ni conclure qu'elle a disparu. Elle tombe sous « Non comparé ».
 func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
