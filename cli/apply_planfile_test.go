@@ -39,7 +39,11 @@ func assertRefusedBeforeAnything(t *testing.T, dir, logPath, stateBefore, out st
 			t.Errorf("message =\n%s\nwant %q", err.Error(), w)
 		}
 	}
-	for _, never := range []string{"Plan:", "will be moved to the trash", "to confirm"} {
+	// Not "to confirm": every caller here runs with --auto-approve, which
+	// never prints the prompt, refused early or not — the check would pass
+	// either way. The prompt itself, on a path where it is really reached and
+	// declined, is covered by TestApplyDeclinedConfirmationWithAFileWritesNothing.
+	for _, never := range []string{"Plan:", "will be moved to the trash"} {
 		if strings.Contains(out, never) {
 			t.Errorf("output carries %q: the refusal must come before the render\n%s", never, out)
 		}
@@ -123,6 +127,32 @@ func TestApplyOfAReviewedPlanConverges(t *testing.T) {
 	}
 	if !strings.Contains(planOut, "No changes") {
 		t.Errorf("the plan following the apply is not empty:\n%s", planOut)
+	}
+}
+
+// T5 (final review): the path after the reviewed-plan check is the ordinary
+// confirmation path, unchanged by --out — a declined confirmation, with a
+// file, writes nothing. Unlike assertRefusedBeforeAnything's callers, this one
+// really reaches the prompt: it is what makes "to confirm" a meaningful thing
+// to check for, instead of the vacuous absence check --auto-approve made of it
+// there.
+func TestApplyDeclinedConfirmationWithAFileWritesNothing(t *testing.T) {
+	dir, planPath, logPath := reviewedOrphan(t)
+	before := mustReadFile(t, filepath.Join(dir, state.FileName))
+	forceInteractive(t)
+
+	out, err := runCmdWithStdin(t, "no\n", "apply", planPath, "--dir", dir)
+	if err == nil || !strings.Contains(err.Error(), "confirmation declined") {
+		t.Fatalf("apply error = %v, want the declined confirmation\n%s", err, out)
+	}
+	if !strings.Contains(out, "to confirm") {
+		t.Errorf("the prompt was not shown, the decline proves nothing:\n%s", out)
+	}
+	if got := readMutationLog(t, logPath); got != "" {
+		t.Errorf("writes = %q, want none", got)
+	}
+	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
+		t.Error("the state was rewritten although the confirmation was declined")
 	}
 }
 
@@ -345,6 +375,52 @@ func TestApplyOfAnEmptyReviewedPlanDoesNothing(t *testing.T) {
 	}
 	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
 		t.Error("the state was rewritten on an empty plan")
+	}
+}
+
+// T5 (final review): a plan file whose only change is a stale state entry —
+// the database left the YAML AND Notion already forgot it. Applying it writes
+// NOTHING to Notion, and the entry is cleaned from the state.
+func TestApplyOfAReviewedPlanCleansAStaleEntryOnly(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
+	})
+	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte("databases: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withFakeNtn(t, "authenticated_database_404")
+
+	planPath := filepath.Join(t.TempDir(), "plan.out")
+	if out, err := runCmd(t, "plan", "--dir", dir, "--out", planPath); err != nil {
+		t.Fatalf("plan --out: %v\n%s", err, out)
+	}
+	if f := readPlanFile(t, planPath); len(f.Changes) != 0 || len(f.StaleState) != 1 {
+		t.Fatalf("changes = %+v, stale = %v, want no change and one stale entry", f.Changes, f.StaleState)
+	}
+	logPath := withMutationLog(t)
+
+	out, err := runCmd(t, "apply", planPath, "--dir", dir, "--auto-approve")
+	if err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "1 stale entry(ies) will be removed from the state") {
+		t.Errorf("the confirmation does not say what will be touched:\n%s", out)
+	}
+	if got := readMutationLog(t, logPath); got != "" {
+		t.Errorf("writes = %q, want none: a stale entry cleans only the state", got)
+	}
+	snap, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, ok := snap.Databases["tasks"]; ok {
+		t.Error("the stale entry was not removed")
 	}
 }
 
