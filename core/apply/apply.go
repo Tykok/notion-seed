@@ -694,7 +694,7 @@ func destroyError(c diff.Change, rep Report, err error) error {
 				"  → lancez `notion-seed plan` pour voir ce que Notion porte réellement : "+
 				"si la database est à la corbeille, elle y ressort en entrée de state "+
 				"obsolète, qu'apply retirera sans rien écrire ; sinon, sa destruction y "+
-				"est proposée de nouveau. Son entrée de state est gardée. %s",
+				"est proposée de nouveau. Son entrée de state est gardée ; %s",
 			c.Resource, err, acquired)
 	}
 
@@ -719,7 +719,7 @@ func destroyError(c diff.Change, rep Report, err error) error {
 					"Notion, puis relancez `notion-seed plan` : si Notion ne connaît plus la "+
 					"database, son entrée apparaîtra comme entrée de state obsolète, qu'un "+
 					"`apply` suivant retirera sans rien écrire. Son entrée de state est "+
-					"gardée. %s",
+					"gardée ; %s",
 				c.Resource, acquired)
 		case apiErr.Status == 404:
 			// Le plan venait de la lire. Ce 404 n'est pas une preuve de
@@ -733,7 +733,7 @@ func destroyError(c diff.Change, rep Report, err error) error {
 					"  → lancez `notion-seed plan` : si elle a disparu, elle y ressort en "+
 					"entrée de state obsolète, qu'apply retirera sans rien écrire dans "+
 					"Notion. Son entrée de state est gardée : un 404 sur une écriture ne "+
-					"suffit pas à abandonner une identité. %s",
+					"suffit pas à abandonner une identité ; %s",
 				c.Resource, acquired)
 		}
 	}
@@ -741,6 +741,6 @@ func destroyError(c diff.Change, rep Report, err error) error {
 	return fmt.Errorf(
 		"mise à la corbeille de %s impossible: %w\n"+
 			"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est annulé, "+
-			"et son entrée de state est gardée. %s",
+			"et son entrée de state est gardée ; %s",
 		c.Resource, err, acquired)
 }
