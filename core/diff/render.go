@@ -19,23 +19,25 @@ import (
 // le non comparé ensuite (ce qu'on n'a pas vérifié), le blocage en dernier
 // avec son issue. Chaque section disparaît si elle est vide : sans state, la
 // sortie est exactement celle d'avant.
-func Render(w io.Writer, p *Plan) error { return render(w, p, true) }
+func Render(w io.Writer, p *Plan) error { return render(w, p, Impact(p)) }
 
-// RenderWithoutImpact écrit le plan sans sa ligne d'agrégat.
-//
-// C'est ce dont `apply` a besoin. La ligne Impact agrège TOUT le plan, or apply
-// n'écrit aujourd'hui que les créations : la lui faire afficher lui ferait
-// annoncer « 1 database(s) à la corbeille » pour une destruction que cette
-// version ne fera pas — et sa propre section « Non appliqué » la démentirait
-// quatre lignes plus bas. La ligne la plus lue du produit ne peut pas mentir
-// sur la commande qui écrit.
-//
-// apply annonce lui-même ce qu'il va écrire, juste avant la confirmation. Le
-// jour où il écrira update et destroy, les deux rendus coïncideront et cette
-// fonction pourra disparaître.
-func RenderWithoutImpact(w io.Writer, p *Plan) error { return render(w, p, false) }
+// RenderWithoutImpact écrit le plan sans sa ligne d'agrégat. Elle ne sert plus
+// qu'à apply, jusqu'à ce qu'il passe à RenderForApply.
+func RenderWithoutImpact(w io.Writer, p *Plan) error { return render(w, p, "") }
 
-func render(w io.Writer, p *Plan, withImpact bool) error {
+// RenderForApply écrit le plan comme Render, à une ligne près : l'agrégat
+// d'impact ne porte que sur ce qu'apply VA écrire.
+//
+// Une ressource retenue garde un impact qu'apply ne causera pas. Reprendre le
+// total de plan ferait mentir la ligne la plus lue du produit au seul moment où
+// l'utilisateur décide, juste avant la confirmation. Sans ressource retenue, les
+// deux rendus coïncident — c'est le cas courant.
+func RenderForApply(w io.Writer, p *Plan) error { return render(w, p, WritableImpact(p)) }
+
+// render écrit le plan. impact est la ligne d'agrégat déjà calculée, "" pour
+// n'en afficher aucune : son périmètre est le choix de l'appelant — tout le plan
+// pour plan, ce qui sera écrit pour apply.
+func render(w io.Writer, p *Plan, impact string) error {
 	if len(p.Drifts) > 0 {
 		if _, err := fmt.Fprintln(w, "Dérive détectée hors de notion-seed"); err != nil {
 			return err
@@ -147,8 +149,8 @@ func render(w io.Writer, p *Plan, withImpact bool) error {
 	// La ligne d'agrégat vient après la liste : on lit le détail, puis le total
 	// par famille. Elle disparaît quand rien de mesuré n'est en jeu — annoncer
 	// un impact vide serait une affirmation de plus que ce qui a été mesuré.
-	if line := Impact(p); withImpact && line != "" {
-		if _, err := fmt.Fprintf(w, "%s\n\n", line); err != nil {
+	if impact != "" {
+		if _, err := fmt.Fprintf(w, "%s\n\n", impact); err != nil {
 			return err
 		}
 	}
@@ -357,10 +359,31 @@ func removalFate(m resources.Measurement) string {
 // sont touchées serait un chiffre faux dans la ligne qui EST l'argument du
 // produit. Le dédoublonnage exigerait de collecter les identifiants de lignes,
 // ce que la passe de mesure ne fait pas — alors on nomme ce qu'on a.
-func Impact(p *Plan) string {
+func Impact(p *Plan) string { return impactOf(p.Changes) }
+
+// WritableImpact agrège le même impact que Impact, sur les SEULES ressources
+// qu'apply va écrire : celles dont Withheld est vide.
+//
+// plan continue d'agréger tout, parce qu'il décrit l'écart, pas une exécution.
+// apply, lui, annonce ce qu'il va causer : une ressource retenue n'est pas
+// écrite, donc son coût n'est pas le sien.
+func WritableImpact(p *Plan) string {
+	writable := make([]Change, 0, len(p.Changes))
+	for _, c := range p.Changes {
+		if c.Withheld == "" {
+			writable = append(writable, c)
+		}
+	}
+	return impactOf(writable)
+}
+
+// impactOf est le calcul lui-même, partagé par Impact et WritableImpact : une
+// seule règle d'agrégat, deux périmètres. Deux règles finiraient par diverger,
+// et plan et apply par annoncer deux coûts différents pour la même écriture.
+func impactOf(changes []Change) string {
 	reassigned, lost, weakened, destroyed := 0, 0, 0, 0
 	var reassignedCapped, lostCapped, weakenedCapped bool
-	for _, c := range p.Changes {
+	for _, c := range changes {
 		if c.Kind == resources.KindDestroy {
 			destroyed++
 		}

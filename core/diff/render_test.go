@@ -635,6 +635,96 @@ func TestImpactIsEmptyWhenNothingIsAtStake(t *testing.T) {
 	}
 }
 
+// Spec §5 : apply agrège l'impact des SEULES ressources qu'il va écrire ; plan,
+// qui décrit l'écart et non une exécution, agrège tout. Les deux configurations
+// sont verrouillées : sans ressource retenue les deux totaux coïncident, avec
+// une ressource retenue celui d'apply est strictement inférieur — il en exclut
+// ce que la ressource retenue aurait coûté.
+func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
+	written := Change{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Class: ClassDestructive, Count: 3,
+			Measure: &resources.Measurement{PropertyType: "select", Option: "Basse"},
+		}},
+	}
+	destroyed := Change{
+		Resource: "database.archive", Kind: resources.KindDestroy, Class: ClassDestructive,
+		Details: []resources.Detail{{
+			Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1,
+		}},
+	}
+	withheld := Change{
+		Resource: "database.projects", Kind: resources.KindUpdate,
+		Withheld: "une option doit être migrée à la main",
+		Details: []resources.Detail{
+			{Op: "~", Class: ClassMigration, Count: 2,
+				Measure: &resources.Measurement{PropertyType: "status", Option: "Fait"}},
+			{Op: "-", Class: ClassDestructive, Count: 4,
+				Measure: &resources.Measurement{PropertyType: "select", Option: "Legacy"}},
+		},
+	}
+
+	const writtenOnly = "Impact : 3 valeurs perdues, 1 database(s) à la corbeille."
+
+	clean := &Plan{Changes: []Change{written, destroyed}}
+	if got := Impact(clean); got != writtenOnly {
+		t.Fatalf("montage du test faux : Impact = %q, want %q", got, writtenOnly)
+	}
+	if got := WritableImpact(clean); got != writtenOnly {
+		t.Errorf("WritableImpact = %q, want %q : sans ressource retenue, apply et plan "+
+			"annoncent le même total", got, writtenOnly)
+	}
+
+	mixed := &Plan{Changes: []Change{written, destroyed, withheld}}
+	if got, want := Impact(mixed), "Impact : 7 valeurs perdues, 1 database(s) à la corbeille."; got != want {
+		t.Errorf("Impact = %q, want %q : plan agrège tout, retenu compris", got, want)
+	}
+	if got := WritableImpact(mixed); got != writtenOnly {
+		t.Errorf("WritableImpact = %q, want %q : apply n'agrège pas ce qu'il ne causera pas",
+			got, writtenOnly)
+	}
+}
+
+// RenderForApply ne diffère de Render que par la ligne d'agrégat : tout le
+// détail du plan — ressource retenue comprise — reste rendu à l'identique.
+func TestRenderForApplyDiffersFromRenderOnlyByTheImpactLine(t *testing.T) {
+	p := &Plan{ToChange: 2, Changes: []Change{
+		{
+			Resource: "database.tasks", Kind: resources.KindUpdate, Class: ClassDestructive,
+			Details: []resources.Detail{{
+				Op: "-", Target: `option "Basse" (propriété "Prio")`,
+				Class: ClassDestructive, Count: 3, Property: "Prio",
+				Measure: &resources.Measurement{Property: "Prio", PropertyType: "select", Option: "Basse"},
+			}},
+		},
+		{
+			Resource: "database.projects", Kind: resources.KindUpdate, Class: ClassDestructive,
+			Withheld: "une option doit être migrée à la main",
+			Details: []resources.Detail{{
+				Op: "-", Target: `option "Legacy" (propriété "Type")`,
+				Class: ClassDestructive, Count: 4, Property: "Type",
+				Measure: &resources.Measurement{Property: "Type", PropertyType: "select", Option: "Legacy"},
+			}},
+		},
+	}}
+
+	var forPlan, forApply bytes.Buffer
+	if err := Render(&forPlan, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderForApply(&forApply, p); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(forPlan.String(), Impact(p), WritableImpact(p), 1)
+	if forApply.String() != want {
+		t.Errorf("RenderForApply:\n%s\nwant:\n%s", forApply.String(), want)
+	}
+	if !strings.Contains(forApply.String(), "Impact : 3 valeurs perdues.") {
+		t.Errorf("sortie:\n%s\nl'agrégat d'apply doit exclure la ressource retenue", forApply.String())
+	}
+}
+
 // lifecycle ne bloque plus mais doit s'entendre.
 func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 	p := &Plan{ToDestroy: 1, Changes: []Change{{
