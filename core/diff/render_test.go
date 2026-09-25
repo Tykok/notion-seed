@@ -1199,3 +1199,42 @@ func TestImpactCountsDestructiveTypeChangesWithTheirBound(t *testing.T) {
 		}
 	}
 }
+
+// A term the family cannot count — a line with no sound filter, a lower bound
+// of zero — still belongs to it: the total is then a lower bound. Skipping
+// such terms printed "Impact: 2 values lost." as an exact figure next to a
+// status → select whose never-set rows nobody counted.
+func TestImpactTreatsUncountedTermsAsALowerBound(t *testing.T) {
+	property := resources.Detail{Op: "~", Target: `property "Statut"`, Class: ClassDestructive,
+		Count: -1, Unmeasurable: true,
+		Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", TargetType: "select",
+			Count: change.CountUnsound}}
+	removal := resources.Detail{Op: "-", Target: `option "In progress" (property "Statut")`,
+		Class: ClassDestructive, Count: 2,
+		Measure: &resources.Measurement{Property: "Statut", PropertyType: "status",
+			Option: "In progress", Retyped: true, TargetType: "select"}}
+	atLeastZero := resources.Detail{Op: "~", Target: `property "Notes"`, Class: ClassDestructive,
+		Count: 0, Measure: &resources.Measurement{Property: "Notes", PropertyType: "rich_text",
+			TargetType: "people", Bound: change.BoundAtLeast}}
+
+	tests := []struct {
+		details []resources.Detail
+		want    string
+	}{
+		{[]resources.Detail{property, removal, atLeastZero}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{property, removal}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{removal, atLeastZero}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{property}, "Impact: an unmeasured number of values lost."},
+		{[]resources.Detail{atLeastZero}, "Impact: an unmeasured number of values lost."},
+	}
+	for _, tt := range tests {
+		p := &Plan{Changes: []Change{{Resource: "database.tasks", Kind: resources.KindUpdate,
+			Details: tt.details}}}
+		if got := Impact(p); got != tt.want {
+			t.Errorf("Impact = %q, want %q", got, tt.want)
+		}
+		if got := WritableImpact(p); got != tt.want {
+			t.Errorf("WritableImpact = %q, want %q", got, tt.want)
+		}
+	}
+}
