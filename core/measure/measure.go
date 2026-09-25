@@ -182,8 +182,8 @@ func typeChangeFilter(r Request) (map[string]any, error) {
 		if len(r.Except) == 0 {
 			return nil, nil
 		}
-		// An empty row gets a value too: it is counted apart, since whether
-		// `does_not_equal` matches an empty value was not measured.
+		// An empty row gets a value too: it is counted apart, through its own
+		// `is_empty` branch, because exceptFilter excludes empty rows.
 		rest, err := exceptFilter(r, on)
 		if err != nil {
 			return nil, err
