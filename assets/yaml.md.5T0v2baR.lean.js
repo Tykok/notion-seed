@@ -1,0 +1,1 @@
+import{_ as t,o as s,c as a,a2 as n}from"./chunks/framework.yse_Y9k2.js";const k=JSON.parse('{"title":"YAML","description":"","frontmatter":{},"headers":[],"relativePath":"yaml.md","filePath":"yaml.md"}'),i={name:"yaml.md"};function o(d,e,l,r,h,p){return s(),a("div",null,[...e[0]||(e[0]=[n("",37)])])}const y=t(i,[["render",o]]);export{k as __pageData,y as default};
