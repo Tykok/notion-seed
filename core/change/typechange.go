@@ -2,7 +2,10 @@
 
 package change
 
-import "strconv"
+import (
+	"math"
+	"strconv"
+)
 
 // Count names the rows a type change touches, as a filter on the SOURCE
 // column — counting happens before the write.
@@ -81,6 +84,14 @@ const (
 	// trailing spaces, while a conversion keeps only an exact match.
 	caveatCase = "a value that differs from a declared option only by case " +
 		"or trailing spaces is not counted, and does not survive either"
+	// Measured on 2026-09-25: url `does_not_equal` ignores case and trailing
+	// spaces too, but a trailing slash counts.
+	caveatURL = "the filter ignores case and trailing spaces but not a trailing " +
+		"slash, while the conversion keeps only an exact match: a value that " +
+		"differs from a declared option only by case or trailing spaces is not " +
+		"counted, and does not survive either"
+	// Measured on 2026-09-25 up to 123456789012345680, not from 1e21 up.
+	caveatHuge      = "a declared number of magnitude 1e21 or more was never measured"
 	caveatParse     = "some values survive the conversion"
 	caveatUnchecked = "unchecked rows are emptied too, which loses nothing they held"
 	caveatEveryRow  = "every row, empty ones included"
@@ -387,7 +398,7 @@ func countFor(tc *TypeChange, from, to string, declared []string) {
 			tc.Count, tc.Except, tc.Caveat = CountEveryRow, except, caveatEveryRow
 			// is_empty counts blank text: only case can escape the filter.
 			if len(except) > 0 && from != "number" {
-				tc.Bound, tc.Caveat = BoundAtLeast, caveatEveryRow+"; "+caveatCase
+				tc.Bound, tc.Caveat = BoundAtLeast, caveatEveryRow+"; "+textCaveat(from)
 			}
 		default:
 			tc.Count, tc.Caveat = CountEveryRow, caveatEveryRow
@@ -407,7 +418,7 @@ func countFor(tc *TypeChange, from, to string, declared []string) {
 		case "rich_text", "url", "number":
 			tc.Except = except
 			if len(except) > 0 && from != "number" {
-				tc.Bound, tc.Caveat = BoundAtLeast, caveatCase
+				tc.Bound, tc.Caveat = BoundAtLeast, textCaveat(from)
 			}
 		}
 	}
@@ -419,19 +430,42 @@ func countFor(tc *TypeChange, from, to string, declared []string) {
 			tc.Caveat = caveatBlank + "; " + tc.Caveat
 		}
 	}
+	if from == "number" && beyondMeasured(tc.Except) {
+		tc.Bound, tc.Caveat = BoundAtLeast, withReason(tc.Caveat, caveatHuge)
+	}
 	if len(tc.Except) > maxExcept {
 		tc.Count, tc.Except, tc.Caveat = CountUnsound, nil, caveatManyOptions
 	}
 }
 
+// textCaveat says what a `does_not_equal` on the source misses.
+func textCaveat(from string) string {
+	if from == "url" {
+		return caveatURL
+	}
+	return caveatCase
+}
+
+// beyondMeasured says a declared number name has a magnitude the campaign
+// never measured (1e21 or more): whether the API writes it the same way is
+// unknown, so excluding its rows can undercount.
+func beyondMeasured(names []string) bool {
+	for _, n := range names {
+		if v, err := strconv.ParseFloat(n, 64); err == nil && math.Abs(v) >= 1e21 {
+			return true
+		}
+	}
+	return false
+}
+
 // exceptFor keeps the declared names a value of the source type can match.
-// A number converts to its shortest decimal writing ('7', '-3.5', '1000000'),
-// so only a name written that way can hold it. Measured on 2026-09-25: "7"
-// keeps 7, "7.0" keeps nothing, and 7.5 or 70 are emptied under ["7"]. A
-// non-canonical name therefore saves no row and is not excluded: the count
-// stays exact. That exactness assumes FormatFloat's shortest writing is the
-// API's for every number — measured on integers, negatives and short
-// decimals, not on very large or very long ones.
+// Measured on 2026-09-25: a number survives only under the exact decimal
+// writing of its float64 value, without exponent — strconv.FormatFloat(v,
+// 'f', -1, 64). "7" keeps 7, "7.0" keeps nothing, 7.5 and 70 are emptied under
+// ["7"], and 123456789012345678 (stored as 123456789012345680) survives only
+// under "123456789012345680". A name in any other form saves no row and is
+// not excluded: the count stays exact. From 1e21 up nothing was measured, and
+// countFor makes the count a lower bound.
 func exceptFor(from string, declared []string) []string {
 	if from != "number" {
 		return declared

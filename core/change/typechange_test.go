@@ -270,3 +270,30 @@ func TestNumberOptionSavesRowsOnlyUnderItsCanonicalText(t *testing.T) {
 		t.Errorf("TypeChange = %+v, want every non-empty row counted, exactly", tc)
 	}
 }
+
+// Measured on 2026-09-25: a number survives only under its exact 'f' writing
+// ("123456789012345680"), and the numeric filter is exact — but magnitudes
+// from 1e21 up were not measured: a count excluding such a name is only a
+// lower bound.
+func TestNumberCountIsALowerBoundBeyondTheMeasuredMagnitude(t *testing.T) {
+	if tc := TypeChangeOf("number", "select", []string{"123456789012345680"}); tc.Bound != BoundExact ||
+		strings.Join(tc.Except, ",") != "123456789012345680" {
+		t.Errorf("measured magnitude: %+v, want exact", tc)
+	}
+	for _, name := range []string{"1000000000000000000000", "-1000000000000000000000"} {
+		tc := TypeChangeOf("number", "select", []string{"7", name})
+		if tc.Bound != BoundAtLeast || !strings.Contains(tc.Caveat, "1e21") {
+			t.Errorf("%s: %+v, want a lower bound naming the unmeasured magnitude", name, tc)
+		}
+	}
+}
+
+// url: measured on 2026-09-25, the filter ignores case and trailing spaces
+// but not a trailing slash. The caveat says exactly that.
+func TestURLCaveatSaysWhatTheFilterIgnores(t *testing.T) {
+	c := TypeChangeOf("url", "select", []string{"https://a.example"}).Caveat
+	if !strings.Contains(c, "case") || !strings.Contains(c, "trailing spaces") ||
+		!strings.Contains(c, "trailing slash") {
+		t.Errorf("caveat = %q", c)
+	}
+}

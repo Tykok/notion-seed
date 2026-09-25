@@ -79,9 +79,9 @@ le chiffre dit quelle borne il est :
 | `N rows` | `is_not_empty` | tout couple où rien ne survit (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
 | `N rows` | lignes cochées | `checkbox` → `number`, `date`, `people`, et → `select` / `multi_select` sans option `Yes` |
 | `N rows` | lignes vides | `select` → `status` : les lignes vides reçoivent une option |
-| `N rows` | non vides (toutes les lignes vers `status`), sauf les options déclarées écrites comme des nombres | `number` → `select`, `multi_select`, `status` avec options déclarées : seule une option nommée par l'écriture canonique du nombre le garde (`7` garde 7, `7.0` ne garde rien) |
+| `N rows` | non vides (toutes les lignes vers `status`), sauf les options déclarées écrites comme des nombres | `number` → `select`, `multi_select`, `status` avec options déclarées : seule une option nommée par l'écriture décimale exacte du nombre, sans exposant, le garde (`7` garde 7, `7.0` ne garde rien). À partir d'un nombre déclaré de magnitude 1e21, jamais mesuré, le chiffre devient `at least N` |
 | `at least N rows` | `is_not_empty` sur `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people` : un texte fait seulement d'espaces ou de sauts de ligne n'est pas compté, et il est perdu aussi |
-| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : le filtre ignore la casse et les espaces de fin, la conversion non — une telle valeur n'est pas comptée, et ne survit pas non plus |
+| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : le filtre ignore la casse et les espaces de fin (sur `url`, pas une barre oblique finale), la conversion non — une telle valeur n'est pas comptée, et ne survit pas non plus |
 | `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` ou `date`, `multi_select` → `select` : certaines valeurs survivent à la conversion |
 | `up to N rows` | toutes les lignes | `multi_select` → `status` : une ligne qui ne porte qu'une valeur déclarée la garde |
 | inconnu | aucun | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |

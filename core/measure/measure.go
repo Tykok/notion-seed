@@ -146,14 +146,16 @@ var emptiable = map[string]bool{
 // typeChangeFilter builds the count of a type change, per the filters the
 // 2026-09-25 campaign checked against the rows actually touched.
 //
-// Shapes measured on 2026-09-25 ("formes de filtre"): `or[is_empty,
-// and[does_not_equal…]]` is accepted and correct on select, rich_text and
-// multi_select (`does_not_contain`); one more level of nesting is refused
-// with 400, so nothing here goes deeper than or → and. On rich_text,
-// `does_not_equal` ignores case and trailing spaces while a conversion keeps
-// only an EXACT match: a count excluding declared names is a lower bound —
-// change.TypeChangeOf says so. NOT measured: `does_not_equal` on number and
-// url, and `checkbox equals false`.
+// Shapes measured on 2026-09-25 ("formes de filtre", and its sequel):
+// `or[is_empty, and[does_not_equal…]]` is accepted and correct on select,
+// rich_text and multi_select (`does_not_contain`); one more level of nesting
+// is refused with 400, so nothing here goes deeper than or → and. On rich_text
+// and url, `does_not_equal` ignores case and trailing spaces (url: not a
+// trailing slash) while a conversion keeps only an EXACT match: a count
+// excluding declared names is a lower bound — change.TypeChangeOf says so. On
+// number, `does_not_equal` is exact and numeric. On number and url it MATCHES
+// EMPTY ROWS, which is why every exclusion goes with `is_not_empty`.
+// `checkbox equals false` counts exactly the unchecked rows.
 func typeChangeFilter(r Request) (map[string]any, error) {
 	on := func(cond map[string]any) map[string]any {
 		return map[string]any{"property": r.Property, r.PropertyType: cond}

@@ -76,9 +76,9 @@ write. Not every filter is exact, and the figure says which bound it is:
 | `N rows` | `is_not_empty` | every pair where nothing survives (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
 | `N rows` | checked rows | `checkbox` → `number`, `date`, `people`, and → `select` / `multi_select` without an option `Yes` |
 | `N rows` | empty rows | `select` → `status`: the empty rows receive an option |
-| `N rows` | non-empty (every row toward `status`), except the declared options written as numbers | `number` → `select`, `multi_select`, `status` with declared options: only an option named with the number's canonical text keeps it (`7` keeps 7, `7.0` keeps nothing) |
+| `N rows` | non-empty (every row toward `status`), except the declared options written as numbers | `number` → `select`, `multi_select`, `status` with declared options: only an option named with the exact decimal writing of the number, without exponent, keeps it (`7` keeps 7, `7.0` keeps nothing). From a declared number of magnitude 1e21 up, never measured, the figure becomes `at least N` |
 | `at least N rows` | `is_not_empty` on `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people`: text made only of spaces or line breaks is not counted, and is lost too |
-| `at least N rows` | non-empty, except the declared options | `rich_text` / `url` → `select`, `multi_select`, `status` with declared options: the filter ignores case and trailing spaces, the conversion does not — such a value is not counted, and does not survive either |
+| `at least N rows` | non-empty, except the declared options | `rich_text` / `url` → `select`, `multi_select`, `status` with declared options: the filter ignores case and trailing spaces (on `url`, not a trailing slash), the conversion does not — such a value is not counted, and does not survive either |
 | `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` or `date`, `multi_select` → `select`: some values survive the conversion |
 | `up to N rows` | every row | `multi_select` → `status`: a row holding a single declared value keeps it |
 | unknown | none | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
