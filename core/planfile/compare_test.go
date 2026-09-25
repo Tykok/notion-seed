@@ -280,6 +280,21 @@ func TestCompareRefusesAChangedKind(t *testing.T) {
 		"database.tasks: kind changed: update reviewed, destroy now")
 }
 
+// Defensive: diff.Compute emits one Change per resource, so this cannot
+// happen from a computed plan. A plan file is unsigned (§9) and can be
+// hand-edited, though, and two changes naming the same resource would
+// otherwise silently collapse into one in the maps Compare builds — refused
+// explicitly instead, named, whichever side carries it.
+func TestCompareRefusesADuplicateResource(t *testing.T) {
+	saved := reviewed(t, tasksPlan(12))
+	saved.Changes = append(saved.Changes, saved.Changes[0])
+	assertDrift(t, saved, tasksPlan(12), "database.tasks: named twice in the reviewed plan")
+
+	fresh := tasksPlan(12)
+	fresh.Changes = append(fresh.Changes, fresh.Changes[0])
+	assertDrift(t, reviewed(t, tasksPlan(12)), fresh, "database.tasks: named twice in the recomputed plan")
+}
+
 func TestCompareRefusesAnAddedOrAGoneChange(t *testing.T) {
 	more := tasksPlan(12)
 	more.Changes = append(more.Changes, diff.Change{
