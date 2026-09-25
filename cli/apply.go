@@ -344,11 +344,11 @@ func confirm(cmd *cobra.Command, autoApprove bool) (bool, error) {
 		if errors.Is(err, io.EOF) {
 			return false, fmt.Errorf(
 				"confirmation interrompue (fin d'entrée) : rien n'a été appliqué\n"+
-					"  → relancez `notion-seed apply` et tapez %q pour appliquer", confirmWord)
+					"  → relancez la commande et tapez « %s » pour appliquer", confirmWord)
 		}
 		return false, fmt.Errorf(
 			"lecture de la confirmation impossible: %w — rien n'a été appliqué\n"+
-				"  → relancez `notion-seed apply` et tapez %q pour appliquer", err, confirmWord)
+				"  → relancez la commande et tapez « %s » pour appliquer", err, confirmWord)
 	}
 	return strings.TrimSpace(line) == confirmWord, nil
 }
