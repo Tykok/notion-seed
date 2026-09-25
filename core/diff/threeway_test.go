@@ -1560,3 +1560,40 @@ func TestMultiSelectTypeChangeDoesNotCountRemovedRowsTwice(t *testing.T) {
 		t.Errorf("property line Measure = %+v, want the rows holding Basse excluded", m)
 	}
 }
+
+// multi_select → select keeps only the FIRST value (measured on 2026-09-24).
+// A row [B, A], B not redeclared, is counted on B's removal line only — and
+// loses A as well, which no line counts. The removal lines therefore bound the
+// loss from below, and the total must say "at least".
+func TestRetypedMultiSelectRemovalIsALowerBound(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Tags": multiSel(state.Option{ID: "o1", Name: "B"}, state.Option{ID: "o2", Name: "A"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Tags": {Type: "select", Options: []state.Option{{Name: "A"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+	details := res.Changeset.Details
+	for i := range details {
+		d := &details[i]
+		switch {
+		case d.Op == "-":
+			if d.Measure.Bound != change.BoundAtLeast {
+				t.Errorf("%s: Bound = %v, want at least", d.Target, d.Measure.Bound)
+			}
+			// The row [B, A]: one row holds B.
+			d.Count, d.Class = 1, change.ClassDestructive
+		case d.Measure != nil:
+			// The property line excludes rows holding B: none left.
+			d.Count, d.Class = 0, change.ClassSafe
+		}
+	}
+	p := &Plan{Changes: []Change{{Resource: "database.tasks", Kind: resources.KindUpdate, Details: details}}}
+	if got := Impact(p); got != "Impact: at least 1 values lost." {
+		t.Errorf("Impact = %q, want a lower bound", got)
+	}
+}
