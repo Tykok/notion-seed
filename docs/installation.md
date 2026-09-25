@@ -16,7 +16,7 @@ ntn login
 which the output format of `ntn` was measured.
 :::
 
-## Installation
+## Install notion-seed
 
 Published binary — Linux, macOS and Windows, on amd64 and arm64 — from the
 [Releases](https://github.com/tykok/notion-seed/releases) page:
