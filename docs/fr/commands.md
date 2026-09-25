@@ -69,11 +69,8 @@ puisqu'elle ne calcule aucun plan.
 
 ### Ce qui peut être compté, et ce qui ne peut pas
 
-Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
-`select`, `status` et `multi_select`.
-
-Un **retrait d'option** est donc toujours chiffré : les options n'existent que
-sur ces trois types.
+Un **retrait d'option** est toujours chiffré : les options n'existent que sur
+`select`, `status` et `multi_select`, et chacun a son filtre.
 
 Une **destruction** l'est aussi, sans filtre : le compte porte sur toutes les
 lignes du data source de la database — celui que le plan vient de relire —,
@@ -82,26 +79,104 @@ data sources les emporte tous, mais un seul est compté : la ligne et l'agrégat
 disent alors « at least N row(s) », et combien de data sources n'ont pas été
 comptés. Elle reste `destructive` quel que soit ce compte, 0 compris.
 
-Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
-d'eux. Des trois couples dangereux ci-dessous, un seul l'est — et seul
-`multi_select` → `select` fait partie des comportements mesurés sur la
-présentation ([Pourquoi](/fr/#pourquoi)) :
+Un **changement de type** est chiffré avec le filtre que la campagne du
+2026-09-25 a vérifié contre les lignes que chaque couple touche réellement, sur
+la colonne de départ, avant l'écriture. Tous les filtres ne sont pas exacts, et
+le chiffre dit quelle borne il est :
 
-| Couple | Chiffré ? |
-|---|---|
-| `multi_select` → `select` | oui — la colonne de départ est filtrable |
-| `rich_text` → `number` | non |
-| `checkbox` → `number` | non |
+| Chiffre | Filtre | Couples |
+|---|---|---|
+| `N rows` | toutes les lignes | tout type → `status`, quand aucune option ne peut garder une valeur |
+| `N rows` | `is_not_empty` | tout couple où rien ne survit (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
+| `N rows` | lignes cochées | `checkbox` → `number`, `date`, `people`, et → `select` / `multi_select` sans option `Yes` |
+| `N rows` | lignes vides | `select` → `status` : les lignes vides reçoivent une option |
+| `N rows` | non vides (toutes les lignes vers `status`), sauf les options déclarées écrites comme des nombres | `number` → `select`, `multi_select`, `status` avec options déclarées : seule une option nommée par l'écriture décimale exacte du nombre, sans exposant, le garde (`7` garde 7, `7.0` ne garde rien). À partir d'un nombre déclaré de magnitude 1e21, jamais mesuré, le chiffre devient `at least N` |
+| `at least N rows` | `is_not_empty` sur `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people` : un texte fait seulement d'espaces ou de sauts de ligne n'est pas compté, et il est perdu aussi |
+| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : le filtre ignore la casse et les espaces de fin (sur `url`, pas une barre oblique finale), la conversion non — une telle valeur n'est pas comptée, et ne survit pas non plus |
+| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` ou `date`, `multi_select` → `select` : certaines valeurs survivent à la conversion |
+| `up to N rows` | toutes les lignes | `multi_select` → `status` : une ligne qui ne porte qu'une valeur déclarée la garde |
+| inconnu | aucun | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
 
-Dans les deux derniers cas, la ligne ne porte pas de chiffre mais le dit :
+Un minorant nul ne rend jamais un changement `safe` : il se lit « no rows
+counted, which does not mean none is touched ». Un zéro exact ou majorant, si
+— une colonne vide n'a rien à perdre.
+
+Une `checkbox` ne compte que ses lignes cochées : une case décochée passe à
+vide aussi, mais une checkbox n'a pas d'état vide, donc « décochée » ne porte
+rien que « jamais renseignée » ne porte pas. La ligne le dit.
+
+Là où aucun filtre n'est sain, la ligne ne porte pas de chiffre et dit
+pourquoi :
 
 ```
-      ~ property "Notes" — rich_text → number  [silent rewrite]
-          → actual impact unknown: notion-seed cannot count the rows of a rich_text property.
+      ~ property "Notes" — rich_text → number: the leading number is kept ('42 text' → 42, '2026-01-15' → 2026, a false value); everything else is emptied  [silent rewrite]
+          → actual impact unknown: no filter separates the text that survives the conversion from the rest.
 ```
 
-La classe reste celle de la mesure — vous savez que le changement est dangereux,
-vous ne savez pas sur combien de lignes. Et `--fail-on=unknown` les attrape.
+```
+      ~ property "Statut" — status → select: a value survives only where an option with the same name is declared; a row that never received a status is emptied  [destructive]
+          → actual impact unknown: a row that never received a status reads as the default option, is emptied too, and no filter isolates it.
+      + option "Not started" (property "Statut")
+      + option "Done" (property "Statut")
+      - option "In progress" (property "Statut") — not redeclared under this name: the type change re-creates the options  [destructive]
+          → 2 rows will be emptied.
+
+Impact: at least 2 values lost.
+```
+
+Le total dit « at least » : les lignes jamais renseignées sont perdues aussi,
+et personne n'a pu les compter. Depuis `multi_select`, les lignes qui portent
+une option non redéclarée sont comptées une fois, sur leur ligne de retrait, et
+laissées hors de la ligne de propriété.
+
+La classe reste celle de la mesure — vous savez que le changement est
+dangereux, vous ne savez pas toujours sur combien de lignes.
+
+### Changements de type
+
+Les 90 couples ordonnés de types gérés ont été mesurés contre l'API, 7 le
+2026-09-24 et les 83 autres le 2026-09-25. La classe est le coût du corps que
+notion-seed envoie : les options que le YAML déclare, par nom, sans id. La ligne
+du plan dit, pour chaque couple, ce qui survit.
+
+| de \ vers | title | rich_text | number | url | select | status | multi_select | date | checkbox | people |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **title** | | M | M | M | M | M | M | M | M | M |
+| **rich_text** | M | | D | S | D¹ | R | D¹ | D | D | D |
+| **number** | M | S | | S | D | R | D | D | D | D |
+| **url** | M | S | D | | D | R | D | D | D | D |
+| **select** | M | S | D | S | | R² | S² | D | D | D |
+| **status** | M | D | D | D | D² | | D² | D | D | D |
+| **multi_select** | M | S | D | S | R² | R² | | D | D | D |
+| **date** | M | S | D | D | D | R | D | | D | D |
+| **checkbox** | M | S | D | S | D³ | R³ | D³ | D | | D |
+| **people** | M | S | D | D | D | R | D | D | D | |
+
+S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
+
+- **L'API ne crée jamais d'option.** Vers `select`, `multi_select` ou `status`,
+  une valeur ne survit que si une option portant exactement son texte est
+  déclarée dans la même écriture ; depuis `rich_text`, le texte est coupé à la
+  première virgule (`multi_select` : découpé sur les virgules). ¹ Avec options
+  déclarées, ces couples deviennent `silent rewrite`.
+- **Vers `number`**, un texte garde son nombre de tête (`'2026-01-15'` → 2026)
+  et tout le reste passe à vide : mesuré `destructive`, et la ligne nomme les
+  valeurs réécrites.
+- ² Entre types à options, chaque option actuelle que le YAML ne redéclare pas
+  sous le même nom ressort en ligne `-` avec son compte. Vers `status`, ses
+  lignes ne passent pas à vide : elles sont réécrites vers l'une des options
+  déclarées.
+- ³ `checkbox` devient `Yes` / `No` : → `select` / `multi_select` est `safe`
+  avec une option `Yes`, → `status` avec `Yes` et `No`.
+- **Vers `status`, chaque ligne reçoit une valeur**, vides comprises : l'une
+  des options déclarées — un `status` les déclare toujours.
+- **`status` en départ :** une ligne qui n'a jamais reçu de status se lit comme
+  l'option par défaut, et pourtant toute conversion la vide.
+- **`status` → `select` était documenté sans perte jusqu'au 2026-09-25.** C'était
+  faux : re-mesuré, il vide toutes les lignes sans option redéclarée, et vide
+  les lignes jamais renseignées même avec.
+- **`title` :** l'API refuse les deux sens en `400`. notion-seed retient la
+  database — voir [Ce que l'API ne sait pas faire](/fr/#ce-que-l-api-ne-sait-pas-faire).
 
 Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
 appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
@@ -151,9 +226,9 @@ options existantes sont transmises avec leur id, les neuves sans : l'API leur en
 crée un, que la relecture rapporte au state. Sous un changement de type, les
 options sont recréées : seules celles du YAML partent, sans id, et chaque option
 actuelle que le YAML ne redéclare pas sous le même nom ressort en `-`, avec le
-nombre de lignes qu'elle vide. Seul `select` → `multi_select` a été mesuré ; les
-autres couples entre `select`, `multi_select` et `status` suivent la même règle,
-sans l'avoir été.
+nombre de lignes qu'elle vide — ou, vers `status`, qu'elle réécrit vers l'une
+des options déclarées. Mesuré le 2026-09-25 pour tous les couples entre
+`select`, `multi_select` et `status`.
 
 L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
 sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins
@@ -189,8 +264,9 @@ qui écrit, et que la confirmation annonce sur sa propre ligne.
 ### Ce qu'il retient
 
 ::: warning Une limite de l'API, pas un jugement
-Renommer une option ou changer sa couleur est le seul changement déclaré que
-notion-seed refuse d'écrire : l'API ne sait pas l'exprimer.
+Renommer une option, changer sa couleur, ou changer le type d'une propriété
+`title` sont les seuls changements déclarés que notion-seed refuse d'écrire :
+l'API ne sait pas les exprimer.
 :::
 
 Ce que l'API ne sait pas exprimer ressort sous `Withheld — migration required` : ce
@@ -222,8 +298,19 @@ Withheld — migration required
       → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
 ```
 
-C'est le seul changement déclaré que notion-seed refuse d'écrire — et ce n'est
-pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
+Un changement de type d'un `title` est retenu de la même façon, avec sa propre
+procédure :
+
+```
+Withheld — migration required
+
+  ~ database.tasks
+      the API refuses to change the type of a title property, in either direction
+      → add a new property of the wanted type, copy the values into it in Notion, then remove the type change from the YAML and rerun
+```
+
+Ce sont les seuls changements déclarés que notion-seed refuse d'écrire — et ce
+n'est pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
 inscrirait dans le state un état que Notion ne porte pas, et chaque run suivant
 afficherait une dérive fantôme.
 
@@ -365,9 +452,9 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 
 | Valeur | Ce qu'elle attrape |
 |---|---|
-| `destructive` | une donnée est perdue, sans qu'aucune fausse valeur soit écrite |
+| `destructive` | une donnée est perdue : des valeurs passent à vide. Vers `number`, certains textes ne gardent en plus que leur nombre de tête — la ligne le dit |
 | `silent-rewrite` | une donnée est remplacée par une autre, sans trace |
-| `unknown` | l'impact n'a pas pu être mesuré : type hors table, comptage en échec, ou hors ligne |
+| `unknown` | l'impact n'a pas pu être mesuré : comptage en échec, ou hors ligne |
 | `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |
 
 Cinq choses à savoir :
@@ -392,9 +479,11 @@ Cinq choses à savoir :
   donc un `--fail-on=destructive,silent-rewrite` ne l'attrape plus et sort en
   `0`. Ajoutez `unknown` à votre liste si vous voulez que le garde-fou tienne
   même quand l'API refuse de compter — sans quoi une CI se croit protégée
-  précisément le jour où elle ne l'est pas. Seule exception : une destruction
+  précisément le jour où elle ne l'est pas. Deux exceptions : une destruction
   dont le comptage de lignes échoue reste `destructive`, puisque la database
-  part à la corbeille quel qu'en soit le compte.
+  part à la corbeille quel qu'en soit le compte ; et un changement de type garde
+  sa classe mesurée, puisque sa nature est connue — seule son ampleur ne l'est
+  pas.
 
 `--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
 Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne
