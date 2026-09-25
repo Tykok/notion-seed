@@ -248,3 +248,27 @@ func TestImportRefusesFailOn(t *testing.T) {
 		t.Errorf("the message must carry a corrective action: %v", err)
 	}
 }
+
+// import loads the config too: a deprecated lifecycle key warns there as well.
+func TestImportWarnsOnDeprecatedLifecycleKeys(t *testing.T) {
+	withFakeNtn(t, "authenticated_database")
+	dir := writeImportFixture(t)
+	ws := filepath.Join(dir, "workspace.yaml")
+	raw, err := os.ReadFile(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ws, append(raw, []byte("lifecycle:\n  allow_data_loss: [database.tasks]\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCmd(t, "import", "database.tasks",
+		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
+	if err != nil {
+		t.Fatalf("import error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "warning: "+ws+": `lifecycle.allow_data_loss` is deprecated") ||
+		!strings.Contains(out, "  → rename `allow_data_loss` to `acknowledge_data_loss` in "+ws) {
+		t.Errorf("output:\n%s\nwant the deprecation warning", out)
+	}
+}

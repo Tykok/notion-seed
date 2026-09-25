@@ -32,8 +32,8 @@ version: 1
 workspace:
   parent_page_id: "44444444-4444-4444-8444-444444444444"
 lifecycle:
-  prevent_destroy: [projects]
-  allow_data_loss: []
+  acknowledge_destroy: [projects]
+  acknowledge_data_loss: []
 `
 
 func TestLoadMergesMultipleFiles(t *testing.T) {
@@ -69,9 +69,13 @@ databases:
 	}
 	// lifecycle comes from workspace.yaml like the rest of the global config.
 	// Without this assertion, removing the lifecycle merge would break no
-	// test, even though prevent_destroy is a safety safeguard.
-	if len(cfg.Lifecycle.PreventDestroy) != 1 || cfg.Lifecycle.PreventDestroy[0] != "projects" {
-		t.Errorf("Lifecycle.PreventDestroy = %v, want [projects]", cfg.Lifecycle.PreventDestroy)
+	// test, even though acknowledge_destroy is what the plan annotates.
+	if len(cfg.Lifecycle.AcknowledgeDestroy) != 1 || cfg.Lifecycle.AcknowledgeDestroy[0] != "projects" {
+		t.Errorf("Lifecycle.AcknowledgeDestroy = %v, want [projects]", cfg.Lifecycle.AcknowledgeDestroy)
+	}
+	// The current names warn about nothing.
+	if len(cfg.Warnings) != 0 {
+		t.Errorf("Warnings = %q, want none with the current key names", cfg.Warnings)
 	}
 	// Deterministic order: by sorted key. There is no graph in MVP 0, but the
 	// plan output must be stable between two runs.
@@ -530,5 +534,122 @@ func TestLoadReportsNonMappingRootInProjectVoice(t *testing.T) {
 	// errors of this file — but it must not be the ONLY message.
 	if !strings.Contains(msg, "cannot unmarshal") {
 		t.Errorf("message = %q, it must keep the decoder's raw text as the cause", msg)
+	}
+}
+
+// The keys before the rename are still read for one version: nobody breaks at
+// once. Each one warns, naming the file, the old key and the new one, with the
+// action on a line of its own.
+func TestLoadReadsDeprecatedLifecycleKeysWithAWarning(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": `
+version: 1
+workspace:
+  parent_page_id: "44444444-4444-4444-8444-444444444444"
+lifecycle:
+  prevent_destroy: [database.projects]
+  allow_data_loss: [database.tasks]
+`,
+	})
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	ws := filepath.Join(dir, WorkspaceFile)
+	if got := cfg.Lifecycle.Acknowledged("database.projects"); len(got) != 1 || got[0] != "prevent_destroy" {
+		t.Errorf("Acknowledged(projects) = %v, want [prevent_destroy]", got)
+	}
+	if got := cfg.Lifecycle.Acknowledged("database.tasks"); len(got) != 1 || got[0] != "allow_data_loss" {
+		t.Errorf("Acknowledged(tasks) = %v, want [allow_data_loss]", got)
+	}
+	want := []string{
+		ws + ": `lifecycle.prevent_destroy` is deprecated, it is now " +
+			"`lifecycle.acknowledge_destroy` — the old name is still read in this version only\n" +
+			"  → rename `prevent_destroy` to `acknowledge_destroy` in " + ws,
+		ws + ": `lifecycle.allow_data_loss` is deprecated, it is now " +
+			"`lifecycle.acknowledge_data_loss` — the old name is still read in this version only\n" +
+			"  → rename `allow_data_loss` to `acknowledge_data_loss` in " + ws,
+	}
+	if len(cfg.Warnings) != len(want) {
+		t.Fatalf("Warnings = %q, want %q", cfg.Warnings, want)
+	}
+	for i := range want {
+		if cfg.Warnings[i] != want[i] {
+			t.Errorf("Warnings[%d] =\n%s\nwant\n%s", i, cfg.Warnings[i], want[i])
+		}
+	}
+}
+
+// An empty old key still warns: its presence is what must be renamed, the
+// content does not matter.
+func TestLoadWarnsOnAnEmptyDeprecatedLifecycleKey(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": "version: 1\nworkspace:\n  parent_page_id: \"44444444-4444-4444-8444-444444444444\"\n" +
+			"lifecycle:\n  prevent_destroy: []\n",
+	})
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "rename `prevent_destroy`") {
+		t.Errorf("Warnings = %q, want one rename warning", cfg.Warnings)
+	}
+}
+
+// Old and new name side by side, mid-migration: the entries are merged, never
+// refused — notion-seed refuses nothing on lifecycle any more, and failing a
+// CI over a half-done rename would break exactly what the deprecation window
+// exists to spare. The advice changes: a bare rename would give a duplicate
+// YAML key, so the warning says to move the entries.
+func TestLoadMergesOldAndNewLifecycleKeysWithAWarning(t *testing.T) {
+	dir := writeConfig(t, map[string]string{
+		"workspace.yaml": `
+version: 1
+workspace:
+  parent_page_id: "44444444-4444-4444-8444-444444444444"
+lifecycle:
+  acknowledge_destroy: [database.projects, database.both]
+  prevent_destroy: [database.tasks, database.both]
+`,
+	})
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	ws := filepath.Join(dir, WorkspaceFile)
+	for resource, want := range map[string]string{
+		"database.projects": "acknowledge_destroy",
+		"database.tasks":    "prevent_destroy",
+		// Listed under both: named once, by the current name.
+		"database.both": "acknowledge_destroy",
+	} {
+		if got := cfg.Lifecycle.Acknowledged(resource); len(got) != 1 || got[0] != want {
+			t.Errorf("Acknowledged(%s) = %v, want [%s]", resource, got, want)
+		}
+	}
+	want := ws + ": `lifecycle.prevent_destroy` and `lifecycle.acknowledge_destroy` are both " +
+		"set, their entries are merged — the old name is still read in this version only\n" +
+		"  → move the entries of `prevent_destroy` into `acknowledge_destroy` in " + ws +
+		", then delete `prevent_destroy`"
+	if len(cfg.Warnings) != 1 || cfg.Warnings[0] != want {
+		t.Errorf("Warnings = %q, want [%q]", cfg.Warnings, want)
+	}
+}
+
+// The order of the acknowledgements is part of the rendering's contract:
+// destruction first, then data loss.
+func TestLifecycleAcknowledgedOrder(t *testing.T) {
+	l := Lifecycle{
+		AcknowledgeDataLoss: []string{"database.tasks"},
+		AcknowledgeDestroy:  []string{"database.tasks"},
+	}
+	got := l.Acknowledged("database.tasks")
+	if len(got) != 2 || got[0] != "acknowledge_destroy" || got[1] != "acknowledge_data_loss" {
+		t.Errorf("Acknowledged = %v, want [acknowledge_destroy acknowledge_data_loss]", got)
+	}
+	if got := l.Acknowledged("database.other"); len(got) != 0 {
+		t.Errorf("Acknowledged(other) = %v, want none", got)
 	}
 }

@@ -141,6 +141,7 @@ func Load(dir string) (*Config, error) {
 		}
 		if doc.Lifecycle != nil {
 			cfg.Lifecycle = *doc.Lifecycle
+			cfg.Warnings = append(cfg.Warnings, deprecatedLifecycleWarnings(path, top)...)
 		}
 		for _, db := range doc.Databases {
 			db.SourceFile = path
@@ -237,6 +238,46 @@ func globalSectionsHint(found []string) string {
 			WorkspaceFile))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// renamedLifecycleKeys pairs each deprecated lifecycle key with its current
+// name, in the order the warnings come out.
+var renamedLifecycleKeys = []struct{ old, current string }{
+	{KeyPreventDestroy, KeyAcknowledgeDestroy},
+	{KeyAllowDataLoss, KeyAcknowledgeDataLoss},
+}
+
+// deprecatedLifecycleWarnings warns about each lifecycle key still written
+// under its name from before the rename. Presence is read on the loose shape:
+// an empty `prevent_destroy: []` must be renamed just the same.
+//
+// Old and new name side by side are MERGED, not refused: lifecycle blocks
+// nothing any more, and failing a command over a half-done rename would break
+// exactly what the deprecation window exists to spare. The advice changes
+// there: renaming the old key would give a duplicate YAML key, which the
+// parser rejects, so the warning says to move its entries.
+func deprecatedLifecycleWarnings(path string, top map[string]any) []string {
+	section, _ := top["lifecycle"].(map[string]any)
+	var out []string
+	for _, k := range renamedLifecycleKeys {
+		if _, ok := section[k.old]; !ok {
+			continue
+		}
+		if _, both := section[k.current]; both {
+			out = append(out, fmt.Sprintf(
+				"%s: `lifecycle.%s` and `lifecycle.%s` are both set, their entries are "+
+					"merged — the old name is still read in this version only\n"+
+					"  → move the entries of `%s` into `%s` in %s, then delete `%s`",
+				path, k.old, k.current, k.old, k.current, path, k.old))
+			continue
+		}
+		out = append(out, fmt.Sprintf(
+			"%s: `lifecycle.%s` is deprecated, it is now `lifecycle.%s` — the old "+
+				"name is still read in this version only\n"+
+				"  → rename `%s` to `%s` in %s",
+			path, k.old, k.current, k.old, k.current, path))
+	}
+	return out
 }
 
 // isNonMappingRoot recognizes the specific YAML decoding failure where the
