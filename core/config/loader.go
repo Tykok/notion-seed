@@ -38,7 +38,7 @@ func (e *DuplicateKeyError) Error() string {
 
 // globalSections are the sections only workspace.yaml may hold. Two of them
 // decide something sensitive: `workspace` picks the write target, `lifecycle`
-// holds the destruction safeguard.
+// holds the acknowledgements the plan shows.
 var globalSections = []string{"version", "workspace", "lifecycle"}
 
 // document is the shape of an individual config file. Every field is
@@ -110,7 +110,7 @@ func Load(dir string) (*Config, error) {
 		// A file of databases/ holds ONLY databases. Demonstrated:
 		// `databases/z.yaml` declaring `workspace.parent_page_id` hijacked the
 		// write target without a warning, and a `lifecycle: {}` there erased
-		// prevent_destroy. With workspace.yaml processed first, any file of
+		// the acknowledgements. With workspace.yaml processed first, any file of
 		// databases/ won.
 		if path != wsPath {
 			if err := rejectGlobalSections(path, top); err != nil {
@@ -229,8 +229,8 @@ func globalSectionsHint(found []string) string {
 		parts = append(parts, fmt.Sprintf(
 			"move %s to %s, the only file that holds the global configuration — "+
 				"otherwise `workspace.parent_page_id` there hijacks the write target and "+
-				"`lifecycle` there erases the prevent_destroy safeguard",
-			quotedList(move), WorkspaceFile))
+				"`lifecycle` there silently replaces the acknowledgements of %s",
+			quotedList(move), WorkspaceFile, WorkspaceFile))
 	}
 	if removeVersion {
 		parts = append(parts, fmt.Sprintf(
