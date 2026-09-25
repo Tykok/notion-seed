@@ -1384,7 +1384,10 @@ func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 			if err == nil {
 				t.Fatal("Run() error = nil, want l'échec de la corbeille")
 			}
-			wants := append([]string{"database.tasks", "entrée de state est gardée", "  → "}, tc.want...)
+			// Le rappel de ce qui est acquis suit un point-virgule : après un
+			// point, il commencerait par une minuscule.
+			wants := append([]string{"database.tasks", "entrée de state est gardée", "  → ",
+				" ; aucune écriture n'avait abouti avant celle-ci"}, tc.want...)
 			for _, want := range wants {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
