@@ -507,10 +507,9 @@ avec l'intégration.
 Quand c'est la page de `workspace.parent_page_id` elle-même qui est à la
 corbeille, `plan` et `apply` s'arrêtent dès la vérification de départ, avant
 tout plan et donc avant toute écriture : restaurez-la, ou faites pointer
-`parent_page_id` vers une page vivante. Seule la page parente est lue : si
-c'est un de ses propres ancêtres qui est à la corbeille, rien ne garantit
-qu'elle le signale, et ce cas n'est pas détecté d'avance. `--skip-preflight`
-saute cette vérification comme les autres.
+`parent_page_id` vers une page vivante. C'est vrai aussi quand c'est une page
+au-dessus d'elle qui est à la corbeille : Notion le signale sur la page
+parente. `--skip-preflight` saute cette vérification comme les autres.
 
 Une mise à la corbeille qui échoue — refus de l'API, `404`, issue inconnue —
 laisse l'entrée de state **en place** : `apply` s'arrête et renvoie à
