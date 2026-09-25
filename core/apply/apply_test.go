@@ -25,12 +25,12 @@ func (f creatorFunc) Create(ctx context.Context, body []byte) (resources.Created
 	return f(ctx, body)
 }
 
-// refuseToCreate sert aux tests où aucune création ne doit être tentée.
+// refuseToCreate serves the tests where no creation must be attempted.
 func refuseToCreate(t *testing.T) creatorFunc {
 	t.Helper()
 	return func(context.Context, []byte) (resources.CreatedDatabase, error) {
-		t.Error("aucune création ne devait être tentée")
-		return resources.CreatedDatabase{}, errors.New("création interdite dans ce test")
+		t.Error("no creation was to be attempted")
+		return resources.CreatedDatabase{}, errors.New("creation forbidden in this test")
 	}
 }
 
@@ -70,9 +70,9 @@ func emptySnapshot() *state.Snapshot {
 	return &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{}}
 }
 
-// Le state doit être écrit APRÈS CHAQUE création, pas une fois à la fin : un
-// arrêt en cours de route laisse alors un state exactement vrai, et aucune
-// database créée sans ancre.
+// The state must be written AFTER EACH creation, not once at the end: a stop
+// midway then leaves an exactly true state, and no database created without an
+// anchor.
 func TestRunSavesStateAfterEachCreation(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{
@@ -84,7 +84,7 @@ func TestRunSavesStateAfterEachCreation(t *testing.T) {
 	n := 0
 	creator := creatorFunc(func(context.Context, []byte) (resources.CreatedDatabase, error) {
 		if n == 1 {
-			// Au moment du DEUXIÈME appel, la première doit déjà être sur disque.
+			// At the SECOND call, the first one must already be on disk.
 			loaded, err := state.Load(dir)
 			if err != nil {
 				t.Fatal(err)
@@ -105,18 +105,18 @@ func TestRunSavesStateAfterEachCreation(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if !savedBeforeSecond {
-		t.Error("le state n'était pas sur disque avant la deuxième création")
+		t.Error("the state was not on disk before the second creation")
 	}
 	if len(rep.Created) != 2 {
-		t.Errorf("Created = %v, want 2 entrées", rep.Created)
+		t.Errorf("Created = %v, want 2 entries", rep.Created)
 	}
 	if !rep.Converged() {
-		t.Errorf("Converged() = false, want true : %+v", rep)
+		t.Errorf("Converged() = false, want true: %+v", rep)
 	}
 }
 
-// Un échec au deuxième POST laisse la première création dans le state, et le
-// message doit nommer les deux — ce qui est acquis, et ce qui ne l'est pas.
+// A failure on the second POST leaves the first creation in the state, and the
+// message must name both — what is done, and what is not.
 func TestRunKeepsFirstCreationWhenSecondFails(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{
@@ -139,11 +139,11 @@ func TestRunKeepsFirstCreationWhenSecondFails(t *testing.T) {
 		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want l'échec de la deuxième création")
+		t.Fatal("Run() error = nil, want the failure of the second creation")
 	}
 	for _, want := range []string{"database.tasks", "database.projects", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 	loaded, lerr := state.Load(dir)
@@ -151,15 +151,15 @@ func TestRunKeepsFirstCreationWhenSecondFails(t *testing.T) {
 		t.Fatal(lerr)
 	}
 	if _, ok := loaded.Databases["projects"]; !ok {
-		t.Error("database.projects doit rester dans le state : elle existe vraiment")
+		t.Error("database.projects must stay in the state: it really exists")
 	}
 	if _, ok := loaded.Databases["tasks"]; ok {
-		t.Error("database.tasks ne doit pas être dans le state : elle n'a pas été créée")
+		t.Error("database.tasks must not be in the state: it was not created")
 	}
 }
 
-// Une issue inconnue arrête net : on ne sait pas si la mutation a été
-// appliquée, donc enchaîner travaillerait sur un workspace indéterminé.
+// An unknown outcome is a hard stop: we don't know whether the mutation was
+// applied, so chaining would work on an undetermined workspace.
 func TestRunStopsOnUnknownOutcomeAndPointsToImport(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{
@@ -177,19 +177,19 @@ func TestRunStopsOnUnknownOutcomeAndPointsToImport(t *testing.T) {
 		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want l'issue inconnue")
+		t.Fatal("Run() error = nil, want the unknown outcome")
 	}
 	if calls != 1 {
-		t.Errorf("appels = %d, want 1 : on n'enchaîne pas après une issue inconnue", calls)
+		t.Errorf("calls = %d, want 1: nothing is chained after an unknown outcome", calls)
 	}
 	for _, want := range []string{"database.projects", "Projects", "import", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// L'identité survit à une relecture ratée : la perdre coûterait un doublon.
+// The identity survives a failed read-back: losing it would cost a duplicate.
 func TestRunKeepsIdentityWhenReadBackFails(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{createChange("projects", "Projects")}}
@@ -204,49 +204,49 @@ func TestRunKeepsIdentityWhenReadBackFails(t *testing.T) {
 		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want le signalement de la relecture ratée")
+		t.Fatal("Run() error = nil, want the failed read-back reported")
 	}
 	if !strings.Contains(err.Error(), "import") {
-		t.Errorf("message = %q, il doit indiquer la resynchronisation par import", err.Error())
+		t.Errorf("message = %q, it must point to resyncing by import", err.Error())
 	}
 	loaded, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if got := loaded.Databases["projects"]; got.ID != "db-1" || got.DataSourceID != "ds-1" {
-		t.Errorf("state = %+v, want l'identité db-1/ds-1 conservée", got)
+		t.Errorf("state = %+v, want the db-1/ds-1 identity kept", got)
 	}
 }
 
-// Un plan bloqué ne doit JAMAIS être écrit, et la garde doit vivre dans le
-// paquet qui écrit — pas seulement dans la commande. Un plan peut être bloqué
-// par une autre ressource que celles qu'il s'apprête à créer : sans cette
-// garde, un second appelant écrirait les créations d'un plan refusé.
+// A blocked plan must NEVER be written, and the guard must live in the package
+// that writes — not only in the command. A plan can be blocked by another
+// resource than the ones it is about to create: without this guard, a second
+// caller would write the creations of a rejected plan.
 func TestRunRefusesABlockedPlan(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{
 		Changes:        []diff.Change{createChange("projects", "Projects")},
 		Blocked:        true,
-		BlockedReasons: []string{"database.tasks : réécriture silencieuse"},
+		BlockedReasons: []string{"database.tasks: silent rewrite"},
 	}
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{
 		Dir: dir, ParentPageID: testParentPageID, Creator: refuseToCreate(t),
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want le refus d'un plan bloqué")
+		t.Fatal("Run() error = nil, want a blocked plan rejected")
 	}
 	if !strings.Contains(err.Error(), "  → ") {
-		t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+		t.Errorf("message = %q, it must carry a corrective action", err.Error())
 	}
 	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit malgré un plan bloqué")
+		t.Error("a state was written despite a blocked plan")
 	}
 }
 
-// Le message d'issue inconnue doit nommer la page parente : l'utilisateur va y
-// aller vérifier, au moment précis où son workspace est indéterminé. Aller
-// rechercher l'id dans workspace.yaml est un travail que la commande peut faire.
+// The unknown-outcome message must name the parent page: the user will go and
+// check there, at the precise moment their workspace is undetermined. Looking
+// the id up in workspace.yaml is work the command can do.
 func TestRunUnknownOutcomeNamesTheParentPage(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{createChange("projects", "Projects")}}
@@ -259,16 +259,16 @@ func TestRunUnknownOutcomeNamesTheParentPage(t *testing.T) {
 		Dir: dir, ParentPageID: testParentPageID, Creator: creator,
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want l'issue inconnue")
+		t.Fatal("Run() error = nil, want the unknown outcome")
 	}
 	if !strings.Contains(err.Error(), testParentPageID) {
-		t.Errorf("message = %q, il doit nommer la page parente %s", err.Error(), testParentPageID)
+		t.Errorf("message = %q, it must name the parent page %s", err.Error(), testParentPageID)
 	}
 }
 
-// Une option que l'API a écrite EN TROP doit se lire comme telle. Réutiliser la
-// note du plan telle quelle donnait « l'API n'a pas écrit - option "Fait" —
-// absente du YAML », qui décrit l'inverse de ce qui s'est passé.
+// An option the API wrote IN EXCESS must read as such. Reusing the plan's note
+// as is gave "the API did not write - option "Fait" — absent from the YAML",
+// which describes the opposite of what happened.
 func TestRunReportsExtraOptionAsWrittenInExcess(t *testing.T) {
 	dir := t.TempDir()
 	target := &state.Database{
@@ -284,7 +284,7 @@ func TestRunReportsExtraOptionAsWrittenInExcess(t *testing.T) {
 		Kind: resources.KindCreate, Target: target,
 	}}}
 
-	// L'API rend une option de plus que ce qui était annoncé.
+	// The API returns one more option than what was announced.
 	creator := creatorFunc(func(context.Context, []byte) (resources.CreatedDatabase, error) {
 		return resources.CreatedDatabase{
 			ID: "db-1", DataSourceID: "ds-1",
@@ -308,19 +308,19 @@ func TestRunReportsExtraOptionAsWrittenInExcess(t *testing.T) {
 	}
 	joined := strings.Join(rep.Mismatches, "\n")
 	if !strings.Contains(joined, "Fait") {
-		t.Fatalf("Mismatches = %v, il doit nommer l'option en trop", rep.Mismatches)
+		t.Fatalf("Mismatches = %v, it must name the extra option", rep.Mismatches)
 	}
-	if strings.Contains(joined, "n'a pas écrit") {
-		t.Errorf("écart = %q : une option écrite en trop ne peut pas se lire "+
-			"« l'API n'a pas écrit »", joined)
+	if strings.Contains(joined, "did not write") {
+		t.Errorf("mismatch = %q: an option written in excess cannot read "+
+			"\"the API did not write\"", joined)
 	}
-	if !strings.Contains(joined, "en trop") {
-		t.Errorf("écart = %q, il doit dire que l'option est en trop", joined)
+	if !strings.Contains(joined, "in excess") {
+		t.Errorf("mismatch = %q, it must say the option is in excess", joined)
 	}
 }
 
-// Une entrée de state obsolète est retirée : ça n'écrit rien dans Notion et ça
-// fait converger le plan.
+// A stale state entry is removed: it writes nothing to Notion and makes the
+// plan converge.
 func TestRunCleansStaleStateEntries(t *testing.T) {
 	dir := t.TempDir()
 	snap := &state.Snapshot{
@@ -336,22 +336,22 @@ func TestRunCleansStaleStateEntries(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(rep.Cleaned) != 1 {
-		t.Errorf("Cleaned = %v, want 1 entrée", rep.Cleaned)
+		t.Errorf("Cleaned = %v, want 1 entry", rep.Cleaned)
 	}
 	loaded, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if _, ok := loaded.Databases["tasks"]; ok {
-		t.Error("l'entrée obsolète n'a pas été retirée")
+		t.Error("the stale entry was not removed")
 	}
 }
 
-// Review Focus #3 : Withheld vide EST l'autorisation d'écrire. Une modification
-// autorisée sans cible est un défaut interne : la sauter ferait converger un
-// apply qui n'a pas écrit ce que le plan montrait, et s'arrêter sur elle
-// laisserait écrite la création qui la précède. Le plan entier est refusé, avant
-// le premier appel.
+// Review Focus #3: an empty Withheld IS the permission to write. An allowed
+// update without a target is a notion-seed bug: skipping it would make an
+// apply converge that did not write what the plan showed, and stopping on it
+// would leave written the creation before it. The whole plan is rejected,
+// before the first call.
 func TestRunRefusesAnAuthorizedChangeWithoutTargetBeforeAnyWrite(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{
@@ -363,20 +363,20 @@ func TestRunRefusesAnAuthorizedChangeWithoutTargetBeforeAnyWrite(t *testing.T) {
 		Dir: dir, ParentPageID: testParentPageID, Creator: refuseToCreate(t),
 	})
 	if err == nil {
-		t.Fatal("Run() error = nil, want le refus d'un changement autorisé sans cible")
+		t.Fatal("Run() error = nil, want an allowed change without a target rejected")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "rien n'a été appliqué", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "nothing was applied", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit alors que le plan est refusé")
+		t.Error("a state was written while the plan is rejected")
 	}
 }
 
-// Une destruction n'a pas de cible : son identité vient du state. Sans id, le
-// PATCH viserait "/v1/databases/", qui ne désigne rien.
+// A destruction has no target: its identity comes from the state. Without an
+// id, the PATCH would target "/v1/databases/", which points at nothing.
 func TestCheckRefusesADestroyWithoutAnIdentityInTheState(t *testing.T) {
 	p := &diff.Plan{Changes: []diff.Change{
 		{Resource: "database.tasks", Key: "tasks", Kind: resources.KindDestroy},
@@ -386,33 +386,33 @@ func TestCheckRefusesADestroyWithoutAnIdentityInTheState(t *testing.T) {
 
 	err := Check(p, snap)
 	if err == nil {
-		t.Fatal("Check() error = nil, want un refus")
+		t.Fatal("Check() error = nil, want a rejection")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 
 	snap.Databases["tasks"] = state.Database{ID: "db-1", Name: "Tasks"}
 	if err := Check(p, snap); err != nil {
-		t.Errorf("Check() error = %v, want nil : l'identité est dans le state", err)
+		t.Errorf("Check() error = %v, want nil: the identity is in the state", err)
 	}
 }
 
-// Une ressource retenue n'a pas de cible, et c'est voulu : Check la laisse
-// passer, Run la nommera sans l'écrire.
+// A withheld resource has no target, and on purpose: Check lets it through,
+// Run will name it without writing it.
 func TestCheckLetsAWithheldChangeThrough(t *testing.T) {
 	c := updateChange("tasks", nil, prioDetail)
-	c.Withheld = "une option doit être migrée à la main"
+	c.Withheld = "an option must be migrated by hand"
 	if err := Check(&diff.Plan{Changes: []diff.Change{c}}, emptySnapshot()); err != nil {
 		t.Errorf("Check() error = %v, want nil", err)
 	}
 }
 
-// L'API n'a pas écrit ce qui était annoncé : la création reste acquise, le
-// state reste vrai, mais l'écart est rapporté. C'est la thèse du produit
-// appliquée à notre propre écriture.
+// The API did not write what was announced: the creation stays done, the
+// state stays true, but the mismatch is reported. It is the product's thesis
+// applied to notion-seed's own write.
 func TestRunReportsMismatchBetweenTargetAndReality(t *testing.T) {
 	dir := t.TempDir()
 	target := &state.Database{
@@ -427,7 +427,7 @@ func TestRunReportsMismatchBetweenTargetAndReality(t *testing.T) {
 		Kind: resources.KindCreate, Target: target,
 	}}}
 
-	// L'API rend une database SANS la propriété Budget.
+	// The API returns a database WITHOUT the Budget property.
 	creator := creatorFunc(func(context.Context, []byte) (resources.CreatedDatabase, error) {
 		return createdFrom("db-1", "Projects"), nil
 	})
@@ -439,19 +439,19 @@ func TestRunReportsMismatchBetweenTargetAndReality(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(rep.Created) != 1 {
-		t.Errorf("Created = %v, want la création acquise", rep.Created)
+		t.Errorf("Created = %v, want the creation done", rep.Created)
 	}
 	joined := strings.Join(rep.Mismatches, "\n")
 	if !strings.Contains(joined, "Budget") {
-		t.Errorf("Mismatches = %v, il doit nommer Budget", rep.Mismatches)
+		t.Errorf("Mismatches = %v, it must name Budget", rep.Mismatches)
 	}
 	if rep.Converged() {
-		t.Error("Converged() = true malgré un écart entre la cible et le réel")
+		t.Error("Converged() = true despite a mismatch between the target and the actual state")
 	}
 }
 
-// Une création conforme ne doit produire AUCUN écart : sans ce test, un
-// comparateur trop bavard ferait échouer tous les apply réussis.
+// A matching creation must produce NO mismatch: without this test, an overly
+// chatty comparator would fail every successful apply.
 func TestRunReportsNoMismatchWhenAPIWroteWhatWasAnnounced(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{createChange("projects", "Projects")}}
@@ -467,12 +467,13 @@ func TestRunReportsNoMismatchWhenAPIWroteWhatWasAnnounced(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(rep.Mismatches) != 0 {
-		t.Errorf("Mismatches = %v, want vide", rep.Mismatches)
+		t.Errorf("Mismatches = %v, want empty", rep.Mismatches)
 	}
 }
 
-// Le payload part de la CIBLE, pas de la configuration : c'est l'invariant que
-// tout le reste protège. On le vérifie sur ce que le créateur reçoit vraiment.
+// The payload comes from the TARGET, not from the configuration: it is the
+// invariant everything else protects. It is checked on what the creator really
+// receives.
 func TestRunSendsThePayloadBuiltFromTheTarget(t *testing.T) {
 	dir := t.TempDir()
 	target := &state.Database{
@@ -499,23 +500,24 @@ func TestRunSendsThePayloadBuiltFromTheTarget(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	// Le group déclaré part tel quel, et surtout : aucun "To-do" substitué.
+	// The declared group goes out as is, and above all: no "To-do" substituted.
 	if !strings.Contains(sent, `"group":"In progress"`) {
-		t.Errorf("payload = %s, il doit porter le group déclaré", sent)
+		t.Errorf("payload = %s, it must carry the declared group", sent)
 	}
 	if strings.Contains(sent, `"To-do"`) {
-		t.Errorf("payload = %s, aucun groupe ne doit être substitué", sent)
+		t.Errorf("payload = %s, no group must be substituted", sent)
 	}
 	if !strings.Contains(sent, testParentPageID) {
-		t.Errorf("payload = %s, il doit viser la page parente", sent)
+		t.Errorf("payload = %s, it must target the parent page", sent)
 	}
 }
 
-// fakeUpdater enregistre ce qu'on lui demande d'écrire.
+// fakeUpdater records what it is asked to write.
 //
-// err survient à l'appel d'index failAt (les précédents réussissent). dbFails
-// dit si l'échec touche le PATCH database — sinon, c'est le PATCH data source
-// qui échoue, et la database est écrite si un corps lui était destiné.
+// err happens at the call of index failAt (the previous ones succeed). dbFails
+// says whether the failure hits the database PATCH — otherwise, it is the data
+// source PATCH that fails, and the database is written if a body was meant for
+// it.
 type fakeUpdater struct {
 	dbBodies [][]byte
 	dsBodies [][]byte
@@ -592,33 +594,33 @@ func TestRunWritesOnlyThePropertiesThePlanShows(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(rep.Updated) != 1 {
-		t.Fatalf("Updated = %v, want 1 ligne", rep.Updated)
+		t.Fatalf("Updated = %v, want 1 line", rep.Updated)
 	}
 	body := string(up.dsBodies[0])
 	if !strings.Contains(body, "Prio") {
 		t.Errorf("payload = %s, want Prio", body)
 	}
 	if strings.Contains(body, "Notes") {
-		t.Errorf("payload = %s, want sans Notes : le plan ne la montre pas", body)
+		t.Errorf("payload = %s, want without Notes: the plan does not show it", body)
 	}
 	if up.dbBodies[0] != nil {
-		t.Errorf("dbBody = %s, want nil : aucun champ de database dans le plan", up.dbBodies[0])
+		t.Errorf("dbBody = %s, want nil: no database field in the plan", up.dbBodies[0])
 	}
 	if len(rep.Mismatches) != 0 {
-		t.Errorf("Mismatches = %v, want vide", rep.Mismatches)
+		t.Errorf("Mismatches = %v, want empty", rep.Mismatches)
 	}
 
-	// Le state est sauvé depuis la RELECTURE : l'id de propriété n'existe que là.
+	// The state is saved from the READ-BACK: the property id exists only there.
 	loaded, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if got := loaded.Databases["tasks"].Properties["Prio"].ID; got != "p1" {
-		t.Errorf("state Prio.ID = %q, want p1 (relu)", got)
+		t.Errorf("state Prio.ID = %q, want p1 (read back)", got)
 	}
 }
 
-// Review Focus #3 : un update qui ne touche qu'un champ n'appelle pas le data
+// Review Focus #3: an update that touches only a field does not call the data
 // source.
 func TestRunWritesOnlyTheDatabaseWhenNoPropertyChanges(t *testing.T) {
 	dir := t.TempDir()
@@ -632,25 +634,25 @@ func TestRunWritesOnlyTheDatabaseWhenNoPropertyChanges(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(up.dbBodies) != 1 {
-		t.Fatalf("%d appel(s) Update, want 1", len(up.dbBodies))
+		t.Fatalf("%d Update call(s), want 1", len(up.dbBodies))
 	}
 	if up.dsBodies[0] != nil {
 		t.Errorf("dsBody = %s, want nil", up.dsBodies[0])
 	}
 	if !strings.Contains(string(up.dbBodies[0]), "Tâches") {
-		t.Errorf("dbBody = %s, want le nouveau titre", up.dbBodies[0])
+		t.Errorf("dbBody = %s, want the new title", up.dbBodies[0])
 	}
 }
 
-// L'équivalence « plan ≡ payload » a deux sens. Le test précédent couvre
-// l'inclusion : rien ne part qui ne soit dans le plan. Celui-ci couvre l'autre :
-// rien du plan ne reste au sol.
+// The "plan ≡ payload" equivalence goes both ways. The previous test covers
+// inclusion: nothing goes out that is not in the plan. This one covers the
+// other: nothing of the plan stays on the ground.
 func TestWriteSetCoversEveryDetail(t *testing.T) {
 	details := []resources.Detail{
 		{Op: "~", Target: "name", Field: "name"},
 		{Op: "~", Target: "icon", Field: "icon"},
 		{Op: "~", Target: `property "Prio"`, Property: "Prio"},
-		{Op: "-", Target: `option "Basse" (propriété "Prio")`, Property: "Prio"},
+		{Op: "-", Target: `option "Basse" (property "Prio")`, Property: "Prio"},
 		{Op: "+", Target: `property "Neuve"`, Property: "Neuve"},
 	}
 	fields, props := writeSet(details)
@@ -659,25 +661,24 @@ func TestWriteSetCoversEveryDetail(t *testing.T) {
 		switch {
 		case d.Field != "":
 			if !slices.Contains(fields, d.Field) {
-				t.Errorf("champ %q du plan absent du jeu d'écriture", d.Field)
+				t.Errorf("plan field %q missing from the write set", d.Field)
 			}
 		case d.Property != "":
 			if !slices.Contains(props, d.Property) {
-				t.Errorf("propriété %q du plan absente du jeu d'écriture", d.Property)
+				t.Errorf("plan property %q missing from the write set", d.Property)
 			}
 		default:
-			t.Errorf("détail %q sans Field ni Property : il ne peut pas être écrit", d.Target)
+			t.Errorf("detail %q without Field or Property: it cannot be written", d.Target)
 		}
 	}
-	// Dédoublonné : "Prio" porte deux lignes, une seule écriture.
+	// Deduplicated: "Prio" carries two lines, a single write.
 	if len(props) != 2 {
-		t.Errorf("props = %v, want 2 (Prio dédoublonnée, Neuve)", props)
+		t.Errorf("props = %v, want 2 (Prio deduplicated, Neuve)", props)
 	}
 }
 
-// Les lignes d'option sous une propriété neuve ou changée de type disent ce qui
-// part ; elles n'ajoutent AUCUNE écriture : le jeu d'écriture est celui des
-// seules lignes de propriété.
+// The option lines under a new or retyped property say what goes out; they add
+// NO write: the write set is that of the property lines alone.
 func TestOptionLinesOfANewPropertyAddNoWrite(t *testing.T) {
 	actual := state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
@@ -708,23 +709,23 @@ func TestOptionLinesOfANewPropertyAddNoWrite(t *testing.T) {
 		withoutOptions = append(withoutOptions, d)
 	}
 	if optionLines != 3 {
-		t.Fatalf("%d lignes d'option, want 3 :\n%v", optionLines, res.Changeset.Details)
+		t.Fatalf("%d option lines, want 3:\n%v", optionLines, res.Changeset.Details)
 	}
 	_, got := writeSet(res.Changeset.Details)
 	_, want := writeSet(withoutOptions)
 	if !slices.Equal(got, want) {
-		t.Errorf("jeu d'écriture = %v, want %v : les lignes d'option n'écrivent rien de plus", got, want)
+		t.Errorf("write set = %v, want %v: the option lines write nothing more", got, want)
 	}
 	if !slices.Equal(got, []string{"Etat", "Prio"}) {
-		t.Errorf("jeu d'écriture = %v, want [Etat Prio]", got)
+		t.Errorf("write set = %v, want [Etat Prio]", got)
 	}
 }
 
-// Le premier piège du §1 : l'API remplace la liste entière des options, et une
-// option existante envoyée sans son id est détruite puis recréée. Chaque pièce
-// est couverte seule ; ce test verrouille leur COMPOSITION — du plan jusqu'au
-// corps envoyé —, qu'un second constructeur de cible ou une copie de Target
-// perdant l'id casserait sans qu'aucun test unitaire ne bouge.
+// The first trap of §1: the API replaces the whole list of options, and an
+// existing option sent without its id is destroyed then re-created. Each piece
+// is covered alone; this test locks their COMPOSITION — from the plan to the
+// body sent —, which a second target builder or a copy of Target losing the id
+// would break without any unit test moving.
 func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
 	actual := state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
@@ -746,7 +747,7 @@ func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
 			}},
 		},
 	}
-	// "Haute" reste, "Moyenne" arrive, "Basse" n'est plus réclamée.
+	// "Haute" stays, "Moyenne" arrives, "Basse" is no longer claimed.
 	desired := state.Database{Properties: map[string]state.Property{
 		"Name": {Type: "title"},
 		"Prio": {Type: "select", Options: []state.Option{
@@ -756,7 +757,7 @@ func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
 	}}
 	res := diff.CompareDatabase("tasks", &desired, &applied, &actual)
 	if res.Withheld != "" || res.Target == nil {
-		t.Fatalf("montage faux : Withheld=%q Target=%v", res.Withheld, res.Target)
+		t.Fatalf("setup is wrong: Withheld=%q Target=%v", res.Withheld, res.Target)
 	}
 	c := updateChange("tasks", res.Target, res.Changeset.Details...)
 
@@ -768,7 +769,7 @@ func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(up.dsBodies) != 1 || up.dsBodies[0] == nil {
-		t.Fatalf("dsBodies = %v, want un PATCH data source", up.dsBodies)
+		t.Fatalf("dsBodies = %v, want a data source PATCH", up.dsBodies)
 	}
 
 	var body struct {
@@ -779,30 +780,30 @@ func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(up.dsBodies[0], &body); err != nil {
-		t.Fatalf("corps illisible %s : %v", up.dsBodies[0], err)
+		t.Fatalf("unreadable body %s: %v", up.dsBodies[0], err)
 	}
 	if _, sent := body.Properties["Name"]; sent {
-		t.Errorf("payload = %s : Name n'est pas dans le plan", up.dsBodies[0])
+		t.Errorf("payload = %s: Name is not in the plan", up.dsBodies[0])
 	}
 	byName := map[string]map[string]any{}
 	for _, o := range body.Properties["Prio"].Select.Options {
 		byName[o["name"].(string)] = o
 	}
 	if got := byName["Haute"]["id"]; got != "o-haute" {
-		t.Errorf("Haute part avec l'id %v, want o-haute : sans lui, l'API la recrée", got)
+		t.Errorf("Haute goes out with id %v, want o-haute: without it, the API re-creates it", got)
 	}
 	moyenne, ok := byName["Moyenne"]
 	if !ok {
-		t.Fatalf("payload = %s : l'option neuve Moyenne manque", up.dsBodies[0])
+		t.Fatalf("payload = %s: the new option Moyenne is missing", up.dsBodies[0])
 	}
 	if id, has := moyenne["id"]; has {
-		t.Errorf("Moyenne part avec l'id %v, want aucun : elle est neuve", id)
+		t.Errorf("Moyenne goes out with id %v, want none: it is new", id)
 	}
 	if _, sent := byName["Basse"]; sent {
-		t.Errorf("payload = %s : Basse n'est pas réclamée, elle ne doit pas partir", up.dsBodies[0])
+		t.Errorf("payload = %s: Basse is not claimed, it must not go out", up.dsBodies[0])
 	}
 	if len(byName) != 2 {
-		t.Errorf("options envoyées = %v, want exactement Haute et Moyenne", byName)
+		t.Errorf("options sent = %v, want exactly Haute and Moyenne", byName)
 	}
 }
 
@@ -810,7 +811,7 @@ func TestRunSkipsAWithheldResourceWithoutCallingTheAPI(t *testing.T) {
 	dir := t.TempDir()
 	up := &fakeUpdater{}
 	c := updateChange("tasks", nil, prioDetail)
-	c.Withheld = "une option doit être migrée à la main"
+	c.Withheld = "an option must be migrated by hand"
 	p := &diff.Plan{Changes: []diff.Change{c}}
 
 	rep, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
@@ -818,16 +819,16 @@ func TestRunSkipsAWithheldResourceWithoutCallingTheAPI(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if up.calls() != 0 {
-		t.Error("un appel a eu lieu sur une ressource retenue")
+		t.Error("a call took place on a withheld resource")
 	}
 	if len(rep.Skipped) != 1 || rep.Skipped[0] != "database.tasks" {
 		t.Errorf("Skipped = %v, want [database.tasks]", rep.Skipped)
 	}
 }
 
-// Review Focus #2 : sans data_source_id, le PATCH viserait
-// "/v1/data_sources/", qui ne désigne rien. La cible vient toujours d'une
-// relecture fraîche : un id vide est un défaut interne, refusé avant tout appel.
+// Review Focus #2: without a data_source_id, the PATCH would target
+// "/v1/data_sources/", which points at nothing. The target always comes from a
+// fresh read-back: an empty id is a notion-seed bug, rejected before any call.
 func TestRunRefusesAnUpdateWithoutADataSourceID(t *testing.T) {
 	dir := t.TempDir()
 	target := prioTarget()
@@ -837,36 +838,36 @@ func TestRunRefusesAnUpdateWithoutADataSourceID(t *testing.T) {
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
 	if err == nil {
-		t.Fatal("error = nil, want un refus avant tout appel")
+		t.Fatal("error = nil, want a rejection before any call")
 	}
 	if up.calls() != 0 {
-		t.Error("un appel a eu lieu malgré l'absence de data_source_id")
+		t.Error("a call took place despite the missing data_source_id")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 }
 
-// La CLI ne branche l'Updater qu'à la tâche suivante : un update sans Updater
-// doit être un défaut nommé, pas un déréférencement nil.
+// The CLI wires the Updater only in the next task: an update without an
+// Updater must be a named bug, not a nil dereference.
 func TestRunRefusesAnUpdateWithoutAnUpdater(t *testing.T) {
 	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir()})
 	if err == nil {
-		t.Fatal("error = nil, want un défaut interne nommé")
+		t.Fatal("error = nil, want a named notion-seed bug")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 }
 
-// Le 404 du PATCH data source accuse le partage avec l'intégration, alors que la
-// cause peut être un ancêtre archivé. Sonder la database tranche.
+// The 404 of the data source PATCH blames the sharing with the integration,
+// while the cause can be an archived ancestor. Probing the database decides.
 func TestRunDiagnosesAnArchivedAncestorOnA404(t *testing.T) {
 	up := &fakeUpdater{
 		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
@@ -878,27 +879,27 @@ func TestRunDiagnosesAnArchivedAncestorOnA404(t *testing.T) {
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
 	if err == nil {
-		t.Fatal("error = nil, want une erreur diagnostiquée")
+		t.Fatal("error = nil, want a diagnosed error")
 	}
 	if up.probes != 1 {
-		t.Errorf("%d sonde(s), want 1", up.probes)
+		t.Errorf("%d probe(s), want 1", up.probes)
 	}
-	for _, want := range []string{"ancêtre", "corbeille", "restaurez la page parente", "  → "} {
+	for _, want := range []string{"ancestor", "trash", "restore the parent page", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
-	for _, unwanted := range []string{"intégration", "integration"} {
+	for _, unwanted := range []string{"shared", "integration"} {
 		if strings.Contains(err.Error(), unwanted) {
-			t.Errorf("erreur = %q, want SANS le conseil de partage, qui est faux ici", err)
+			t.Errorf("error = %q, want WITHOUT the sharing advice, which is wrong here", err)
 		}
 	}
 }
 
-// Un ancêtre à la corbeille fait échouer le PATCH database le PREMIER. Quand ce
-// PATCH est passé, un 404 du data source ne peut donc pas venir d'un ancêtre
-// archivé, même si la database se lit encore : conseiller de restaurer la page
-// parente enverrait l'utilisateur chercher une cause qui n'existe pas.
+// An ancestor in the trash fails the database PATCH FIRST. When that PATCH went
+// through, a 404 from the data source therefore cannot come from an archived
+// ancestor, even if the database can still be read: advising to restore the
+// parent page would send the user looking for a cause that does not exist.
 func TestRunDoesNotBlameAnArchivedAncestorAfterADatabaseWrite(t *testing.T) {
 	up := &fakeUpdater{
 		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
@@ -909,19 +910,19 @@ func TestRunDoesNotBlameAnArchivedAncestorAfterADatabaseWrite(t *testing.T) {
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
 	if err == nil {
-		t.Fatal("error = nil, want une erreur diagnostiquée")
+		t.Fatal("error = nil, want a diagnosed error")
 	}
 	if len(up.dbBodies) != 1 || up.dbBodies[0] == nil {
-		t.Fatalf("montage faux : le PATCH database devait partir")
+		t.Fatalf("setup is wrong: the database PATCH was supposed to go out")
 	}
-	for _, unwanted := range []string{"ancêtre", "corbeille", "restaurez la page parente"} {
+	for _, unwanted := range []string{"ancestor", "trash", "restore the parent page"} {
 		if strings.Contains(err.Error(), unwanted) {
-			t.Errorf("erreur = %q, want SANS %q : le PATCH database réussi l'exclut", err, unwanted)
+			t.Errorf("error = %q, want WITHOUT %q: the successful database PATCH rules it out", err, unwanted)
 		}
 	}
-	for _, want := range []string{"data source", "partagé", "déjà écrit sur cette ressource : le nom", "  → "} {
+	for _, want := range []string{"data source", "shared", "already written on this resource: the name", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 }
@@ -936,25 +937,25 @@ func TestRunDiagnosesAVanishedDatabaseOnA404(t *testing.T) {
 
 	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
 	if err == nil {
-		t.Fatal("error = nil, want une erreur diagnostiquée")
+		t.Fatal("error = nil, want a diagnosed error")
 	}
-	for _, want := range []string{"disparu", "partagée avec l'intégration", "  → "} {
+	for _, want := range []string{"vanished", "shared with the integration", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
-	if strings.Contains(err.Error(), "corbeille") {
-		t.Errorf("erreur = %q, want SANS le diagnostic d'ancêtre archivé", err)
+	if strings.Contains(err.Error(), "trash") {
+		t.Errorf("error = %q, want WITHOUT the archived-ancestor diagnosis", err)
 	}
 }
 
-// Si la sonde elle-même échoue, on ne tranche pas — mais on ne relaie pas
-// davantage le conseil de partage du 404, qui peut être faux.
+// If the probe itself fails, nothing is decided — but the 404's sharing advice,
+// which can be wrong, is not relayed either.
 func TestRunFallsBackWhenTheProbeFails(t *testing.T) {
 	up := &fakeUpdater{
 		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
 			Message: "Make sure the relevant pages are shared with your integration"},
-		existsErr: errors.New("réseau coupé"),
+		existsErr: errors.New("network down"),
 	}
 	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
 
@@ -962,18 +963,18 @@ func TestRunFallsBackWhenTheProbeFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("error = nil")
 	}
-	for _, want := range []string{"réseau coupé", "404", "  → "} {
+	for _, want := range []string{"network down", "404", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 	if strings.Contains(err.Error(), "shared with your integration") {
-		t.Errorf("erreur = %q, want sans le texte brut du 404", err)
+		t.Errorf("error = %q, want without the raw text of the 404", err)
 	}
 }
 
-// Mesuré : sur un ancêtre archivé, le PATCH database échoue le premier, avec un
-// 400 qui nomme la cause. Le message dit le remède.
+// Measured: under an archived ancestor, the database PATCH fails first, with a
+// 400 that names the cause. The message states the fix.
 func TestRunNamesAnArchivedAncestorOnTheDatabasePatch(t *testing.T) {
 	target := prioTarget()
 	up := &fakeUpdater{
@@ -988,15 +989,15 @@ func TestRunNamesAnArchivedAncestorOnTheDatabasePatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("error = nil")
 	}
-	for _, want := range []string{"restaurez la page parente", "rien n'a été écrit sur cette ressource"} {
+	for _, want := range []string{"restore the parent page", "nothing was written on this resource"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 }
 
-// Échec du second PATCH : le message nomme EXACTEMENT les champs écrits, dit
-// qu'aucune donnée n'est touchée, et liste ce qui était acquis avant.
+// Failure of the second PATCH: the message names EXACTLY the fields written,
+// says no data is touched, and lists what was done before.
 func TestRunNamesWhatPassedWhenTheSecondPatchFails(t *testing.T) {
 	dir := t.TempDir()
 	up := &fakeUpdater{
@@ -1013,26 +1014,26 @@ func TestRunNamesWhatPassedWhenTheSecondPatchFails(t *testing.T) {
 
 	rep, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: dir, Updater: up})
 	if err == nil {
-		t.Fatal("error = nil, want l'échec du second PATCH")
+		t.Fatal("error = nil, want the failure of the second PATCH")
 	}
 	if len(rep.Updated) != 1 {
-		t.Errorf("Updated = %v, want la première modification acquise", rep.Updated)
+		t.Errorf("Updated = %v, want the first update done", rep.Updated)
 	}
 	msg := err.Error()
-	for _, want := range []string{"database.projects", "le nom", "aucune donnée", "database.tasks", "  → "} {
+	for _, want := range []string{"database.projects", "the name", "no row data", "database.tasks", "  → "} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("erreur = %q, want contenant %q", msg, want)
+			t.Errorf("error = %q, want containing %q", msg, want)
 		}
 	}
-	for _, unwanted := range []string{"icône", "description"} {
+	for _, unwanted := range []string{"icon", "description"} {
 		if strings.Contains(msg, unwanted) {
-			t.Errorf("erreur = %q : %q n'a pas été envoyé, il ne doit pas être nommé", msg, unwanted)
+			t.Errorf("error = %q: %q was not sent, it must not be named", msg, unwanted)
 		}
 	}
 }
 
-// Issue inconnue : arrêt net, sans enchaîner. `plan` suffit à voir le réel —
-// contrairement à la création, il n'y a pas d'identité à ré-adopter.
+// Unknown outcome: hard stop, nothing chained. `plan` is enough to see the
+// actual state — unlike creation, there is no identity to re-adopt.
 func TestRunStopsOnAnUnknownOutcome(t *testing.T) {
 	up := &fakeUpdater{err: &transport.OutcomeUnknownError{Cause: errors.New("timeout")}}
 	other := prioTarget()
@@ -1047,22 +1048,21 @@ func TestRunStopsOnAnUnknownOutcome(t *testing.T) {
 		t.Fatal("error = nil")
 	}
 	if len(up.dbBodies) != 1 {
-		t.Errorf("%d appel(s) Update, want 1 : aucun enchaînement après une issue inconnue", len(up.dbBodies))
+		t.Errorf("%d Update call(s), want 1: nothing chained after an unknown outcome", len(up.dbBodies))
 	}
 	msg := err.Error()
-	for _, want := range []string{"issue inconnue", "notion-seed plan", "  → "} {
+	for _, want := range []string{"unknown outcome", "notion-seed plan", "  → "} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("erreur = %q, want contenant %q", msg, want)
+			t.Errorf("error = %q, want containing %q", msg, want)
 		}
 	}
 	if strings.Contains(msg, "import") {
-		t.Errorf("erreur = %q, want sans import : il n'y a rien à ré-adopter", msg)
+		t.Errorf("error = %q, want without import: there is nothing to re-adopt", msg)
 	}
 }
 
-// overlayFixture : une entrée de state antérieure qui connaît une propriété
-// hors config (Hors), et une cible qui renomme la database et ajoute une option
-// à Prio.
+// overlayFixture: a prior state entry that knows an unmanaged property (Hors),
+// and a target that renames the database and adds an option to Prio.
 func overlayFixture() (prior state.Database, target *state.Database, p *diff.Plan) {
 	prior = state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Avant",
@@ -1082,13 +1082,13 @@ func overlayFixture() (prior state.Database, target *state.Database, p *diff.Pla
 	return prior, target, p
 }
 
-// Écrite mais pas relue : le state porte ce qui a été ÉCRIT, superposé à
-// l'entrée d'avant. Garder l'entrée d'avant ferait passer notre propre écriture
-// pour une dérive venue d'ailleurs au prochain plan.
+// Written but not read back: the state holds what was WRITTEN, laid over the
+// previous entry. Keeping the previous entry would pass notion-seed's own
+// write off as drift from elsewhere in the next plan.
 func TestRunRecordsWhatWasWrittenWhenTheReReadFails(t *testing.T) {
 	dir := t.TempDir()
 	prior, _, p := overlayFixture()
-	up := &fakeUpdater{readErr: errors.New("relecture impossible")}
+	up := &fakeUpdater{readErr: errors.New("read-back failed")}
 	snap := emptySnapshot()
 	snap.Databases["tasks"] = prior
 
@@ -1096,8 +1096,8 @@ func TestRunRecordsWhatWasWrittenWhenTheReReadFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("error = nil")
 	}
-	if !strings.Contains(err.Error(), "relecture impossible") || !strings.Contains(err.Error(), "  → ") {
-		t.Errorf("erreur = %q", err)
+	if !strings.Contains(err.Error(), "read-back failed") || !strings.Contains(err.Error(), "  → ") {
+		t.Errorf("error = %q", err)
 	}
 
 	loaded, lerr := state.Load(dir)
@@ -1106,21 +1106,21 @@ func TestRunRecordsWhatWasWrittenWhenTheReReadFails(t *testing.T) {
 	}
 	got := loaded.Databases["tasks"]
 	if got.Name != "Tasks" {
-		t.Errorf("Name = %q, want Tasks (écrit)", got.Name)
+		t.Errorf("Name = %q, want Tasks (written)", got.Name)
 	}
 	if opts := got.Properties["Prio"].Options; len(opts) != 1 || opts[0].Key != "haute" {
-		t.Errorf("Prio.Options = %v, want l'option écrite, key comprise", opts)
+		t.Errorf("Prio.Options = %v, want the written option, key included", opts)
 	}
 	if got.Properties["Hors"].ID != "h1" {
-		t.Error("Hors, connue du state mais hors du jeu d'écriture, a été perdue")
+		t.Error("Hors, known to the state but outside the write set, was lost")
 	}
 	if _, ok := got.Properties["Notes"]; ok {
-		t.Error("Notes n'a pas été écrite : elle ne doit pas entrer dans le state")
+		t.Error("Notes was not written: it must not enter the state")
 	}
 }
 
-// Second PATCH en échec : seul le nom est passé. Le state le porte, et garde
-// les propriétés d'avant, que rien n'a touchées.
+// Second PATCH failing: only the name went through. The state holds it, and
+// keeps the previous properties, which nothing touched.
 func TestRunRecordsTheDatabaseFieldsWhenTheSecondPatchFails(t *testing.T) {
 	dir := t.TempDir()
 	prior, _, p := overlayFixture()
@@ -1138,17 +1138,17 @@ func TestRunRecordsTheDatabaseFieldsWhenTheSecondPatchFails(t *testing.T) {
 	}
 	got := loaded.Databases["tasks"]
 	if got.Name != "Tasks" {
-		t.Errorf("Name = %q, want Tasks (le PATCH database est passé)", got.Name)
+		t.Errorf("Name = %q, want Tasks (the database PATCH went through)", got.Name)
 	}
 	if opts := got.Properties["Prio"].Options; len(opts) != 0 {
-		t.Errorf("Prio.Options = %v, want l'état d'avant : le data source n'a pas été écrit", opts)
+		t.Errorf("Prio.Options = %v, want the previous state: the data source was not written", opts)
 	}
 	if got.Properties["Hors"].ID != "h1" {
-		t.Error("Hors a été perdue")
+		t.Error("Hors was lost")
 	}
 }
 
-// Premier PATCH en échec : rien n'est passé, rien n'est inscrit.
+// First PATCH failing: nothing went through, nothing is recorded.
 func TestRunLeavesStateUntouchedWhenTheFirstPatchFails(t *testing.T) {
 	dir := t.TempDir()
 	prior, _, p := overlayFixture()
@@ -1160,13 +1160,13 @@ func TestRunLeavesStateUntouchedWhenTheFirstPatchFails(t *testing.T) {
 		t.Fatal("error = nil")
 	}
 	if snap.Databases["tasks"].Name != "Avant" {
-		t.Errorf("Name = %q, want Avant : rien n'a été écrit", snap.Databases["tasks"].Name)
+		t.Errorf("Name = %q, want Avant: nothing was written", snap.Databases["tasks"].Name)
 	}
 }
 
-// fakeTrasher enregistre les ids qu'on lui demande de mettre à la corbeille.
-// before, s'il est posé, tourne au début de chaque appel : c'est ce qui permet
-// de vérifier que le state est déjà sur disque au moment de l'appel suivant.
+// fakeTrasher records the ids it is asked to move to the trash. before, when
+// set, runs at the start of each call: it is what allows checking that the
+// state is already on disk at the time of the next call.
 type fakeTrasher struct {
 	ids       []string
 	confirmed bool
@@ -1197,8 +1197,8 @@ func destroyChange(key string) diff.Change {
 	}
 }
 
-// orphanSnapshot ancre chaque key avec l'id "db-<key>" : un test peut ainsi dire
-// quel id a été mis à la corbeille.
+// orphanSnapshot anchors each key with the id "db-<key>": a test can thus say
+// which id was moved to the trash.
 func orphanSnapshot(keys ...string) *state.Snapshot {
 	snap := emptySnapshot()
 	for _, k := range keys {
@@ -1207,13 +1207,13 @@ func orphanSnapshot(keys ...string) *state.Snapshot {
 	return snap
 }
 
-// L'identité mise à la corbeille est celle du state, et le state est sauvé
-// après CHAQUE destruction : une interruption laisse un fichier exactement vrai.
+// The identity moved to the trash is the state's, and the state is saved
+// after EACH destruction: an interruption leaves an exactly true file.
 func TestRunTrashesEachOrphanFromItsStateIdentityAndSavesAfterEach(t *testing.T) {
 	dir := t.TempDir()
 	snap := orphanSnapshot("archive", "tasks")
-	// Le state est sur disque avant le premier appel, comme en vrai : sans ça,
-	// la relecture ci-dessous ne prouverait rien.
+	// The state is on disk before the first call, as in real life: without it,
+	// the read-back below would prove nothing.
 	if err := state.Save(dir, snap); err != nil {
 		t.Fatal(err)
 	}
@@ -1236,12 +1236,12 @@ func TestRunTrashesEachOrphanFromItsStateIdentityAndSavesAfterEach(t *testing.T)
 		t.Fatalf("Run() error = %v", err)
 	}
 	if want := []string{"db-archive", "db-tasks"}; !slices.Equal(tr.ids, want) {
-		t.Errorf("ids mis à la corbeille = %v, want %v", tr.ids, want)
+		t.Errorf("ids moved to the trash = %v, want %v", tr.ids, want)
 	}
 	if !goneBeforeSecond {
-		t.Error("l'entrée de database.archive était encore sur disque avant la deuxième destruction")
+		t.Error("the database.archive entry was still on disk before the second destruction")
 	}
-	if len(rep.Destroyed) != 2 || !strings.HasPrefix(rep.Destroyed[0], "database.archive mise à la corbeille") {
+	if len(rep.Destroyed) != 2 || !strings.HasPrefix(rep.Destroyed[0], "database.archive moved to the trash") {
 		t.Errorf("Destroyed = %v", rep.Destroyed)
 	}
 	loaded, lerr := state.Load(dir)
@@ -1249,16 +1249,16 @@ func TestRunTrashesEachOrphanFromItsStateIdentityAndSavesAfterEach(t *testing.T)
 		t.Fatal(lerr)
 	}
 	if len(loaded.Databases) != 0 {
-		t.Errorf("state = %v, want vide", loaded.Databases)
+		t.Errorf("state = %v, want empty", loaded.Databases)
 	}
 	if !rep.Converged() {
-		t.Errorf("Converged() = false : %+v", rep)
+		t.Errorf("Converged() = false: %+v", rep)
 	}
 }
 
-// Review Focus #1 : un 200 qui ne confirme pas la corbeille garde l'entrée.
-// L'abandonner rendrait invisible une database encore vivante : ni déclarée, ni
-// dans le state.
+// Review Focus #1: a 200 that does not confirm the trashing keeps the entry.
+// Abandoning it would make a still live database invisible: neither declared,
+// nor in the state.
 func TestRunKeepsTheStateEntryWhenTheAPIDoesNotConfirmTheTrash(t *testing.T) {
 	dir := t.TempDir()
 	snap := orphanSnapshot("tasks")
@@ -1269,39 +1269,39 @@ func TestRunKeepsTheStateEntryWhenTheAPIDoesNotConfirmTheTrash(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(rep.Destroyed) != 0 {
-		t.Errorf("Destroyed = %v, want vide", rep.Destroyed)
+		t.Errorf("Destroyed = %v, want empty", rep.Destroyed)
 	}
 	if len(rep.Mismatches) != 1 || !strings.Contains(rep.Mismatches[0], "database.tasks") ||
-		!strings.Contains(rep.Mismatches[0], "gardée") {
-		t.Errorf("Mismatches = %v, want un écart nommant database.tasks et l'entrée gardée", rep.Mismatches)
+		!strings.Contains(rep.Mismatches[0], "kept") {
+		t.Errorf("Mismatches = %v, want a mismatch naming database.tasks and the kept entry", rep.Mismatches)
 	}
 	if _, ok := snap.Databases["tasks"]; !ok {
-		t.Error("l'entrée a été retirée alors que la corbeille n'est pas confirmée")
+		t.Error("the entry was removed while the trashing is not confirmed")
 	}
 	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit alors que rien n'a été détruit")
+		t.Error("a state was written while nothing was destroyed")
 	}
 	if rep.Converged() {
-		t.Error("Converged() = true alors que la database n'est pas à la corbeille")
+		t.Error("Converged() = true while the database is not in the trash")
 	}
 }
 
-// Une corbeille CONFIRMÉE dont l'écriture du state échoue ensuite ne doit
-// jamais laisser croire que rien ne s'est passé : la database est déjà à la
-// corbeille dans Notion, seul l'enregistrement local a échoué.
+// A CONFIRMED trashing whose state write then fails must never suggest that
+// nothing happened: the database is already in the trash in Notion, only the
+// local record failed.
 func TestRunWarnsWhenTrashSucceedsButStateSaveFails(t *testing.T) {
 	dir := t.TempDir()
 	snap := orphanSnapshot("tasks")
-	// Le state est sur disque avant l'appel, comme en vrai : sans ça, la
-	// relecture ci-dessous ne prouverait rien.
+	// The state is on disk before the call, as in real life: without it, the
+	// read-back below would prove nothing.
 	if err := state.Save(dir, snap); err != nil {
 		t.Fatal(err)
 	}
 
-	// Un dossier non inscriptible fait échouer state.Save après une corbeille
-	// déjà confirmée par l'API.
+	// A non-writable directory fails state.Save after a trashing already
+	// confirmed by the API.
 	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Skipf("chmod indisponible ici: %v", err)
+		t.Skipf("chmod unavailable here: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
@@ -1311,15 +1311,15 @@ func TestRunWarnsWhenTrashSucceedsButStateSaveFails(t *testing.T) {
 	})
 	if err == nil {
 		_ = os.Chmod(dir, 0o700)
-		t.Skip("le dossier reste inscriptible (root ?), test non significatif")
+		t.Skip("the directory stays writable (root?), test not meaningful")
 	}
 
 	for _, want := range []string{
-		"database.tasks", "corbeille", "  → ", "notion-seed plan",
-		"entrée de state obsolète", "`apply` suivant retirera",
+		"database.tasks", "trash", "  → ", "notion-seed plan",
+		"stale state entry", "`apply` will remove",
 	} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err.Error(), want)
+			t.Errorf("error = %q, want containing %q", err.Error(), want)
 		}
 	}
 
@@ -1331,13 +1331,13 @@ func TestRunWarnsWhenTrashSucceedsButStateSaveFails(t *testing.T) {
 		t.Fatal(lerr)
 	}
 	if _, still := loaded.Databases["tasks"]; !still {
-		t.Error("le state sur disque a perdu l'entrée malgré l'échec d'écriture")
+		t.Error("the state on disk lost the entry despite the write failure")
 	}
 }
 
-// Review Focus #2 et D-B1 : aucun échec ne retire l'entrée. Le 404 en
-// particulier ne vaut pas destruction — il renvoie au plan, qui relit le réel,
-// et n'accuse jamais le partage.
+// Review Focus #2 and D-B1: no failure removes the entry. The 404 in
+// particular does not count as a destruction — it points to the plan, which
+// reads the actual state back, and never blames the sharing.
 func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -1349,28 +1349,28 @@ func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 			name: "404",
 			err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
 				Message: "Could not find database with ID: db-tasks."},
-			want:     []string{"404", "notion-seed plan", "entrée de state obsolète"},
-			unwanted: []string{"partagée", "intégration"},
+			want:     []string{"404", "notion-seed plan", "stale state entry"},
+			unwanted: []string{"shared", "integration"},
 		},
 		{
-			name: "ancêtre archivé",
+			name: "archived ancestor",
 			err: &transport.APIError{Status: 400, NotionCode: "validation_error",
 				Message: "Can't edit page on block with an archived ancestor. You must " +
 					"unarchive the ancestor before editing page."},
-			want: []string{"page ancêtre", "restaurez la page parente", "relancez apply",
-				"supprimez définitivement la page parente", "notion-seed plan",
-				"entrée de state obsolète", "`apply` suivant retirera"},
+			want: []string{"ancestor page", "restore the parent page", "rerun apply",
+				"permanently delete the parent page", "notion-seed plan",
+				"stale state entry", "`apply` will remove"},
 		},
 		{
-			name: "issue inconnue",
+			name: "unknown outcome",
 			err:  &transport.OutcomeUnknownError{Cause: context.DeadlineExceeded},
-			want: []string{"issue inconnue", "notion-seed plan", "entrée de state obsolète"},
+			want: []string{"unknown outcome", "notion-seed plan", "stale state entry"},
 		},
 		{
-			name: "refus générique",
+			name: "generic rejection",
 			err: &transport.APIError{Status: 409, NotionCode: "conflict_error",
 				Message: "Conflict occurred while saving."},
-			want: []string{"impossible", "relancez apply"},
+			want: []string{"failed to", "rerun apply"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1382,34 +1382,35 @@ func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 				Dir: dir, Trasher: &fakeTrasher{err: tc.err},
 			})
 			if err == nil {
-				t.Fatal("Run() error = nil, want l'échec de la corbeille")
+				t.Fatal("Run() error = nil, want the trashing failure")
 			}
-			// Le rappel de ce qui est acquis suit un point-virgule : après un
-			// point, il commencerait par une minuscule.
-			wants := append([]string{"database.tasks", "entrée de state est gardée", "  → ",
-				" ; aucune écriture n'avait abouti avant celle-ci"}, tc.want...)
+			// The reminder of what is done follows a semicolon: after a period, it
+			// would start with a lowercase letter.
+			wants := append([]string{"database.tasks", "state entry is kept", "  → ",
+				"; no write had succeeded before this one"}, tc.want...)
 			for _, want := range wants {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+					t.Errorf("message = %q, it must contain %q", err.Error(), want)
 				}
 			}
 			for _, unwanted := range tc.unwanted {
 				if strings.Contains(err.Error(), unwanted) {
-					t.Errorf("message = %q, il ne doit pas contenir %q", err.Error(), unwanted)
+					t.Errorf("message = %q, it must not contain %q", err.Error(), unwanted)
 				}
 			}
 			if _, ok := snap.Databases["tasks"]; !ok {
-				t.Error("l'entrée a été retirée malgré l'échec")
+				t.Error("the entry was removed despite the failure")
 			}
 			if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
-				t.Error("un state a été écrit malgré l'échec")
+				t.Error("a state was written despite the failure")
 			}
 		})
 	}
 }
 
-// Un échec au milieu de la série nomme ce qui est acquis avant lui : sans ça,
-// l'utilisateur ne sait pas quelles databases sont déjà à la corbeille.
+// A failure in the middle of the series names what was done before it:
+// without it, the user does not know which databases are already in the
+// trash.
 func TestRunNamesTheDestroysAcquiredBeforeAFailure(t *testing.T) {
 	dir := t.TempDir()
 	snap := orphanSnapshot("archive", "tasks")
@@ -1419,25 +1420,25 @@ func TestRunNamesTheDestroysAcquiredBeforeAFailure(t *testing.T) {
 
 	_, err := Run(context.Background(), p, snap, Options{Dir: dir, Trasher: tr})
 	if err == nil {
-		t.Fatal("Run() error = nil, want l'échec de la seconde destruction")
+		t.Fatal("Run() error = nil, want the failure of the second destruction")
 	}
-	if want := "déjà mises à la corbeille et retirées du state : database.archive"; !strings.Contains(err.Error(), want) {
-		t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+	if want := "already moved to the trash and removed from the state: database.archive"; !strings.Contains(err.Error(), want) {
+		t.Errorf("message = %q, it must contain %q", err.Error(), want)
 	}
 	loaded, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if _, ok := loaded.Databases["archive"]; ok {
-		t.Error("database.archive est encore dans le state alors qu'elle est à la corbeille")
+		t.Error("database.archive is still in the state while it is in the trash")
 	}
 	if _, ok := loaded.Databases["tasks"]; !ok {
-		t.Error("database.tasks a quitté le state alors que sa destruction a échoué")
+		t.Error("database.tasks left the state while its destruction failed")
 	}
 }
 
-// Review Focus #4 : prevent_destroy est un accusé de lecture. Run ne le lit
-// pas, et la destruction part.
+// Review Focus #4: prevent_destroy is an acknowledgement. Run does not read it,
+// and the destruction goes out.
 func TestRunTrashesADestroyAcknowledgedByPreventDestroy(t *testing.T) {
 	c := destroyChange("tasks")
 	c.Acknowledged = []string{"prevent_destroy"}
@@ -1449,7 +1450,7 @@ func TestRunTrashesADestroyAcknowledgedByPreventDestroy(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(tr.ids) != 1 || len(rep.Destroyed) != 1 {
-		t.Errorf("ids = %v, Destroyed = %v : prevent_destroy ne doit rien empêcher", tr.ids, rep.Destroyed)
+		t.Errorf("ids = %v, Destroyed = %v: prevent_destroy must prevent nothing", tr.ids, rep.Destroyed)
 	}
 }
 
@@ -1457,18 +1458,18 @@ func TestRunRefusesADestroyWithoutATrasher(t *testing.T) {
 	_, err := Run(context.Background(), &diff.Plan{Changes: []diff.Change{destroyChange("tasks")}},
 		orphanSnapshot("tasks"), Options{Dir: t.TempDir()})
 	if err == nil {
-		t.Fatal("error = nil, want un défaut interne nommé")
+		t.Fatal("error = nil, want a named notion-seed bug")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 }
 
-// L'absence de Trasher se voit AVANT la première écriture : sinon un plan qui
-// crée puis détruit écrirait la création, puis s'arrêterait sur la
-// destruction, à moitié appliqué.
+// A missing Trasher is seen BEFORE the first write: otherwise a plan that
+// creates then destroys would write the creation, then stop on the
+// destruction, half applied.
 func TestRunRefusesAMissingWriterBeforeAnyWrite(t *testing.T) {
 	dir := t.TempDir()
 	snap := orphanSnapshot("tasks")
@@ -1478,14 +1479,14 @@ func TestRunRefusesAMissingWriterBeforeAnyWrite(t *testing.T) {
 	}}
 	rep, err := Run(context.Background(), p, snap, Options{Dir: dir, Creator: refuseToCreate(t)})
 	if err == nil {
-		t.Fatal("error = nil, want un défaut interne nommé")
+		t.Fatal("error = nil, want a named notion-seed bug")
 	}
-	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+	for _, want := range []string{"database.tasks", "notion-seed bug", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("erreur = %q, want contenant %q", err, want)
+			t.Errorf("error = %q, want containing %q", err, want)
 		}
 	}
 	if len(rep.Created) != 0 {
-		t.Errorf("Created = %v, want aucune création avant le refus", rep.Created)
+		t.Errorf("Created = %v, want no creation before the rejection", rep.Created)
 	}
 }

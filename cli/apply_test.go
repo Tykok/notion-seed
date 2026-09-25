@@ -95,7 +95,7 @@ func TestApplyCreatesDatabaseAndWritesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "database.projects créée") {
+	if !strings.Contains(out, "database.projects created") {
 		t.Errorf("sortie:\n%s", out)
 	}
 	snap, lerr := state.Load(dir)
@@ -339,7 +339,7 @@ func TestApplyProceedsOnExactConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "database.projects créée") {
+	if !strings.Contains(out, "database.projects created") {
 		t.Errorf("sortie:\n%s", out)
 	}
 }
@@ -571,7 +571,7 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "~ database.tasks modifiée") {
+	if !strings.Contains(out, "~ database.tasks updated") {
 		t.Errorf("le compte rendu ne nomme pas la modification:\n%s", out)
 	}
 	if !strings.Contains(out, "1 modification(s)") {
@@ -648,7 +648,7 @@ func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 	if strings.Contains(out, "entrée(s) obsolètes") {
 		t.Errorf("la destruction est annoncée comme un nettoyage local:\n%s", out)
 	}
-	if !strings.Contains(out, "- database.tasks mise à la corbeille") {
+	if !strings.Contains(out, "- database.tasks moved to the trash") {
 		t.Errorf("le compte rendu ne nomme pas la destruction:\n%s", out)
 	}
 	if !strings.Contains(out, "1 mise(s) à la corbeille") {
@@ -817,7 +817,7 @@ func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
 func TestApplyReportKeepsItsSummaryWhenOnlyAMismatchRemains(t *testing.T) {
 	var b bytes.Buffer
 	renderReport(&b, apply.Report{Mismatches: []string{
-		"database.tasks — l'API a répondu sans mettre la database à la corbeille",
+		"database.tasks — the API answered without moving the database to the trash",
 	}}, 0)
 	out := b.String()
 	if !strings.Contains(out, "Appliqué : 0 création(s), 0 modification(s), 0 mise(s) à la corbeille") {
