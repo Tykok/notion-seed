@@ -274,3 +274,19 @@ func TestRemoteDatabaseFromJSONIgnoresNonEmojiIcon(t *testing.T) {
 		}
 	}
 }
+
+// Mettre une database à la corbeille emporte TOUS ses data sources, mais le
+// comptage n'en interroge qu'un : le décodeur garde leur nombre pour que le plan
+// puisse dire que son compte est un minorant.
+func TestRemoteDatabaseFromJSONCountsItsDataSources(t *testing.T) {
+	const twoSources = `{"object":"database","id":"db-1","archived":false,"in_trash":false,` +
+		`"data_sources":[{"id":"ds-1","name":"A"},{"id":"ds-2","name":"B"}]}`
+	got, err := RemoteDatabaseFromJSON([]byte(twoSources), []byte(dsBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DataSourceID != "ds-1" || got.DataSourceCount != 2 {
+		t.Errorf("DataSourceID = %q, DataSourceCount = %d, want ds-1 et 2",
+			got.DataSourceID, got.DataSourceCount)
+	}
+}

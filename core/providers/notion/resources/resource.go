@@ -53,6 +53,10 @@ type Measurement struct {
 	Option       string
 	Retyped      bool
 	AllRows      bool
+	// UncountedDataSources, avec AllRows, est le nombre de data sources de la
+	// database que le comptage n'interroge pas : il n'en compte qu'un, la mise
+	// à la corbeille les emporte tous. Non nul, le compte est un minorant.
+	UncountedDataSources int
 }
 
 // Detail décrit un changement élémentaire à l'intérieur d'une ressource.

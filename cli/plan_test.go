@@ -1138,3 +1138,35 @@ databases:
 		t.Errorf("une option redéclarée sous le même nom garde ses lignes:\n%s", out)
 	}
 }
+
+// routedTransport rend en 200 le corps associé au préfixe du chemin demandé.
+type routedTransport map[string]string
+
+func (r routedTransport) Execute(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+	for prefix, body := range r {
+		if strings.HasPrefix(req.Path, prefix) {
+			return transport.APIResponse{Status: 200, Body: []byte(body)}, nil
+		}
+	}
+	return transport.APIResponse{}, fmt.Errorf("chemin non servi: %s", req.Path)
+}
+
+// Le refresh garde le nombre de data sources de la database relue : c'est lui
+// qui dit au plan qu'un compte de lignes de destruction n'en couvre qu'un.
+func TestRefreshManagedKeepsTheDataSourceCount(t *testing.T) {
+	tr := routedTransport{
+		"/v1/databases/": `{"object":"database","id":"db-1","archived":false,"in_trash":false,` +
+			`"data_sources":[{"id":"ds-1","name":"A"},{"id":"ds-2","name":"B"}]}`,
+		"/v1/data_sources/": `{"object":"data_source","id":"ds-1","title":[{"plain_text":"A"}],` +
+			`"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`,
+	}
+	snap := &state.Snapshot{Version: state.Version,
+		Databases: map[string]state.Database{"a": {ID: "db-1", DataSourceID: "ds-1"}}}
+	got, err := refreshManaged(context.Background(), tr, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["a"].DataSources != 2 {
+		t.Errorf("DataSources = %d, want 2", got["a"].DataSources)
+	}
+}

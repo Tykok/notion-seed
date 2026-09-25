@@ -65,10 +65,16 @@ type Unmanaged struct {
 // Missing distingue « lue et absente » de « pas lue » : sans cette distinction,
 // une ressource gérée disparue passerait pour une ressource jamais appliquée,
 // donc pour une création — exactement le contresens à éviter.
+//
+// DataSources est le nombre de data sources que la database relue porte, 0 si
+// on ne le sait pas. Il n'a pas sa place dans state.Database, qui est écrit sur
+// disque : c'est un fait du réel, qui ne sert qu'à dire qu'un compte de lignes
+// est partiel.
 type Refreshed struct {
-	Database state.Database
-	Missing  bool
-	Reason   string
+	Database    state.Database
+	Missing     bool
+	Reason      string
+	DataSources int
 }
 
 // Plan est le résultat de la passe de diff.
@@ -182,9 +188,26 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		}
 
 		d := r.Database
-		p.absorb(key, CompareDatabase(key, nil, &a, &d), allowDataLoss, preventDestroy)
+		res := CompareDatabase(key, nil, &a, &d)
+		markUncountedDataSources(res.Changeset.Details, r.DataSources)
+		p.absorb(key, res, allowDataLoss, preventDestroy)
 	}
 	return p, nil
+}
+
+// markUncountedDataSources note, sur la demande de comptage d'une destruction,
+// les data sources qu'elle n'interrogera pas : le comptage n'en lit qu'un, la
+// corbeille les emporte tous. Un nombre inconnu (0) ou un seul data source ne
+// marque rien.
+func markUncountedDataSources(details []resources.Detail, dataSources int) {
+	if dataSources <= 1 {
+		return
+	}
+	for i := range details {
+		if m := details[i].Measure; m != nil && m.AllRows {
+			m.UncountedDataSources = dataSources - 1
+		}
+	}
 }
 
 // absorb verse le résultat d'une ressource dans le plan, et y note les clés de

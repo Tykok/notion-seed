@@ -59,8 +59,11 @@ Un **retrait d'option** est donc toujours chiffré : les options n'existent que
 sur ces trois types.
 
 Une **destruction** l'est aussi, sans filtre : le compte porte sur toutes les
-lignes du data source que le state ancre, celles qui partent à la corbeille
-avec la database. Elle reste `destructif` quel que soit ce compte, 0 compris.
+lignes du data source de la database — celui que le plan vient de relire —,
+celles qui partent à la corbeille avec elle. Une database qui porte plusieurs
+data sources les emporte tous, mais un seul est compté : la ligne et l'agrégat
+disent alors « au moins N ligne(s) », et combien de data sources n'ont pas été
+comptés. Elle reste `destructif` quel que soit ce compte, 0 compris.
 
 Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
 d'eux. Des trois couples dangereux mesurés plus haut, un seul l'est :
