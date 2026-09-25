@@ -167,7 +167,7 @@ func TestApplyOfAReviewedPlanRefusesAFailedCountAndSaysRerun(t *testing.T) {
 	assertRefusedBeforeAnything(t, dir, logPath, before, out, err,
 		"3 rows reviewed, no figure now: its count did not succeed",
 		"a count failed",
-		"rerun `notion-seed apply "+planPath+"`")
+		"rerun the same command to apply "+planPath)
 	// The cause of the failure is printed, as on any plan.
 	if !strings.Contains(out, "count failed — ") {
 		t.Errorf("the count failure is not reported:\n%s", out)
