@@ -4,6 +4,7 @@ package apply
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"slices"
@@ -674,6 +675,92 @@ func TestOptionLinesOfANewPropertyAddNoWrite(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"Etat", "Prio"}) {
 		t.Errorf("jeu d'écriture = %v, want [Etat Prio]", got)
+	}
+}
+
+// Le premier piège du §1 : l'API remplace la liste entière des options, et une
+// option existante envoyée sans son id est détruite puis recréée. Chaque pièce
+// est couverte seule ; ce test verrouille leur COMPOSITION — du plan jusqu'au
+// corps envoyé —, qu'un second constructeur de cible ou une copie de Target
+// perdant l'id casserait sans qu'aucun test unitaire ne bouge.
+func TestRunSendsRemoteOptionIDsFromThePlanToThePayload(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Name": {ID: "title", Type: "title"},
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Name: "Basse", Color: "blue"},
+			}},
+		},
+	}
+	applied := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Name": {ID: "title", Type: "title"},
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Key: "haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Key: "basse", Name: "Basse", Color: "blue"},
+			}},
+		},
+	}
+	// "Haute" reste, "Moyenne" arrive, "Basse" n'est plus réclamée.
+	desired := state.Database{Properties: map[string]state.Property{
+		"Name": {Type: "title"},
+		"Prio": {Type: "select", Options: []state.Option{
+			{Key: "haute", Name: "Haute", Color: "red"},
+			{Key: "moyenne", Name: "Moyenne", Color: "orange"},
+		}},
+	}}
+	res := diff.CompareDatabase("tasks", &desired, &applied, &actual)
+	if res.Withheld != "" || res.Target == nil {
+		t.Fatalf("montage faux : Withheld=%q Target=%v", res.Withheld, res.Target)
+	}
+	c := updateChange("tasks", res.Target, res.Changeset.Details...)
+
+	up := &fakeUpdater{remote: prioRemote()}
+	snap := emptySnapshot()
+	snap.Databases["tasks"] = applied
+	if _, err := Run(context.Background(), &diff.Plan{Changes: []diff.Change{c}}, snap,
+		Options{Dir: t.TempDir(), Updater: up}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(up.dsBodies) != 1 || up.dsBodies[0] == nil {
+		t.Fatalf("dsBodies = %v, want un PATCH data source", up.dsBodies)
+	}
+
+	var body struct {
+		Properties map[string]struct {
+			Select struct {
+				Options []map[string]any `json:"options"`
+			} `json:"select"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(up.dsBodies[0], &body); err != nil {
+		t.Fatalf("corps illisible %s : %v", up.dsBodies[0], err)
+	}
+	if _, sent := body.Properties["Name"]; sent {
+		t.Errorf("payload = %s : Name n'est pas dans le plan", up.dsBodies[0])
+	}
+	byName := map[string]map[string]any{}
+	for _, o := range body.Properties["Prio"].Select.Options {
+		byName[o["name"].(string)] = o
+	}
+	if got := byName["Haute"]["id"]; got != "o-haute" {
+		t.Errorf("Haute part avec l'id %v, want o-haute : sans lui, l'API la recrée", got)
+	}
+	moyenne, ok := byName["Moyenne"]
+	if !ok {
+		t.Fatalf("payload = %s : l'option neuve Moyenne manque", up.dsBodies[0])
+	}
+	if id, has := moyenne["id"]; has {
+		t.Errorf("Moyenne part avec l'id %v, want aucun : elle est neuve", id)
+	}
+	if _, sent := byName["Basse"]; sent {
+		t.Errorf("payload = %s : Basse n'est pas réclamée, elle ne doit pas partir", up.dsBodies[0])
+	}
+	if len(byName) != 2 {
+		t.Errorf("options envoyées = %v, want exactement Haute et Moyenne", byName)
 	}
 }
 
