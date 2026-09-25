@@ -463,7 +463,12 @@ func impactOf(changes []Change) string {
 		for _, d := range c.Details {
 			// A destruction's count is aggregated by trash, separately: they are
 			// rows, not values, and they mix with no family.
-			if d.Measure == nil || d.Measure.AllRows || d.Count <= 0 {
+			//
+			// A line with no count (Count < 0) or a lower bound of zero is NOT
+			// skipped: it costs rows nobody counted, so its family's total is a
+			// lower bound. Skipping it would print the rest as an exact figure.
+			// A safe line — an exact or upper-bound zero — costs nothing.
+			if d.Measure == nil || d.Measure.AllRows || d.Class == ClassSafe {
 				continue
 			}
 			// A migration line withholds its resource: nothing is written, so
@@ -486,13 +491,13 @@ func impactOf(changes []Change) string {
 	}
 
 	var parts []string
-	if reassigned.sum > 0 {
+	if reassigned.present() {
 		parts = append(parts, reassigned.String()+" values reassigned without a trace")
 	}
-	if lost.sum > 0 {
+	if lost.present() {
 		parts = append(parts, lost.String()+" values lost")
 	}
-	if weakened.sum > 0 {
+	if weakened.present() {
 		parts = append(parts, weakened.String()+" values degraded without a trace")
 	}
 	if trash.databases > 0 {
@@ -511,11 +516,18 @@ func impactOf(changes []Change) string {
 type family struct {
 	sum int
 	// capped: a term hit the pagination cap. atLeast: a term's filter can miss
-	// rows. atMost: a term's filter can count rows that survive.
+	// rows, or a term was not counted at all. atMost: a term's filter can count
+	// rows that survive.
 	capped, atLeast, atMost bool
 }
 
 func (f *family) add(d resources.Detail) {
+	if d.Count < 0 {
+		// Not counted — no sound filter, failed or skipped count: the rows it
+		// costs are missing from the sum.
+		f.atLeast = true
+		return
+	}
 	f.sum += d.Count
 	switch {
 	case d.Capped && d.Measure.Bound == change.BoundAtMost:
@@ -530,10 +542,14 @@ func (f *family) add(d resources.Detail) {
 	}
 }
 
+// present says the family has something to announce: a counted value, or a
+// term that costs rows nobody could count.
+func (f family) present() bool { return f.sum > 0 || f.atLeast }
+
 func (f family) String() string {
 	lower := f.capped || f.atLeast
 	switch {
-	case lower && f.atMost:
+	case f.sum == 0 || lower && f.atMost:
 		return "an unmeasured number of"
 	case f.atMost:
 		return fmt.Sprintf("up to %d", f.sum)
