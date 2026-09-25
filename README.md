@@ -77,18 +77,54 @@ vous ne savez pas sur combien de lignes. Et `--fail-on=unknown` les attrape.
 Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
 appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
 
+### Ce que l'API ne sait pas faire
+
+Deux changements sont inexprimables, mesurés le 2026-09-24 :
+
+| Changement | Ce que fait l'API |
+|---|---|
+| Renommer une option | Répond `200`, ne change rien |
+| Changer la couleur d'une option | Répond `400`, que l'option soit désignée par son id ou par son nom, et tout le PATCH de la propriété échoue |
+
+`notion-seed` ne les écrit donc pas, et retient la database entière tant qu'ils
+sont déclarés. Les autres databases du plan s'appliquent. La procédure est
+nommée, avec le nombre de lignes à migrer :
+
+1. créer la nouvelle option dans Notion ;
+2. y déplacer les lignes que le plan a comptées ;
+3. retirer l'ancienne option, puis relancer.
+
+```
+  ~ database.tasks  [migration requise]
+      ~ option "Fait" → "Terminé" (propriété "Statut") — l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer  [migration requise]
+          → 2 lignes seront réassignées à une autre option, sans trace.
+
+Retenu — migration requise
+
+  ~ database.tasks
+      une option doit être migrée à la main : l'API ne sait ni renommer une option ni changer sa couleur
+      → créez la nouvelle option dans Notion, déplacez-y les lignes comptées ci-dessus, retirez l'ancienne, puis relancez
+```
+
+C'est le seul changement déclaré que notion-seed refuse d'écrire — et ce n'est
+pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
+inscrirait dans le state un état que Notion ne porte pas, et chaque run suivant
+afficherait une dérive fantôme.
+
 ## État actuel
 
-MVP 2 : première écriture. `apply` crée les databases déclarées et absentes de
-Notion, et inscrit leur identité dans le state après chaque création. Les
-modifications de propriétés et les destructions ne sont pas encore écrites :
-elles sont affichées, nommées, et `apply` sort en code non nul tant qu'elles
-restent.
+`apply` crée les databases déclarées et absentes de Notion, et modifie celles
+qui existent déjà : nom, description, icône et propriétés déclarées. Le state
+est mis à jour après chaque ressource écrite. Les destructions ne sont pas encore
+écrites : elles sont affichées, nommées, et `apply` sort en code non nul tant
+qu'elles restent. Deux changements d'option, que l'API ne sait pas exprimer, sont
+retenus avec la migration à faire à la main — voir
+[Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire).
 
 | | |
 |---|---|
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
-| `apply` | créations uniquement — voir [Appliquer](#appliquer) |
+| `apply` | créations et modifications ; destructions non écrites — voir [Appliquer](#appliquer) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
 | `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
 | `--fail-on` | le garde-fou de CI — voir [En CI](#en-ci) |
@@ -232,6 +268,11 @@ elle, une option renommée dans le YAML ressort en retrait suivi d'un ajout —
 `destructif` ou `réécriture silencieuse` selon le type et le nombre de lignes
 concernées — faute de pouvoir la suivre à travers le changement de nom.
 
+L'`icon` — un emoji — est écrite sur la database, jamais sur son data source :
+mesuré, écrire sur la database met les deux à jour, écrire sur le data source les
+fait diverger. `notion-seed` ne lit que l'icône de la database : si celle du data
+source est changée à part, dans Notion, il ne la voit pas.
+
 Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notion-seed.schema.json).
 
 ### `lifecycle` — des accusés de lecture
@@ -338,18 +379,44 @@ le state est aveugle à la dérive, et elle confronte le réel à ce qui avait �
 annoncé. Si l'API n'a pas écrit ce que le plan promettait, `apply` le dit — sur
 sa propre écriture.
 
+Les **modifications**. Une database déjà ancrée par le state est écrite en deux
+appels, toujours dans cet ordre :
+
+1. `PATCH /v1/databases/{id}` — le nom, la description et l'icône, s'ils
+   changent ;
+2. `PATCH /v1/data_sources/{id}` — les propriétés qui portent une ligne dans le
+   plan, et elles seules.
+
+Ce qui part est exactement ce que le plan a affiché : une propriété déclarée
+mais identique au réel ne part pas, une propriété non déclarée non plus. Les
+options existantes sont transmises avec leur id, les neuves sans : l'API leur en
+crée un, que la relecture rapporte au state.
+
+L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
+sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins
+coûteux. `apply` le dit, et inscrit dans le state ce qui est passé.
+
 Il retire aussi les **entrées de state obsolètes** : une ressource que le YAML
 ne déclare plus et qui a déjà été supprimée dans Notion. C'est un nettoyage
 local, rien n'est écrit dans Notion.
 
 ### Ce qu'il n'écrit pas encore
 
-Les modifications de propriétés et les destructions. Elles ressortent sous
-`Non appliqué par cette version`, et `apply` sort en code non nul tant qu'il
-reste du travail — un apply qui ne converge pas doit être bruyant en CI.
+Les destructions. Elles ressortent sous `Non appliqué par cette version`, avec
+la marche à suivre : archiver la database dans Notion, ou attendre la version qui
+les écrit.
 
-Une ressource est entièrement écrite ou pas touchée du tout. Il n'y a pas
-d'exécution partielle silencieuse.
+Ce que l'API ne sait pas exprimer ressort, lui, sous `Retenu — migration
+requise` : ce n'est pas une limite de cette version, et attendre n'y changera
+rien — voir [Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire).
+
+Dans les deux cas, `apply` sort en code non nul tant qu'il reste du travail —
+un apply qui ne converge pas doit être bruyant en CI.
+
+Une ressource retenue ou non appliquée n'est pas touchée du tout : aucun appel
+ne part pour elle. Une ressource écrite l'est en entier, à une exception près,
+qui n'est jamais silencieuse : une modification peut s'arrêter entre ses deux
+appels — voir [En cas d'échec](#en-cas-déchec).
 
 ### La confirmation
 
@@ -372,12 +439,24 @@ est vérifié **avant** la confirmation et avant la moindre écriture.
 ### En cas d'échec
 
 Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
-personne n'a demandée. Ce qui a été créé reste créé, et reste dans le state.
+personne n'a demandée. Ce qui a été créé ou modifié reste écrit, et reste dans
+le state.
+
+Une modification peut s'arrêter **entre ses deux appels** : le nom, la
+description ou l'icône sont passés, les propriétés non, et aucune donnée de ligne
+n'a été touchée. `apply` nomme ce qui est passé, l'inscrit dans le state, et
+relancer `notion-seed plan` montre ce qui reste.
+
+Une database dont une page ancêtre est à la corbeille se lit comme vivante, mais
+refuse toute écriture. `apply` le diagnostique et demande de restaurer la page
+parente, plutôt que de relayer le `404` de l'API, qui accuse à tort le partage
+avec l'intégration.
 
 Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
 a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
 database, la page parente et la marche à suivre : vérifier dans Notion, puis
-`notion-seed import` si elle existe.
+`notion-seed import` si elle existe. Pour une modification, l'identité est déjà
+dans le state : `notion-seed plan` suffit à voir ce que Notion porte.
 
 ## Sortie
 
