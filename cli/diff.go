@@ -18,5 +18,6 @@ func newDiffCmd() *cobra.Command {
 		},
 	}
 	opts.bind(cmd)
+	opts.bindOut(cmd)
 	return cmd
 }
