@@ -113,6 +113,7 @@ by hand, and `apply` exits with a non-zero code as long as they remain — see
 |---|---|
 | `init`, `version`, `plan`, `diff`, `import` | available |
 | `apply` | creations, updates and destructions — see [Applying](/commands#apply) |
+| `plan --out` / `apply <file>` | the reviewed plan, applied as reviewed or not at all — see [A reviewed plan](/commands#a-reviewed-plan) |
 | state file | `notion-seed.state.json`, written by `import` and `apply` |
 | `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | acknowledgements — see [lifecycle](/yaml#lifecycle-acknowledgements) |
 | `--fail-on` | the CI safeguard — see [In CI](/commands#in-ci) |
