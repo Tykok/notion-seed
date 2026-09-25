@@ -122,12 +122,12 @@ du plan dit, pour chaque couple, ce qui survit.
 | de \ vers | title | rich_text | number | url | select | status | multi_select | date | checkbox | people |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **title** | | M | M | M | M | M | M | M | M | M |
-| **rich_text** | M | | R | S | D¹ | R | D¹ | D | D | D |
+| **rich_text** | M | | D | S | D¹ | R | D¹ | D | D | D |
 | **number** | M | S | | S | D | R | D | D | D | D |
-| **url** | M | S | R | | D¹ | R | D¹ | D | D | D |
-| **select** | M | S | R | S | | R² | S² | D | D | D |
+| **url** | M | S | D | | D | R | D | D | D | D |
+| **select** | M | S | D | S | | R² | S² | D | D | D |
 | **status** | M | D | D | D | D² | | D² | D | D | D |
-| **multi_select** | M | S | R | S | R² | R² | | D | D | D |
+| **multi_select** | M | S | D | S | R² | R² | | D | D | D |
 | **date** | M | S | D | D | D | R | D | | D | D |
 | **checkbox** | M | S | D | S | D³ | R³ | D³ | D | | D |
 | **people** | M | S | D | D | D | R | D | D | D | |
@@ -136,9 +136,12 @@ S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
 
 - **L'API ne crée jamais d'option.** Vers `select`, `multi_select` ou `status`,
   une valeur ne survit que si une option portant exactement son texte est
-  déclarée dans la même écriture ; depuis `rich_text` ou `url`, le texte est
-  coupé à la première virgule (`multi_select` : découpé sur les virgules).
-  ¹ Avec options déclarées, ces couples deviennent `silent rewrite`.
+  déclarée dans la même écriture ; depuis `rich_text`, le texte est coupé à la
+  première virgule (`multi_select` : découpé sur les virgules). ¹ Avec options
+  déclarées, ces couples deviennent `silent rewrite`.
+- **Vers `number`**, un texte garde son nombre de tête (`'2026-01-15'` → 2026)
+  et tout le reste passe à vide : mesuré `destructive`, et la ligne nomme les
+  valeurs réécrites.
 - ² Entre types à options, chaque option actuelle que le YAML ne redéclare pas
   sous le même nom ressort en ligne `-` avec son compte. Vers `status`, ses
   lignes ne passent pas à vide : elles reçoivent la première option déclarée.
@@ -669,7 +672,7 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 
 | Valeur | Ce qu'elle attrape |
 |---|---|
-| `destructive` | une donnée est perdue, sans qu'aucune fausse valeur soit écrite |
+| `destructive` | une donnée est perdue : des valeurs passent à vide. Vers `number`, certains textes ne gardent en plus que leur nombre de tête — la ligne le dit |
 | `silent-rewrite` | une donnée est remplacée par une autre, sans trace |
 | `unknown` | l'impact n'a pas pu être mesuré : comptage en échec, ou hors ligne |
 | `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |

@@ -161,8 +161,11 @@ const (
 //     status (read back as "Not started") is emptied. No filter isolates it.
 //   - Toward status, EVERY row gets a value, empty ones included: a silent
 //     rewrite of the whole column.
-//   - A pair that rewrites some values and empties others is classed as a
-//     silent rewrite: a false value is worse than a missing one.
+//   - A pair is classed as the campaign measured it. Toward number, a text
+//     keeps its leading number ('2026-01-15' → 2026) and everything else is
+//     emptied: measured destructive, and the note on the line names the
+//     rewritten values. Behavior the campaign did not observe — the comma
+//     cut on a url, say — is not encoded.
 var typeChangeTable = map[[2]string]entry{
 	// title: the API refuses both directions.
 	{"title", "rich_text"}:    {class: ClassMigration, refused: true, measured: measuredCampaign, survives: titleFrom},
@@ -185,7 +188,7 @@ var typeChangeTable = map[[2]string]entry{
 	{"people", "title"}:       {class: ClassMigration, refused: true, measured: measuredCampaign, survives: titleTo},
 
 	// rich_text.
-	{"rich_text", "number"}:       {class: ClassSilentRewrite, measured: measuredRemeasure, survives: leadingNumber},
+	{"rich_text", "number"}:       {class: ClassDestructive, measured: measuredRemeasure, survives: leadingNumber},
 	{"rich_text", "url"}:          {class: ClassSafe, measured: measuredCampaign, survives: "everything survives, as is, even text that is not a URL"},
 	{"rich_text", "select"}:       {class: ClassDestructive, withOptions: cls(ClassSilentRewrite), measured: measuredCampaign, survives: byTextCut},
 	{"rich_text", "status"}:       {class: ClassSilentRewrite, measured: measuredCampaign, survives: toStatus + ", cut at the first comma"},
@@ -206,10 +209,10 @@ var typeChangeTable = map[[2]string]entry{
 
 	// url.
 	{"url", "rich_text"}:    {class: ClassSafe, measured: measuredCampaign, survives: asText},
-	{"url", "number"}:       {class: ClassSilentRewrite, measured: measuredCampaign, survives: leadingNumber},
-	{"url", "select"}:       {class: ClassDestructive, withOptions: cls(ClassSilentRewrite), measured: measuredCampaign, survives: byTextCut},
+	{"url", "number"}:       {class: ClassDestructive, measured: measuredCampaign, survives: leadingNumber},
+	{"url", "select"}:       {class: ClassDestructive, measured: measuredCampaign, survives: byText},
 	{"url", "status"}:       {class: ClassSilentRewrite, measured: measuredCampaign, survives: toStatus},
-	{"url", "multi_select"}: {class: ClassDestructive, withOptions: cls(ClassSilentRewrite), measured: measuredCampaign, survives: byTextSplit},
+	{"url", "multi_select"}: {class: ClassDestructive, measured: measuredCampaign, survives: byText},
 	{"url", "date"}:         {class: ClassDestructive, measured: measuredCampaign, survives: isoDate},
 	{"url", "checkbox"}:     {class: ClassDestructive, measured: measuredCampaign, survives: unchecked},
 	{"url", "people"}:       {class: ClassDestructive, measured: measuredCampaign, survives: "nothing survives, member e-mails included"},
@@ -217,7 +220,7 @@ var typeChangeTable = map[[2]string]entry{
 	// select. Toward an option type, the removal lines of retypedRemovalLines
 	// count the values whose option is not redeclared.
 	{"select", "rich_text"}:    {class: ClassSafe, measured: measuredCampaign, survives: "the option name survives, as text"},
-	{"select", "number"}:       {class: ClassSilentRewrite, measured: measuredCampaign, survives: leadingNumber},
+	{"select", "number"}:       {class: ClassDestructive, measured: measuredCampaign, survives: leadingNumber},
 	{"select", "url"}:          {class: ClassSafe, measured: measuredCampaign, survives: "the option name survives, as text"},
 	{"select", "status"}:       {class: ClassSilentRewrite, measured: measuredCampaign, survives: toStatusByName},
 	{"select", "multi_select"}: {class: ClassSafe, measured: measuredRemeasure, survives: byName},
@@ -238,7 +241,7 @@ var typeChangeTable = map[[2]string]entry{
 
 	// multi_select.
 	{"multi_select", "rich_text"}: {class: ClassSafe, measured: measuredCampaign, survives: "the values survive, joined by ','"},
-	{"multi_select", "number"}:    {class: ClassSilentRewrite, measured: measuredCampaign, survives: "a lone leading number is kept (['2026-01-15'] → 2026, a false value); everything else is emptied"},
+	{"multi_select", "number"}:    {class: ClassDestructive, measured: measuredCampaign, survives: "a lone leading number is kept (['2026-01-15'] → 2026, a false value); everything else is emptied"},
 	{"multi_select", "url"}:       {class: ClassSafe, measured: measuredCampaign, survives: "the values survive, joined by ','"},
 	{"multi_select", "select"}:    {class: ClassSilentRewrite, measured: measuredFirst, survives: "only the first value is kept, and nothing says the others existed"},
 	{"multi_select", "status"}:    {class: ClassSilentRewrite, measured: measuredCampaign, survives: "only the first value is kept; " + toStatusByName},

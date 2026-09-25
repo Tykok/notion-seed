@@ -118,12 +118,12 @@ plan line says, for each pair, what survives.
 | from \ to | title | rich_text | number | url | select | status | multi_select | date | checkbox | people |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **title** | | M | M | M | M | M | M | M | M | M |
-| **rich_text** | M | | R | S | D¹ | R | D¹ | D | D | D |
+| **rich_text** | M | | D | S | D¹ | R | D¹ | D | D | D |
 | **number** | M | S | | S | D | R | D | D | D | D |
-| **url** | M | S | R | | D¹ | R | D¹ | D | D | D |
-| **select** | M | S | R | S | | R² | S² | D | D | D |
+| **url** | M | S | D | | D | R | D | D | D | D |
+| **select** | M | S | D | S | | R² | S² | D | D | D |
 | **status** | M | D | D | D | D² | | D² | D | D | D |
-| **multi_select** | M | S | R | S | R² | R² | | D | D | D |
+| **multi_select** | M | S | D | S | R² | R² | | D | D | D |
 | **date** | M | S | D | D | D | R | D | | D | D |
 | **checkbox** | M | S | D | S | D³ | R³ | D³ | D | | D |
 | **people** | M | S | D | D | D | R | D | D | D | |
@@ -132,9 +132,12 @@ S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
 
 - **The API never creates an option.** Toward `select`, `multi_select` or
   `status`, a value survives only where an option with exactly its text is
-  declared in the same write; from `rich_text` or `url`, the text is cut at the
-  first comma (`multi_select`: split on commas). ¹ With declared options, these
-  pairs become `silent rewrite`.
+  declared in the same write; from `rich_text`, the text is cut at the first
+  comma (`multi_select`: split on commas). ¹ With declared options, these pairs
+  become `silent rewrite`.
+- **Toward `number`**, a text keeps its leading number (`'2026-01-15'` → 2026)
+  and everything else is emptied: measured `destructive`, and the line names
+  the rewritten values.
 - ² Between option types, each current option the YAML does not redeclare
   under the same name comes out as its own `-` line with its count. Toward
   `status` its rows are not emptied: they get the first declared option.
@@ -652,7 +655,7 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 
 | Value | What it catches |
 |---|---|
-| `destructive` | data is lost, without any wrong value being written |
+| `destructive` | data is lost: values are emptied. Toward `number`, some texts also keep only their leading number — the line says so |
 | `silent-rewrite` | data is replaced by other data, without a trace |
 | `unknown` | the impact could not be measured: failed count, or offline |
 | `migration` | the API accepts the request and changes nothing: the rows must be migrated by hand |
