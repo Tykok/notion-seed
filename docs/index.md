@@ -34,7 +34,7 @@ tool born from that.
 Declaring a Notion workspace in files is not the hard problem. The hard problem
 is knowing what the API will do to your data when the declaration changes.
 
-Six behaviors measured against the API, which a tool that just sends the
+Nine behaviors measured against the API, which a tool that just sends the
 request does not warn you about:
 
 | Change | What the API does |
@@ -45,13 +45,17 @@ request does not warn you about:
 | Remove a `status` option | **Reassigns the rows to another option**, without an error |
 | `multi_select` → `select` | **Keeps only one value** on rows that held several |
 | `select` → `multi_select` | Recreates the options: a row keeps its value only if the YAML redeclares an option **with the same name**; the others are emptied |
+| `status` → `select` | Empties every row whose option is not redeclared, **and every row that never received a status**, although it reads "Not started" |
+| Any type → `status` | **Gives every row a value**, empty ones included |
+| Change the type of a `title` | Refused, `400` |
 
 Measured on 2026-09-24 against API `2025-09-03`, on populated rows — the last
-one on 2026-09-25.
+four on 2026-09-25, with the 90 type changes listed in
+[Type changes](/commands#type-changes).
 
-Removing a `status` option and `multi_select` → `select` are the ones that
-justify the tool: the data is not lost, it is replaced by a plausible, wrong
-value, indistinguishable after the fact.
+Removing a `status` option, `multi_select` → `select` and any type → `status`
+are the ones that justify the tool: the data is not lost, it is replaced by a
+plausible, wrong value, indistinguishable after the fact.
 
 `notion-seed` does not stop you. It tells you, **before writing**, how many
 rows are affected. A `status` option removed from the YAML, held by two rows:
@@ -82,12 +86,13 @@ decision to the workflow.
 
 ## What the API cannot do
 
-Two changes are not expressible, measured on 2026-09-24:
+Three changes are not expressible, measured on 2026-09-24 and 2026-09-25:
 
 | Change | What the API does |
 |---|---|
 | Rename an option | Returns `200`, changes nothing |
 | Change an option's color | Returns `400`, whether the option is designated by its id or by its name, and the whole PATCH of the property fails |
+| Change the type of a `title` property, or turn a property into a `title` | Returns `400`: a data source holds a single title property |
 
 `notion-seed` therefore does not write them, and withholds the whole database
 as long as they are declared. The other databases of the plan are applied. See
@@ -99,9 +104,9 @@ and the number of rows it names.
 `apply` creates the databases that are declared and absent from Notion, updates
 the ones that already exist — name, description, icon and declared properties
 — and moves to the trash the ones the YAML no longer declares. The state is
-updated after each resource written. Two option changes, which the API cannot
-express, are withheld with the migration to do by hand, and `apply` exits with
-a non-zero code as long as they remain — see
+updated after each resource written. Two option changes and the type change of
+a `title`, which the API cannot express, are withheld with the migration to do
+by hand, and `apply` exits with a non-zero code as long as they remain — see
 [What the API cannot do](#what-the-api-cannot-do).
 
 | | |
