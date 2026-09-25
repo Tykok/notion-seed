@@ -1541,3 +1541,22 @@ func TestRetypedRemovalTowardStatusCarriesTheNewType(t *testing.T) {
 		}
 	}
 }
+
+// multi_select → select: the removal lines count the rows holding "Basse";
+// the property line must not count them again in another family.
+func TestMultiSelectTypeChangeDoesNotCountRemovedRowsTwice(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Tags": multiSel(state.Option{ID: "o1", Name: "Haute"}, state.Option{ID: "o2", Name: "Basse"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Tags": {Type: "select", Options: []state.Option{{Name: "Haute"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	m := res.Changeset.Details[0].Measure
+	if m == nil || !reflect.DeepEqual(m.Except, []string{"Basse"}) {
+		t.Errorf("property line Measure = %+v, want the rows holding Basse excluded", m)
+	}
+}

@@ -201,7 +201,11 @@ func exceptFilter(r Request, on func(map[string]any) map[string]any) (map[string
 			}
 			v = f
 		}
-		and = append(and, on(map[string]any{"does_not_equal": v}))
+		op := "does_not_equal"
+		if r.PropertyType == "multi_select" {
+			op = "does_not_contain"
+		}
+		and = append(and, on(map[string]any{op: v}))
 	}
 	return map[string]any{"and": and}, nil
 }
