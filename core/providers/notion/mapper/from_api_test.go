@@ -204,6 +204,42 @@ func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
 	}
 }
 
+// resources.Trash recalcule "archived || in_trash" localement, sans appeler ce
+// décodeur : un PATCH corbeille ne relit jamais le data source, que le
+// décodeur exige en plus de la database. Ce test fait tourner les deux règles
+// sur le MÊME corps de réponse : sans lui, faire dériver l'une des deux (par
+// exemple en oubliant in_trash dans l'une) ne casserait rien.
+func TestTrashLocalRuleAgreesWithDecoderRule(t *testing.T) {
+	const stubDSBody = `{"id":"ds1","title":[],"properties":{}}`
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"ni archived ni in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`},
+		{"archived seul", `{"object":"database","id":"db1","archived":true}`},
+		{"in_trash seul", `{"object":"database","id":"db1","in_trash":true}`},
+		{"les deux", `{"object":"database","id":"db1","archived":true,"in_trash":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &stubTransport{byPath: map[string]string{"/v1/databases/db1": tc.body}}
+			trashed, err := resources.NewDatabaseResource(st, RemoteDatabaseFromJSON).
+				Trash(context.Background(), "db1")
+			if err != nil {
+				t.Fatalf("Trash() error = %v", err)
+			}
+
+			decoded, err := RemoteDatabaseFromJSON([]byte(tc.body), []byte(stubDSBody))
+			if err != nil {
+				t.Fatalf("RemoteDatabaseFromJSON() error = %v", err)
+			}
+			if trashed != decoded.Archived {
+				t.Errorf("Trash() = %v, décodeur.Archived = %v : les deux règles ont dérivé",
+					trashed, decoded.Archived)
+			}
+		})
+	}
+}
+
 func TestRemoteDatabaseFromJSONReadsEmojiIcon(t *testing.T) {
 	dbBody := []byte(`{"id":"db-1","icon":{"type":"emoji","emoji":"🔵"},
 		"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)

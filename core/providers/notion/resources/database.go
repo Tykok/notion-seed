@@ -295,6 +295,47 @@ func (r *DatabaseResource) Update(
 	return out, nil
 }
 
+// trashBody est le corps qui met une database à la corbeille. Mesuré le
+// 2026-09-24 : il suffit, et la réponse porte archived=true, in_trash=true.
+const trashBody = `{"in_trash":true}`
+
+// Trash met une database à la corbeille : un seul PATCH, sur la database.
+//
+// Le booléen dit si la RÉPONSE confirme la corbeille, selon une règle locale
+// (archived || in_trash) qui DOIT rester la même que celle du décodeur
+// (mapper.RemoteDatabaseFromJSON) — celle-là même par laquelle le plan suivant
+// classerait la database. La dupliquer ici, plutôt que d'appeler le décodeur,
+// est structurel : le décodeur veut aussi le corps du data source, qu'un PATCH
+// corbeille ne relit jamais. TestTrashLocalRuleAgreesWithDecoderRule, dans le
+// paquet mapper, garde les deux règles synchronisées en faisant tourner le
+// vrai décodeur. Un 200 qui ne confirme pas la corbeille n'est pas une
+// destruction : l'appelant garde alors l'identité, car l'abandonner rendrait
+// invisible une database qui existe peut-être encore.
+//
+// Une réponse illisible rend une issue inconnue : l'appel a répondu 200, donc la
+// mutation a peut-être eu lieu, et rien ne permet de le dire.
+func (r *DatabaseResource) Trash(ctx context.Context, id string) (bool, error) {
+	resp, err := r.tr.Execute(ctx, transport.APIRequest{
+		Method: "PATCH",
+		Path:   "/v1/databases/" + id,
+		Body:   []byte(trashBody),
+	})
+	if err != nil {
+		return false, err
+	}
+	var probe struct {
+		Archived bool `json:"archived"`
+		InTrash  bool `json:"in_trash"`
+	}
+	if err := json.Unmarshal(resp.Body, &probe); err != nil {
+		return false, &transport.OutcomeUnknownError{Cause: fmt.Errorf(
+			"réponse de PATCH /v1/databases/%s illisible: %w\n"+
+				"  → réessayez ; si ça persiste, vérifiez que `ntn` parle bien la version "+
+				"d'API 2025-09-03 (`ntn --version`)", id, err)}
+	}
+	return probe.Archived || probe.InTrash, nil
+}
+
 // asRemoteDatabase ramène la relecture d'une database à son type concret. Read
 // ne rend jamais autre chose : un autre type ne peut venir que d'un défaut de
 // notion-seed, et le message le dit plutôt que de laisser chercher du côté de
