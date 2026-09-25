@@ -82,8 +82,9 @@ least N row(s)", and how many data sources were not counted. It stays
 `destructive` whatever the count, 0 included.
 
 A **type change** is quantified only if the source column is of one of them.
-Of the three dangerous pairs measured on the overview ([Why](/#why)), only one
-is:
+Of the three dangerous pairs below, only one is — and only
+`multi_select` → `select` is among the behaviors measured on the overview
+([Why](/#why)):
 
 | Pair | Quantified? |
 |---|---|
@@ -171,7 +172,9 @@ it again, redeclare it then run `notion-seed import`.
 Renaming a database's `key` in the YAML is not a rename for notion-seed, which
 only has the key to anchor the identity: the old key comes out orphaned and
 goes to the trash, the new one is created empty, and `plan` shows both
-separately. To keep the database, keep its `key` — `name` can change freely —
+separately. To keep the database, keep its `key` — with an explicit `key`,
+`name` can change freely; without one, the key is derived from `name` and a
+rename moves it (see [databases/*.yaml](/yaml#databases-yaml)) —
 or, if the key has already changed, reattach the existing database to the new
 key with `notion-seed import` before running `apply`.
 

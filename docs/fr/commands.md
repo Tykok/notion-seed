@@ -83,8 +83,9 @@ disent alors « at least N row(s) », et combien de data sources n'ont pas été
 comptés. Elle reste `destructive` quel que soit ce compte, 0 compris.
 
 Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
-d'eux. Des trois couples dangereux mesurés sur la présentation
-([Pourquoi](/fr/#pourquoi)), un seul l'est :
+d'eux. Des trois couples dangereux ci-dessous, un seul l'est — et seul
+`multi_select` → `select` fait partie des comportements mesurés sur la
+présentation ([Pourquoi](/fr/#pourquoi)) :
 
 | Couple | Chiffré ? |
 |---|---|
@@ -174,7 +175,9 @@ Renommer la `key` d'une database dans le YAML n'est pas un renommage pour
 notion-seed, qui n'a que la key pour ancrer l'identité : l'ancienne key en
 ressort orpheline et part à la corbeille, la nouvelle est créée vide, et
 `plan` montre les deux séparément. Pour garder la database, gardez sa `key` —
-`name` peut changer librement — ou, si la key a déjà changé, ré-attachez la
+avec une `key` explicite, `name` peut changer librement ; sans elle, la key est
+dérivée de `name` et un renommage la déplace (voir
+[databases/*.yaml](/fr/yaml#databases-yaml)) — ou, si la key a déjà changé, ré-attachez la
 database existante à la nouvelle key avec `notion-seed import` avant de
 lancer `apply`.
 
