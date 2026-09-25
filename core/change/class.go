@@ -99,7 +99,7 @@ func ClassifyOptionRemoval(propertyType string, count int) Class {
 // Measured on 2026-09-25 against the API: a row keeps its value only if an
 // option with the same name goes in the payload. Otherwise, toward select or
 // multi_select it is emptied — a loss, whatever the old type —, and toward
-// status it gets the first declared option — a false value.
+// status it is rewritten to one of the declared options — a false value.
 func ClassifyRetypedOptionRemoval(targetType string, count int) Class {
 	return classifyLoss(count, targetType == "status")
 }

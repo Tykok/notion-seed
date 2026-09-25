@@ -299,7 +299,7 @@ func consequence(d resources.Detail) string {
 	if d.Measure.Option != "" {
 		switch removalFate(*d.Measure) {
 		case "retyped-status":
-			return count + " will be reassigned to the first declared option, without a trace"
+			return count + " will be rewritten to one of the declared options, without a trace"
 		case "status":
 			return count + " will be reassigned to another option, without a trace"
 		case "multi_select":
@@ -333,7 +333,14 @@ func consequence(d resources.Detail) string {
 func typeChangeConsequence(d resources.Detail) string {
 	m := d.Measure
 	fate := "will lose their value"
-	if d.Class == ClassSilentRewrite {
+	switch {
+	case d.Class != ClassSilentRewrite:
+	case m.TargetType == "status" ||
+		m.PropertyType == "multi_select" && m.TargetType == "select":
+		// The rows this line counts keep or get a value; the values that
+		// are emptied are counted on the option removal lines.
+		fate = "will be rewritten, without a trace"
+	default:
 		fate = "will be rewritten or emptied, without a trace"
 	}
 	switch {
@@ -402,7 +409,7 @@ func destroyedRows(d resources.Detail) string {
 // it is treated as a select, a loss (measured on 2026-09-25).
 func removalFate(m resources.Measurement) string {
 	// Measured on 2026-09-25: toward status, a value whose option is not
-	// redeclared gets the first declared option.
+	// redeclared is rewritten to one of the declared options.
 	if m.Retyped && m.TargetType == "status" {
 		return "retyped-status"
 	}
