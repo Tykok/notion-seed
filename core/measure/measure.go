@@ -57,6 +57,16 @@ type Request struct {
 	AllRows      bool
 }
 
+// fallback dit ce que le plan affichera faute de compte. Il diffère pour une
+// destruction : sa classe ne dépend pas du compte, elle reste destructive, et
+// l'annoncer « inconnue » serait faux.
+func (r Request) fallback() string {
+	if r.AllRows {
+		return "la destruction reste annoncée destructive, sans son nombre de lignes"
+	}
+	return "l'impact de ce changement sera annoncé comme inconnu"
+}
+
 // subject nomme ce qu'on compte, pour les messages d'erreur.
 func (r Request) subject() string {
 	if r.AllRows {
@@ -155,8 +165,8 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf(
 				"comptage des lignes de %s impossible: %w\n"+
-					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez "+
-					"pour obtenir le compte", r.subject(), err)
+					"  → %s ; réessayez "+
+					"pour obtenir le compte", r.subject(), err, r.fallback())
 		}
 
 		// Results est un POINTEUR de tranche, délibérément : une tranche nue
@@ -173,7 +183,7 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if err := json.Unmarshal(resp.Body, &decoded); err != nil {
 			return Result{}, fmt.Errorf(
 				"réponse de comptage illisible: %w\n"+
-					"  → réessayez ; si ça persiste, l'impact sera annoncé comme inconnu", err)
+					"  → réessayez ; si ça persiste, %s", err, r.fallback())
 		}
 
 		// Un 200 dont on ne reconnaît pas la forme ne vaut PAS zéro ligne.
@@ -183,18 +193,18 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if decoded.Object != "list" {
 			return Result{}, fmt.Errorf(
 				"%w pour %s: l'API a répondu un objet %q, pas une liste de lignes\n"+
-					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"  → %s ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.subject(), decoded.Object)
+				ErrUnreadableCount, r.subject(), decoded.Object, r.fallback())
 		}
 		if decoded.Results == nil {
 			return Result{}, fmt.Errorf(
 				"%w pour %s: la liste rendue par l'API ne porte aucun champ results\n"+
-					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"  → %s ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.subject())
+				ErrUnreadableCount, r.subject(), r.fallback())
 		}
 
 		out.Count += len(*decoded.Results)
@@ -210,10 +220,10 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if decoded.NextCursor == "" {
 			return Result{}, fmt.Errorf(
 				"%w pour %s: l'API annonce une page suivante sans curseur pour l'atteindre\n"+
-					"  → l'impact de ce changement sera annoncé comme inconnu ; réessayez, "+
+					"  → %s ; réessayez, "+
 					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
 					"réponse de l'API",
-				ErrUnreadableCount, r.subject())
+				ErrUnreadableCount, r.subject(), r.fallback())
 		}
 		cursor = decoded.NextCursor
 	}
