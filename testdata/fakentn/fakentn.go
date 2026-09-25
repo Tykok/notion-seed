@@ -170,6 +170,11 @@ func main() {
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
+	case "authenticated_database_updatable":
+		// La database d'authenticated_database, qui retient ce qu'on lui écrit :
+		// couvre l'update d'apply de bout en bout, relecture comprise. Voir
+		// runUpdatable.
+		runUpdatable()
 	case "authenticated_database_query_403":
 		// Tout est lisible SAUF le comptage, refusé en 403 : couvre le fait
 		// qu'un comptage en échec n'empêche ni le plan ni son rendu, et que sa

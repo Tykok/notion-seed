@@ -772,6 +772,7 @@ func TestFakeNtnAnswersQueryWithAListInEveryScenario(t *testing.T) {
 	// Tous les scénarios qui servent /v1/data_sources/ et répondent en 200.
 	scenarios := []string{
 		"authenticated_database",
+		"authenticated_database_updatable",
 		"archived_database",
 		"authenticated_create",
 	}
