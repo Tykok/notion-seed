@@ -548,6 +548,13 @@ func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
 	if !strings.Contains(out, "Retenu : 1") {
 		t.Errorf("le bilan ne compte pas la ressource retenue:\n%s", out)
 	}
+	// Rien n'est écrit : le compte est le coût du remède, pas une perte.
+	if !strings.Contains(out, `2 lignes portent "Fait" : à migrer à la main`) {
+		t.Errorf("la ligne ne chiffre pas la migration à faire:\n%s", out)
+	}
+	if strings.Contains(out, "réassignées") {
+		t.Errorf("une ressource retenue est annoncée comme réassignant des lignes:\n%s", out)
+	}
 }
 
 // Une ressource retenue ne part pas : aucun PATCH, state intact.

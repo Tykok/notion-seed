@@ -272,6 +272,16 @@ func consequence(d resources.Detail) string {
 	// cette propriété, et c'est pour ça qu'il parle de valeurs, pas de lignes.
 	count := bound(d.Count, d.Capped) + " lignes"
 
+	// Migration : la ressource est retenue, rien ne sera écrit. Le compte porte
+	// sur l'option ACTUELLE parce que c'est le coût du remède — les lignes à
+	// déplacer à la main —, pas une perte. Laisser la ligne tomber dans le cas
+	// du retrait ci-dessous annoncerait une réassignation ou un vidage qui
+	// n'aura pas lieu : un chiffre faux sur la donnée de l'utilisateur.
+	if d.Class == ClassMigration && d.Measure.Option != "" {
+		return fmt.Sprintf("%s portent %q : à migrer à la main avant d'appliquer",
+			count, d.Measure.Option)
+	}
+
 	// Retrait d'option : le sort des lignes dépend du type, et les TROIS cas
 	// mesurés le 2026-09-24 diffèrent. Les confondre affirmerait plus que ce qui
 	// a été mesuré, ce qui est le seul défaut que ce produit ne peut pas se
@@ -339,6 +349,12 @@ func Impact(p *Plan) string {
 		}
 		for _, d := range c.Details {
 			if d.Measure == nil || d.Count <= 0 {
+				continue
+			}
+			// Une ligne de migration retient sa ressource : rien n'est écrit, donc
+			// rien n'est perdu. Son compte est le coût d'un remède manuel, que la
+			// ligne elle-même affiche ; l'additionner ici en ferait une perte.
+			if d.Class == ClassMigration {
 				continue
 			}
 			switch {
