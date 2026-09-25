@@ -63,6 +63,10 @@ type Measurement struct {
 	// it brings: toward status, a value that is not redeclared is reassigned
 	// to the first option instead of emptied (measured on 2026-09-25).
 	TargetType string
+	// Bound also marks a retyped multi_select option removal as a lower bound
+	// of what its rows lose: toward select or status, only the first value is
+	// kept.
+	//
 	// Count, Bound, Except and Caveat describe a type change's count, as
 	// change.TypeChangeOf gives it: which rows to filter, how the figure
 	// relates to the rows really touched, which declared option names are

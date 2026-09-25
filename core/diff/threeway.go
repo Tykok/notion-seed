@@ -608,6 +608,14 @@ func retypedRemovalLines(propName string, want, have state.Property) []resources
 	for _, name := range undeclaredOptions(want, have) {
 		d := removalLine(propName, have.Type, name, true)
 		d.Measure.TargetType = want.Type
+		// From multi_select toward a single value, only the FIRST value is
+		// kept (measured on 2026-09-24): a row [B, A] with B not redeclared is
+		// counted here, and loses A too, which no line counts. The count is
+		// exact for B, a lower bound of what the row loses — and the total
+		// must say so.
+		if have.Type == "multi_select" && want.Type != "multi_select" {
+			d.Measure.Bound = change.BoundAtLeast
+		}
 		out = append(out, d)
 	}
 	return out
