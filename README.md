@@ -500,8 +500,9 @@ Sous une page ancêtre déjà à la corbeille, Notion refuse aussi la mise à la
 corbeille, et la database y part de toute façon avec sa page. `apply` propose
 les deux issues : restaurer la page parente puis relancer `apply`, ou supprimer
 définitivement la page parente depuis la corbeille de Notion, puis relancer
-`notion-seed plan` : si Notion ne connaît plus la database, son entrée est
-nettoyée comme entrée de state obsolète.
+`notion-seed plan` : si Notion ne connaît plus la database, son entrée y
+ressort en entrée de state obsolète, qu'un `apply` suivant retire sans rien
+écrire.
 
 Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
 a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
