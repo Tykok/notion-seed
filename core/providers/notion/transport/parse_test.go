@@ -43,10 +43,10 @@ func TestParseStatusAndHeaders(t *testing.T) {
 		headerKey  string
 		headerVal  string
 	}{
-		{"200 avec headers", stderr200, 200, true, "x-notion-request-id", "99999999-9999-4999-8999-999999999999"},
+		{"200 with headers", stderr200, 200, true, "x-notion-request-id", "99999999-9999-4999-8999-999999999999"},
 		{"404", stderr404, 404, true, "content-length", "363"},
-		{"429 avec retry-after", stderr429, 429, true, "retry-after", "3"},
-		{"pas de ligne de statut", stderr400, 0, false, "", ""},
+		{"429 with retry-after", stderr429, 429, true, "retry-after", "3"},
+		{"no status line", stderr400, 0, false, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,7 +83,7 @@ func TestParseAPIError(t *testing.T) {
 		{"400 validation_error", stderr400, true, 400, "validation_error", "should be a valid uuid"},
 		{"400 validation_error multi-line", stderr400MultiLine, true, 400, "validation_error", "instead was"},
 		{"429 rate_limited", stderr429, true, 429, "rate_limited", "Rate limited"},
-		{"succès, pas d'erreur", stderr200, false, 0, "", ""},
+		{"success, no error", stderr200, false, 0, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -123,20 +123,20 @@ func TestAPIErrorRetryable(t *testing.T) {
 	}
 }
 
-// Une ligne au-delà du plafond du scanner tronque la trace : un header peut
-// manquer sans que rien ne le signale. L'erreur du scanner était jetée, donc un
-// stderr tronqué ressortait comme un parsing normal.
+// A line beyond the scanner's cap truncates the trace: a header can be missing
+// without anything reporting it. The scanner's error was thrown away, so a
+// truncated stderr came out as a normal parse.
 func TestParseStatusAndHeadersReportsScannerError(t *testing.T) {
 	huge := []byte("< 200 OK\n< x-long: " + strings.Repeat("a", 2*1024*1024) + "\n")
 
 	status, _, ok, err := ParseStatusAndHeaders(huge)
 	if err == nil {
-		t.Fatal("error = nil : l'erreur du scanner a été avalée")
+		t.Fatal("error = nil: the scanner error was swallowed")
 	}
 	if ok {
-		t.Error("ok = true sur une trace tronquée : on ne sait pas ce qui a été perdu après le statut")
+		t.Error("ok = true on a truncated trace: what was lost after the status is unknown")
 	}
 	if status != 0 {
-		t.Errorf("status = %d, want 0 sur une trace tronquée", status)
+		t.Errorf("status = %d, want 0 on a truncated trace", status)
 	}
 }

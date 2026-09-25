@@ -4,8 +4,8 @@ package transport
 
 import "fmt"
 
-// APIError est une erreur retournée par l'API Notion, extraite du stderr de
-// ntn (exit code 5).
+// APIError is an error returned by the Notion API, extracted from ntn's
+// stderr (exit code 5).
 type APIError struct {
 	Status     int
 	NotionCode string
@@ -16,28 +16,28 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("notion api %d %s: %s", e.Status, e.NotionCode, e.Message)
 }
 
-// Retryable ne vaut true que sur 429 et 5xx. Un 4xx est une erreur de config
-// ou de permission : la rejouer ne fait que perdre du temps.
+// Retryable is true only on 429 and 5xx. A 4xx is a config or permission
+// error: replaying it only wastes time.
 func (e *APIError) Retryable() bool {
 	return e.Status == 429 || e.Status >= 500
 }
 
-// OutcomeUnknownError signale qu'on ne sait pas si l'appel a abouti côté
-// serveur — typiquement un timeout. Ne jamais traiter comme un échec : la
-// mutation a peut-être été appliquée.
+// OutcomeUnknownError reports that it is not known whether the call succeeded
+// server-side — typically a timeout. Never treat it as a failure: the
+// mutation may have been applied.
 type OutcomeUnknownError struct {
 	Cause error
 }
 
 func (e *OutcomeUnknownError) Error() string {
-	return fmt.Sprintf("résultat inconnu, l'appel a peut-être abouti côté serveur: %v", e.Cause)
+	return fmt.Sprintf("unknown result, the call may have succeeded server-side: %v", e.Cause)
 }
 
 func (e *OutcomeUnknownError) Unwrap() error { return e.Cause }
 
-// UsageError signale que notion-seed a construit un appel `ntn` invalide
-// (exit code 2). C'est un bug interne, jamais rejoué. La commande construite
-// est reportée : sans elle, l'utilisateur n'a aucun moyen de rapporter le bug.
+// UsageError reports that notion-seed built an invalid `ntn` call (exit
+// code 2). It is an internal bug, never replayed. The built command is
+// reported: without it, the user has no way to report the bug.
 type UsageError struct {
 	Command string
 	Stderr  string
@@ -45,6 +45,6 @@ type UsageError struct {
 
 func (e *UsageError) Error() string {
 	return fmt.Sprintf(
-		"appel ntn invalide (bug interne de notion-seed)\n  commande : %s\n  %s",
+		"invalid ntn call (notion-seed bug)\n  command: %s\n  %s",
 		e.Command, e.Stderr)
 }

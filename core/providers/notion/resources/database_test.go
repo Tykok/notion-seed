@@ -13,15 +13,16 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
-// stubTransport rend une réponse par chemin appelé.
+// stubTransport returns one response per called path.
 //
-// calls enregistre "MÉTHODE /chemin" — pas le seul chemin — pour qu'un test
-// puisse distinguer un PATCH d'un GET sur la même ressource : Update relit
-// exactement les chemins qu'elle vient d'écrire.
+// calls records "METHOD /path" — not the path alone — so a test can tell a
+// PATCH from a GET on the same resource: Update reads back exactly the paths
+// it just wrote.
 //
-// errs permet de faire échouer un appel précis sans toucher aux autres : sans
-// lui, un test ne peut faire échouer QUE tous les appels d'un transport, ce
-// qui ne permet pas de vérifier qu'Update s'arrête au bon endroit.
+// errs makes it possible to fail one specific call without touching the
+// others: without it, a test can only fail ALL the calls of a transport,
+// which does not make it possible to check that Update stops at the right
+// place.
 type stubTransport struct {
 	byPath map[string]string
 	calls  []string
@@ -43,8 +44,8 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 		"/v1/data_sources/ds1": `{"id":"ds1","title":[{"plain_text":"Projects"}],
 			"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`,
 	}}
-	// Le stub CAPTURE ce qu'il reçoit. Sans ça, un appel decode(dsBody, dbBody)
-	// avec les arguments inversés passerait le test sans être vu.
+	// The stub CAPTURES what it receives. Without that, a decode(dsBody, dbBody)
+	// call with swapped arguments would pass the test unnoticed.
 	var gotDB, gotDS []byte
 	decode := func(dbBody, dsBody []byte) (RemoteDatabase, error) {
 		gotDB, gotDS = dbBody, dsBody
@@ -61,21 +62,21 @@ func TestDatabaseResourceReadFetchesDatabaseThenDataSource(t *testing.T) {
 	}
 	if len(st.calls) != 2 ||
 		st.calls[0] != "GET /v1/databases/db1" || st.calls[1] != "GET /v1/data_sources/ds1" {
-		t.Errorf("appels = %v, want database puis data_source", st.calls)
+		t.Errorf("calls = %v, want database then data_source", st.calls)
 	}
 	if !strings.Contains(string(gotDB), `"object":"database"`) &&
 		!strings.Contains(string(gotDB), `"data_sources"`) {
-		t.Errorf("decode a reçu %q comme dbBody : arguments probablement inversés", gotDB)
+		t.Errorf("decode received %q as dbBody: arguments probably swapped", gotDB)
 	}
 	if !strings.Contains(string(gotDS), `"properties"`) {
-		t.Errorf("decode a reçu %q comme dsBody : arguments probablement inversés", gotDS)
+		t.Errorf("decode received %q as dsBody: arguments probably swapped", gotDS)
 	}
 }
 
-// Le test de dérive entre la sonde de Read et le décodeur vit dans le paquet
-// mapper (TestProbeAndDecoderAgreeOnDataSourceID) : ici, il ne pouvait
-// qu'injecter une closure codée en dur, donc ne rien garder. Le paquet mapper,
-// lui, peut importer resources et faire tourner le VRAI décodeur.
+// The drift test between Read's probe and the decoder lives in the mapper
+// package (TestProbeAndDecoderAgreeOnDataSourceID): here, it could only inject
+// a hard-coded closure, hence guard nothing. The mapper package, on the other
+// hand, can import resources and run the REAL decoder.
 
 func TestDatabaseResourceDiffOnAbsentRemoteIsCreate(t *testing.T) {
 	r := NewDatabaseResource(nil, nil)
@@ -101,15 +102,15 @@ func TestDatabaseResourceDiffOnAbsentRemoteIsCreate(t *testing.T) {
 	if len(cs.Details) != 2 {
 		t.Fatalf("details = %d, want 2", len(cs.Details))
 	}
-	// Ordre déterministe : tri alphabétique des propriétés.
+	// Deterministic order: properties sorted alphabetically.
 	if cs.Details[0].Target != `property "Budget" (number)` {
 		t.Errorf("Details[0].Target = %q", cs.Details[0].Target)
 	}
 }
 
-// Piège du typed-nil : un RemoteState non-nil dont Exists() est false doit
-// mener à une création comme un nil. Sans ce test, simplifier la condition en
-// `remote == nil` ne casserait rien.
+// Typed-nil trap: a non-nil RemoteState whose Exists() is false must lead to a
+// creation just like a nil. Without this test, simplifying the condition to
+// `remote == nil` would break nothing.
 func TestDatabaseResourceDiffOnNonNilButAbsentRemoteIsAlsoCreate(t *testing.T) {
 	r := NewDatabaseResource(nil, nil)
 	db := config.Database{Key: "projects", Name: "Projects",
@@ -117,7 +118,7 @@ func TestDatabaseResourceDiffOnNonNilButAbsentRemoteIsAlsoCreate(t *testing.T) {
 
 	var remote RemoteState = RemoteDatabase{} // non-nil, Found == false
 	if remote == nil {
-		t.Fatal("le montage du test est faux : remote doit être non-nil")
+		t.Fatal("the test setup is wrong: remote must be non-nil")
 	}
 	cs, err := r.Diff(db, remote)
 	if err != nil {
@@ -130,14 +131,14 @@ func TestDatabaseResourceDiffOnNonNilButAbsentRemoteIsAlsoCreate(t *testing.T) {
 
 func TestDatabaseResourceDiffRejectsWrongDesiredType(t *testing.T) {
 	r := NewDatabaseResource(nil, nil)
-	if _, err := r.Diff("pas une database", nil); err == nil {
-		t.Fatal("Diff() error = nil, want une erreur de type")
+	if _, err := r.Diff("not a database", nil); err == nil {
+		t.Fatal("Diff() error = nil, want a type error")
 	}
 }
 
-// La méthode Diff délègue à la fonction de paquet, qui n'a besoin d'aucune
-// ressource. C'est ce qui permet au moteur de diff de ne plus construire un
-// NewDatabaseResource(nil, nil) pour appeler un calcul pur.
+// The Diff method delegates to the package function, which needs no
+// resource. That is what lets the diff engine stop building a
+// NewDatabaseResource(nil, nil) to call a pure computation.
 func TestDiffDelegatesToDatabaseChangeset(t *testing.T) {
 	db := config.Database{
 		Key:  "projects",
@@ -153,22 +154,22 @@ func TestDiffDelegatesToDatabaseChangeset(t *testing.T) {
 		t.Fatalf("Diff() error = %v", err)
 	}
 	if viaFunc := DatabaseChangeset(db, nil); !reflect.DeepEqual(viaMethod, viaFunc) {
-		t.Errorf("méthode = %+v, fonction = %+v : la délégation a divergé", viaMethod, viaFunc)
+		t.Errorf("method = %+v, function = %+v: the delegation diverged", viaMethod, viaFunc)
 	}
 }
 
-// transportFunc permet à un test de décider par MÉTHODE autant que par chemin,
-// et de rendre une erreur — ce que stubTransport ne sait pas faire.
+// transportFunc lets a test decide by METHOD as well as by path, and return an
+// error — which stubTransport cannot do.
 type transportFunc func(ctx context.Context, req transport.APIRequest) (transport.APIResponse, error)
 
 func (f transportFunc) Execute(ctx context.Context, req transport.APIRequest) (transport.APIResponse, error) {
 	return f(ctx, req)
 }
 
-// decodeCreated est le décodeur des tests de création. Il est local au paquet :
-// utiliser mapper.RemoteDatabaseFromJSON créerait un cycle d'import, puisque
-// mapper importe resources. C'est la même raison qui impose que Create prenne
-// un []byte déjà sérialisé.
+// decodeCreated is the decoder of the creation tests. It is local to the
+// package: using mapper.RemoteDatabaseFromJSON would create an import cycle,
+// since mapper imports resources. It is the same reason that requires Create
+// to take an already serialized []byte.
 func decodeCreated(dbBody, dsBody []byte) (RemoteDatabase, error) {
 	return RemoteDatabase{
 		ID:           "db-new",
@@ -181,9 +182,9 @@ func decodeCreated(dbBody, dsBody []byte) (RemoteDatabase, error) {
 	}, nil
 }
 
-// Create doit POSTer puis RELIRE. La relecture n'est pas du zèle : elle
-// rapporte les ids d'options, sans lesquels le state est aveugle à la dérive,
-// et elle confronte le résultat à ce qui avait été annoncé.
+// Create must POST then READ BACK. The read-back is not overzealous: it brings
+// back the option ids, without which the state is blind to drift, and it
+// confronts the result with what had been announced.
 func TestCreatePostsThenReadsBack(t *testing.T) {
 	var seen []string
 	var sentBody []byte
@@ -219,16 +220,16 @@ func TestCreatePostsThenReadsBack(t *testing.T) {
 		t.Errorf("Remote.Name = %q, want Tasks", got.Remote.Name)
 	}
 	if len(seen) != 3 || seen[0] != "POST /v1/databases" {
-		t.Errorf("appels = %v, want POST /v1/databases puis les deux lectures", seen)
+		t.Errorf("calls = %v, want POST /v1/databases then the two reads", seen)
 	}
 	if string(sentBody) != `{"parent":{}}` {
-		t.Errorf("body = %q, il doit partir tel quel", sentBody)
+		t.Errorf("body = %q, it must go out as is", sentBody)
 	}
 }
 
-// Si la relecture échoue APRÈS un POST réussi, l'identité doit survivre : la
-// perdre coûterait un doublon au prochain apply. L'erreur est rapportée à part,
-// pas confondue avec un échec de création.
+// If the read-back fails AFTER a successful POST, the identity must survive:
+// losing it would cost a duplicate on the next apply. The error is reported
+// separately, not confused with a creation failure.
 func TestCreateKeepsIdentityWhenReadBackFails(t *testing.T) {
 	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
 		if req.Method == "POST" {
@@ -241,17 +242,17 @@ func TestCreateKeepsIdentityWhenReadBackFails(t *testing.T) {
 	r := NewDatabaseResource(tr, decodeCreated)
 	got, err := r.Create(context.Background(), []byte(`{"parent":{}}`))
 	if err != nil {
-		t.Fatalf("Create() error = %v, want nil : la création a réussi", err)
+		t.Fatalf("Create() error = %v, want nil: the creation succeeded", err)
 	}
 	if got.ID != "db-new" || got.DataSourceID != "ds-new" {
-		t.Errorf("ids = %q/%q : l'identité ne doit jamais être perdue", got.ID, got.DataSourceID)
+		t.Errorf("ids = %q/%q: the identity must never be lost", got.ID, got.DataSourceID)
 	}
 	if got.ReadErr == nil {
-		t.Error("ReadErr = nil, want l'échec de relecture")
+		t.Error("ReadErr = nil, want the read-back failure")
 	}
 }
 
-// Un POST en échec est un échec de création : aucune identité à conserver.
+// A failed POST is a creation failure: no identity to keep.
 func TestCreateReturnsErrorWhenPostFails(t *testing.T) {
 	tr := transportFunc(func(_ context.Context, _ transport.APIRequest) (transport.APIResponse, error) {
 		return transport.APIResponse{}, &transport.APIError{Status: 400, NotionCode: "validation_error"}
@@ -259,15 +260,15 @@ func TestCreateReturnsErrorWhenPostFails(t *testing.T) {
 	r := NewDatabaseResource(tr, decodeCreated)
 	got, err := r.Create(context.Background(), []byte(`{}`))
 	if err == nil {
-		t.Fatal("Create() error = nil, want l'erreur de l'API")
+		t.Fatal("Create() error = nil, want the API error")
 	}
 	if got.ID != "" {
-		t.Errorf("ID = %q, want vide : rien n'a été créé", got.ID)
+		t.Errorf("ID = %q, want empty: nothing was created", got.ID)
 	}
 }
 
-// Une réponse sans identifiant ne doit pas passer pour un succès : on ne sait
-// pas ce qui a été créé, et le message doit envoyer vérifier.
+// A response without an identifier must not pass for a success: what was
+// created is unknown, and the message must send the user to check.
 func TestCreateRefusesResponseWithoutID(t *testing.T) {
 	tr := transportFunc(func(_ context.Context, _ transport.APIRequest) (transport.APIResponse, error) {
 		return transport.APIResponse{Status: 200, Body: []byte(`{"object":"database"}`)}, nil
@@ -275,18 +276,18 @@ func TestCreateRefusesResponseWithoutID(t *testing.T) {
 	r := NewDatabaseResource(tr, decodeCreated)
 	_, err := r.Create(context.Background(), []byte(`{}`))
 	if err == nil {
-		t.Fatal("Create() error = nil, want un refus")
+		t.Fatal("Create() error = nil, want a rejection")
 	}
-	for _, want := range []string{"identifiant", "  → ", "page parente"} {
+	for _, want := range []string{"identifier", "  → ", "parent page"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// Update doit écrire la database AVANT le data source, puis relire les deux.
-// L'ordre est l'échec le moins coûteux : un échec du data source laisse un
-// nom et une icône à jour et aucune donnée touchée.
+// Update must write the database BEFORE the data source, then read both back.
+// The order is the cheapest failure: a data source failure leaves a name and
+// an icon up to date and no data touched.
 func TestDatabaseResourceUpdatePatchesDatabaseBeforeDataSource(t *testing.T) {
 	st := &stubTransport{byPath: map[string]string{
 		"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
@@ -303,20 +304,20 @@ func TestDatabaseResourceUpdatePatchesDatabaseBeforeDataSource(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if !got.DatabaseWritten {
-		t.Error("DatabaseWritten = false alors que dbBody était non vide")
+		t.Error("DatabaseWritten = false while dbBody was non-empty")
 	}
-	// Les deux PATCH, puis la relecture (database puis data source).
+	// The two PATCHes, then the read-back (database then data source).
 	want := []string{
 		"PATCH /v1/databases/db1", "PATCH /v1/data_sources/ds1",
 		"GET /v1/databases/db1", "GET /v1/data_sources/ds1",
 	}
 	if !reflect.DeepEqual(st.calls, want) {
-		t.Errorf("appels = %v, want %v", st.calls, want)
+		t.Errorf("calls = %v, want %v", st.calls, want)
 	}
 }
 
-// Un corps vide saute son endpoint : une mise à jour qui ne touche que des
-// propriétés n'a rien à écrire sur la database.
+// An empty body skips its endpoint: an update that touches only properties
+// has nothing to write on the database.
 func TestDatabaseResourceUpdateSkipsTheEndpointWithoutABody(t *testing.T) {
 	st := &stubTransport{byPath: map[string]string{
 		"/v1/databases/db1":    `{"id":"db1","data_sources":[{"id":"ds1","name":"Tasks"}]}`,
@@ -332,17 +333,17 @@ func TestDatabaseResourceUpdateSkipsTheEndpointWithoutABody(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if got.DatabaseWritten {
-		t.Error("DatabaseWritten = true alors qu'aucun corps de database n'a été passé")
+		t.Error("DatabaseWritten = true while no database body was passed")
 	}
 	want := []string{"PATCH /v1/data_sources/ds1", "GET /v1/databases/db1", "GET /v1/data_sources/ds1"}
 	if !reflect.DeepEqual(st.calls, want) {
-		t.Errorf("appels = %v, want %v", st.calls, want)
+		t.Errorf("calls = %v, want %v", st.calls, want)
 	}
 }
 
-// Si le PATCH de la database échoue, le data source ne doit RECEVOIR aucun
-// appel : l'écrire alors que le nom n'est pas passé romprait l'ordre D4 qui
-// garantit l'échec le moins coûteux.
+// If the database PATCH fails, the data source must RECEIVE no call: writing
+// it while the name did not go through would break the D4 order that
+// guarantees the cheapest failure.
 func TestDatabaseResourceUpdateStopsBeforeDataSourceWhenDatabasePatchFails(t *testing.T) {
 	st := &stubTransport{
 		byPath: map[string]string{
@@ -361,20 +362,20 @@ func TestDatabaseResourceUpdateStopsBeforeDataSourceWhenDatabasePatchFails(t *te
 	got, err := r.Update(context.Background(), "db1", "ds1",
 		[]byte(`{"title":[]}`), []byte(`{"properties":{}}`))
 	if err == nil {
-		t.Fatal("Update() error = nil, want l'échec du PATCH database")
+		t.Fatal("Update() error = nil, want the database PATCH failure")
 	}
 	if got.DatabaseWritten {
-		t.Error("DatabaseWritten = true alors que le PATCH database a échoué")
+		t.Error("DatabaseWritten = true while the database PATCH failed")
 	}
 	want := []string{"PATCH /v1/databases/db1"}
 	if !reflect.DeepEqual(st.calls, want) {
-		t.Errorf("appels = %v, want %v : le data source ne doit pas être touché", st.calls, want)
+		t.Errorf("calls = %v, want %v: the data source must not be touched", st.calls, want)
 	}
 }
 
-// Si le PATCH du data source échoue APRÈS que celui de la database ait
-// réussi, DatabaseWritten doit rester true : le nom et l'icône sont écrits,
-// seules les propriétés ne le sont pas, et l'appelant doit pouvoir le dire.
+// If the data source PATCH fails AFTER the database's succeeded,
+// DatabaseWritten must stay true: the name and the icon are written, only the
+// properties are not, and the caller must be able to say so.
 func TestDatabaseResourceUpdateReportsDatabaseWrittenWhenDataSourcePatchFails(t *testing.T) {
 	st := &stubTransport{
 		byPath: map[string]string{
@@ -393,21 +394,21 @@ func TestDatabaseResourceUpdateReportsDatabaseWrittenWhenDataSourcePatchFails(t 
 	got, err := r.Update(context.Background(), "db1", "ds1",
 		[]byte(`{"title":[]}`), []byte(`{"properties":{}}`))
 	if err == nil {
-		t.Fatal("Update() error = nil, want l'échec du PATCH data source")
+		t.Fatal("Update() error = nil, want the data source PATCH failure")
 	}
 	if !got.DatabaseWritten {
-		t.Error("DatabaseWritten = false alors que le PATCH database a réussi")
+		t.Error("DatabaseWritten = false while the database PATCH succeeded")
 	}
 	want := []string{"PATCH /v1/databases/db1", "PATCH /v1/data_sources/ds1"}
 	if !reflect.DeepEqual(st.calls, want) {
-		t.Errorf("appels = %v, want %v", st.calls, want)
+		t.Errorf("calls = %v, want %v", st.calls, want)
 	}
 }
 
-// DatabaseExists ne lit QUE la database, jamais son data source : Task 8 s'en
-// sert pour diagnostiquer un ancêtre archivé après un 404 sur le PATCH du data
-// source, où GET database répond 200 alors que le data source, lui, est
-// inatteignable — un Read complet échouerait ici et cacherait le diagnostic.
+// DatabaseExists reads ONLY the database, never its data source: Task 8 uses
+// it to diagnose an archived ancestor after a 404 on the data source PATCH,
+// where GET database answers 200 while the data source is unreachable — a
+// full Read would fail here and hide the diagnosis.
 func TestDatabaseResourceDatabaseExistsOnSuccessIsTrue(t *testing.T) {
 	st := &stubTransport{byPath: map[string]string{
 		"/v1/databases/db1": `{"id":"db1"}`,
@@ -423,7 +424,7 @@ func TestDatabaseResourceDatabaseExistsOnSuccessIsTrue(t *testing.T) {
 	}
 	want := []string{"GET /v1/databases/db1"}
 	if !reflect.DeepEqual(st.calls, want) {
-		t.Errorf("appels = %v, want %v : ne doit lire QUE la database", st.calls, want)
+		t.Errorf("calls = %v, want %v: must read ONLY the database", st.calls, want)
 	}
 }
 
@@ -437,7 +438,7 @@ func TestDatabaseResourceDatabaseExistsOn404IsFalseWithoutError(t *testing.T) {
 
 	got, err := r.DatabaseExists(context.Background(), "db1")
 	if err != nil {
-		t.Fatalf("DatabaseExists() error = %v, want nil : un 404 dit juste « absente »", err)
+		t.Fatalf("DatabaseExists() error = %v, want nil: a 404 just says \"absent\"", err)
 	}
 	if got {
 		t.Error("DatabaseExists() = true, want false")
@@ -455,7 +456,7 @@ func TestDatabaseResourceDatabaseExistsOnOtherErrorReturnsIt(t *testing.T) {
 
 	got, err := r.DatabaseExists(context.Background(), "db1")
 	if err == nil {
-		t.Fatal("DatabaseExists() error = nil, want l'erreur remontée : ce n'est pas un 404")
+		t.Fatal("DatabaseExists() error = nil, want the error passed up: it is not a 404")
 	}
 	if got {
 		t.Error("DatabaseExists() = true, want false")
@@ -466,18 +467,18 @@ type otherRemote struct{}
 
 func (otherRemote) Exists() bool { return true }
 
-// Create et Update partagent cette conversion. Read ne rend jamais autre chose
-// qu'une RemoteDatabase : un autre type est un défaut interne, et le message
-// doit le dire avec son action, plutôt que de laisser chercher du côté de
-// Notion.
+// Create and Update share this conversion. Read never returns anything other
+// than a RemoteDatabase: another type is a notion-seed bug, and the message
+// must say so with its action, rather than letting the user look on the
+// Notion side.
 func TestAsRemoteDatabaseNamesAnUnexpectedTypeAsAnInternalDefect(t *testing.T) {
 	_, err := asRemoteDatabase("db-1", otherRemote{})
 	if err == nil {
-		t.Fatal("asRemoteDatabase() error = nil, want un défaut interne")
+		t.Fatal("asRemoteDatabase() error = nil, want a notion-seed bug")
 	}
-	for _, want := range []string{"db-1", "type inattendu", "  → ", "défaut interne"} {
+	for _, want := range []string{"db-1", "unexpected type", "  → ", "notion-seed bug"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 
@@ -487,8 +488,8 @@ func TestAsRemoteDatabaseNamesAnUnexpectedTypeAsAnInternalDefect(t *testing.T) {
 	}
 }
 
-// La corbeille part en UN appel, sur la database seule, avec le corps mesuré le
-// 2026-09-24. Le data source n'est ni écrit ni relu.
+// The trashing goes out in ONE call, on the database only, with the body
+// measured on 2026-09-24. The data source is neither written nor read back.
 func TestDatabaseResourceTrashPatchesInTrashOnTheDatabaseOnly(t *testing.T) {
 	var calls []string
 	var body []byte
@@ -505,18 +506,18 @@ func TestDatabaseResourceTrashPatchesInTrashOnTheDatabaseOnly(t *testing.T) {
 		t.Fatalf("Trash() error = %v", err)
 	}
 	if !trashed {
-		t.Error("Trash() = false, want true : la réponse confirme la corbeille")
+		t.Error("Trash() = false, want true: the response confirms the trashing")
 	}
 	if want := []string{"PATCH /v1/databases/db1"}; !reflect.DeepEqual(calls, want) {
-		t.Errorf("appels = %v, want %v", calls, want)
+		t.Errorf("calls = %v, want %v", calls, want)
 	}
 	if string(body) != `{"in_trash":true}` {
-		t.Errorf("corps = %s, want {\"in_trash\":true}", body)
+		t.Errorf("body = %s, want {\"in_trash\":true}", body)
 	}
 }
 
-// Review Focus #1 : un 200 n'est pas une corbeille. Seule la réponse le dit, et
-// selon la règle du décodeur — celle par laquelle le plan suivant classerait la
+// Review Focus #1: a 200 is not a trashing. Only the response says so, and by
+// the decoder's rule — the one by which the next plan would classify the
 // database.
 func TestDatabaseResourceTrashConfirmsOnlyWhatTheResponseSays(t *testing.T) {
 	for _, tc := range []struct {
@@ -524,9 +525,9 @@ func TestDatabaseResourceTrashConfirmsOnlyWhatTheResponseSays(t *testing.T) {
 		body string
 		want bool
 	}{
-		{"ni archived ni in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`, false},
-		{"archived seul", `{"object":"database","id":"db1","archived":true}`, true},
-		{"in_trash seul", `{"object":"database","id":"db1","in_trash":true}`, true},
+		{"neither archived nor in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`, false},
+		{"archived only", `{"object":"database","id":"db1","archived":true}`, true},
+		{"in_trash only", `{"object":"database","id":"db1","in_trash":true}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
@@ -543,22 +544,22 @@ func TestDatabaseResourceTrashConfirmsOnlyWhatTheResponseSays(t *testing.T) {
 	}
 }
 
-// Une réponse 200 illisible ne dit ni oui ni non : la mutation a peut-être eu
-// lieu. C'est une issue inconnue, pas un refus.
+// An unreadable 200 response says neither yes nor no: the mutation may have
+// happened. It is an unknown outcome, not a rejection.
 func TestDatabaseResourceTrashCallsAnUnreadableResponseAnUnknownOutcome(t *testing.T) {
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
-		return transport.APIResponse{Status: 200, Body: []byte("pas du json")}, nil
+		return transport.APIResponse{Status: 200, Body: []byte("not json")}, nil
 	})
 	trashed, err := NewDatabaseResource(tr, nil).Trash(context.Background(), "db1")
 	var unknown *transport.OutcomeUnknownError
 	if !errors.As(err, &unknown) {
-		t.Fatalf("Trash() error = %v, want une OutcomeUnknownError", err)
+		t.Fatalf("Trash() error = %v, want an OutcomeUnknownError", err)
 	}
 	if trashed {
-		t.Error("Trash() = true sur une réponse illisible")
+		t.Error("Trash() = true on an unreadable response")
 	}
 	if !strings.Contains(err.Error(), "  → ") {
-		t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+		t.Errorf("message = %q, it must carry a corrective action", err.Error())
 	}
 }
 
@@ -568,9 +569,9 @@ func TestDatabaseResourceTrashReturnsTheAPIError(t *testing.T) {
 
 	trashed, err := NewDatabaseResource(st, nil).Trash(context.Background(), "db1")
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("Trash() error = %v, want l'erreur de l'API telle quelle", err)
+		t.Fatalf("Trash() error = %v, want the API error as is", err)
 	}
 	if trashed {
-		t.Error("Trash() = true alors que le PATCH a échoué")
+		t.Error("Trash() = true while the PATCH failed")
 	}
 }

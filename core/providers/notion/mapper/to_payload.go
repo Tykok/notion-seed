@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package mapper traduit la configuration en payloads d'API Notion, et les
-// réponses d'API en états distants.
+// Package mapper translates the configuration into Notion API payloads, and
+// API responses into remote states.
 package mapper
 
 import (
@@ -12,22 +12,21 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// ErrUnsupportedType signale un type de propriété hors périmètre. Le schéma
-// le rejette déjà en amont ; ce garde-fou couvre les appels programmatiques.
-var ErrUnsupportedType = errors.New("type de propriété non supporté")
+// ErrUnsupportedType reports an out-of-scope property type. The schema
+// already rejects it upstream; this safeguard covers programmatic calls.
+var ErrUnsupportedType = errors.New("unsupported property type")
 
-// DatabaseCreatePayload construit le corps de POST /v1/databases depuis la
-// CIBLE RÉSOLUE, jamais depuis la configuration.
+// DatabaseCreatePayload builds the body of POST /v1/databases from the
+// RESOLVED TARGET, never from the configuration.
 //
-// C'est l'invariant de sûreté du produit : `target` est l'état exact que le
-// plan a affiché, donc tout ce qui part vers l'API a été annoncé. Un paramètre
-// de type config.Database rouvrirait un second chemin, capable de diverger du
-// plan en silence — c'est ce qui a produit la substitution du groupe "To-do".
-// TestMapperDoesNotImportConfig verrouille la propriété.
+// It is the product's safety invariant: `target` is the exact state the plan
+// showed, so everything that goes to the API was announced. A parameter of
+// type config.Database would reopen a second path, able to diverge from the
+// plan silently — that is what produced the "To-do" group substitution.
+// TestMapperDoesNotImportConfig locks the property.
 //
-// Depuis l'API 2025-09-03, une database est un conteneur : le schéma des
-// propriétés vit dans son data source, transmis à la création sous
-// initial_data_source.
+// Since API 2025-09-03, a database is a container: the properties schema
+// lives in its data source, passed on creation under initial_data_source.
 func DatabaseCreatePayload(key string, target state.Database, parentPageID string) ([]byte, error) {
 	names := make([]string, 0, len(target.Properties))
 	for name := range target.Properties {
@@ -55,13 +54,13 @@ func DatabaseCreatePayload(key string, target state.Database, parentPageID strin
 	return json.Marshal(body)
 }
 
-// DataSourceUpdatePayload construit le corps de PATCH /v1/data_sources/{id}
-// depuis la CIBLE RÉSOLUE, pour les SEULES propriétés nommées.
+// DataSourceUpdatePayload builds the body of PATCH /v1/data_sources/{id} from
+// the RESOLVED TARGET, for the named properties ONLY.
 //
-// `props` vient du plan : ce sont les propriétés qui portent au moins une
-// ligne. Envoyer davantage écrirait des propriétés que le plan n'a pas
-// montrées ; envoyer moins laisserait un plan non appliqué sans le dire.
-// Mesuré le 2026-09-24 : une propriété omise du payload n'est pas touchée.
+// `props` comes from the plan: they are the properties that carry at least
+// one line. Sending more would write properties the plan did not show;
+// sending fewer would leave a plan unapplied without saying so. Measured on
+// 2026-09-24: a property omitted from the payload is not touched.
 func DataSourceUpdatePayload(key string, target state.Database, props []string) ([]byte, error) {
 	out, err := propertiesPayload(key, target, props)
 	if err != nil {
@@ -70,14 +69,13 @@ func DataSourceUpdatePayload(key string, target state.Database, props []string) 
 	return json.Marshal(map[string]any{"properties": out})
 }
 
-// DatabaseUpdatePayload construit le corps de PATCH /v1/databases/{id} pour
-// les SEULS champs nommés.
+// DatabaseUpdatePayload builds the body of PATCH /v1/databases/{id} for the
+// named fields ONLY.
 //
-// Mesuré le 2026-09-24 : la description n'est PAS acceptée sur le data
-// source (« Use the Update Database API instead »), et l'icône n'est pas
-// partagée entre les deux objets — écrire sur la database met les deux à
-// jour, écrire sur le data source les fait diverger. Ces trois champs
-// passent donc tous par ici.
+// Measured on 2026-09-24: the description is NOT accepted on the data source
+// ("Use the Update Database API instead"), and the icon is not shared between
+// the two objects — writing to the database updates both, writing to the
+// data source makes them diverge. So these three fields all go through here.
 func DatabaseUpdatePayload(key string, target state.Database, fields []string) ([]byte, error) {
 	body := make(map[string]any, len(fields))
 	for _, f := range fields {
@@ -90,34 +88,34 @@ func DatabaseUpdatePayload(key string, target state.Database, fields []string) (
 			body["icon"] = iconPayload(target.Icon)
 		default:
 			return nil, fmt.Errorf(
-				"database %q : champ %q inconnu du payload de mise à jour\n"+
-					"  → c'est un défaut interne de notion-seed : rapportez-le avec la "+
-					"sortie de `notion-seed plan`", key, f)
+				"database %q: field %q unknown to the update payload\n"+
+					"  → this is a notion-seed bug: report it with the "+
+					"output of `notion-seed plan`", key, f)
 		}
 	}
 	return json.Marshal(body)
 }
 
-// propertiesPayload construit le payload des propriétés NOMMÉES depuis la
-// cible résolue. Partagé par la création, qui nomme toutes les propriétés de
-// la cible, et par la mise à jour du data source, qui ne nomme que celles du
-// plan : les deux chemins doivent rejeter un type non supporté de la même
-// façon, en nommant la database et la propriété.
+// propertiesPayload builds the payload of the NAMED properties from the
+// resolved target. Shared by the creation, which names every property of the
+// target, and by the data source update, which names only the plan's: both
+// paths must reject an unsupported type the same way, naming the database and
+// the property.
 func propertiesPayload(key string, target state.Database, names []string) (map[string]any, error) {
 	out := make(map[string]any, len(names))
 	for _, name := range names {
 		p, ok := target.Properties[name]
 		if !ok {
 			return nil, fmt.Errorf(
-				"database %q : la propriété %q est à écrire mais absente de la cible\n"+
-					"  → c'est un défaut interne de notion-seed, pas une erreur de "+
-					"configuration : rapportez-le avec la sortie de `notion-seed plan`",
+				"database %q: property %q is to be written but missing from the target\n"+
+					"  → this is a notion-seed bug, not a "+
+					"configuration error: report it with the output of `notion-seed plan`",
 				key, name)
 		}
 		payload, err := PropertyPayload(p)
 		if err != nil {
-			return nil, fmt.Errorf("database %q, propriété %q: %w\n"+
-				"  → retirez cette propriété du YAML, ou déclarez-la avec un type supporté",
+			return nil, fmt.Errorf("database %q, property %q: %w\n"+
+				"  → remove this property from the YAML, or declare it with a supported type",
 				key, name, err)
 		}
 		out[name] = payload
@@ -125,23 +123,23 @@ func propertiesPayload(key string, target state.Database, names []string) (map[s
 	return out, nil
 }
 
-// titlePayload rend la forme API d'un titre de database.
+// titlePayload returns the API form of a database title.
 func titlePayload(content string) []any {
 	return []any{map[string]any{"text": map[string]any{"content": content}}}
 }
 
-// richTextPayload rend la forme API d'un champ rich_text (la description de
-// la database).
+// richTextPayload returns the API form of a rich_text field (the database's
+// description).
 func richTextPayload(content string) []any {
 	return []any{map[string]any{"text": map[string]any{"content": content}}}
 }
 
-// iconPayload rend la forme API d'un icône emoji.
+// iconPayload returns the API form of an emoji icon.
 func iconPayload(emoji string) map[string]any {
 	return map[string]any{"type": "emoji", "emoji": emoji}
 }
 
-// PropertyPayload construit la configuration d'une propriété.
+// PropertyPayload builds a property's configuration.
 func PropertyPayload(p state.Property) (map[string]any, error) {
 	switch p.Type {
 	case "title", "rich_text", "url", "people", "date", "checkbox":
@@ -160,8 +158,8 @@ func PropertyPayload(p state.Property) (map[string]any, error) {
 		}}, nil
 
 	case "status":
-		// Pas de champ `groups` : l'API ne l'accepte pas en modification, et le
-		// groupe se pilote par le champ `group` de chaque option.
+		// No `groups` field: the API does not accept it on update, and the group
+		// is driven by each option's `group` field.
 		return map[string]any{"status": map[string]any{
 			"options": optionsPayload(p.Options),
 		}}, nil
@@ -171,26 +169,26 @@ func PropertyPayload(p state.Property) (map[string]any, error) {
 	}
 }
 
-// optionsPayload rend la liste COMPLÈTE des options. L'API remplace la liste
-// au lieu de la fusionner : toute option absente du payload est détruite, et
-// les lignes qui la portaient perdent leur valeur.
+// optionsPayload returns the FULL list of options. The API replaces the list
+// instead of merging it: any option missing from the payload is destroyed,
+// and the rows that held it lose their value.
 //
-// Aucune valeur n'est inventée. Un `group` vide n'est pas transmis plutôt que
-// remplacé par un défaut : le schéma garantit qu'une option de status en porte
-// toujours un, et substituer une valeur ici serait écrire ce que le plan n'a
-// pas affiché. Le paramètre `withGroup` a disparu avec le défaut : il n'y a
-// plus rien à décider, seulement à transmettre.
+// No value is invented. An empty `group` is not sent rather than replaced by
+// a default: the schema guarantees a status option always carries one, and
+// substituting a value here would write what the plan did not show. The
+// `withGroup` parameter went away with the default: there is nothing left to
+// decide, only to pass on.
 //
-// La `key` de configuration n'est jamais transmise : c'est une identité interne
-// à notion-seed, l'API ne la connaît pas.
+// The configuration `key` is never sent: it is an identity internal to
+// notion-seed, the API does not know it.
 func optionsPayload(options []state.Option) []map[string]any {
 	out := make([]map[string]any, 0, len(options))
 	for _, o := range options {
 		entry := map[string]any{"name": o.Name}
-		// L'ID est l'identité de l'option côté Notion. L'omettre sur une option
-		// existante la fait apparier PAR NOM, donc un nom changé devient un
-		// retrait suivi d'un ajout, et les lignes qui la portaient perdent leur
-		// valeur. Une option neuve n'en a pas : l'API lui en crée un.
+		// The ID is the option's identity on the Notion side. Omitting it on an
+		// existing option makes it match BY NAME, so a changed name becomes a
+		// removal followed by an addition, and the rows that held it lose their
+		// value. A new option has none: the API creates one for it.
 		if o.ID != "" {
 			entry["id"] = o.ID
 		}

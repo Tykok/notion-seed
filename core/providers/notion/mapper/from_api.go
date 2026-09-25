@@ -10,9 +10,9 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
 
-// Formes brutes des réponses de l'API, réduites aux champs dont notion-seed a
-// besoin. Les champs ignorés ne sont pas une omission : ce qui n'est pas
-// déclaré dans la config n'est pas touché.
+// Raw shapes of the API responses, reduced to the fields notion-seed needs.
+// The ignored fields are not an omission: what is not declared in the config
+// is not touched.
 type rawDatabase struct {
 	ID       string `json:"id"`
 	Archived bool   `json:"archived"`
@@ -69,22 +69,22 @@ type rawDataSource struct {
 	Properties  map[string]rawProperty `json:"properties"`
 }
 
-// RemoteDatabaseFromJSON assemble l'état distant depuis la réponse de
-// GET /v1/databases/{id} et celle de GET /v1/data_sources/{id}.
+// RemoteDatabaseFromJSON assembles the remote state from the response of
+// GET /v1/databases/{id} and that of GET /v1/data_sources/{id}.
 //
-// Les deux appels sont nécessaires : depuis 2025-09-03, la database porte
-// l'identité et l'archivage, le data source porte le titre et le schéma.
+// Both calls are needed: since 2025-09-03, the database holds the identity and
+// the archiving, the data source holds the title and the schema.
 func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, error) {
 	var db rawDatabase
 	if err := json.Unmarshal(dbBody, &db); err != nil {
 		return resources.RemoteDatabase{}, fmt.Errorf(
-			"réponse de GET /v1/databases illisible: %w\n  → réessayez ; si ça persiste, %s",
+			"unreadable response from GET /v1/databases: %w\n  → retry; if it persists, %s",
 			err, preflight.PinNtnHint())
 	}
 	var ds rawDataSource
 	if err := json.Unmarshal(dsBody, &ds); err != nil {
 		return resources.RemoteDatabase{}, fmt.Errorf(
-			"réponse de GET /v1/data_sources illisible: %w\n  → réessayez ; si ça persiste, %s",
+			"unreadable response from GET /v1/data_sources: %w\n  → retry; if it persists, %s",
 			err, preflight.PinNtnHint())
 	}
 
@@ -103,8 +103,8 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 			out.Name = db.DataSources[0].Name
 		}
 	}
-	// Seul l'emoji est exprimable dans le YAML. Les autres formes restent "",
-	// ce qui vaut « rien de comparable », pas « pas d'icône ».
+	// Only the emoji is expressible in the YAML. The other forms stay "", which
+	// means "nothing comparable", not "no icon".
 	if db.Icon.Type == "emoji" {
 		out.Icon = db.Icon.Emoji
 	}
@@ -119,8 +119,8 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 		case "multi_select":
 			rp.Options = convertOptions(p.MultiSelect.Options, nil)
 		case "status":
-			// Le group n'est pas porté par l'option dans la réponse : il faut le
-			// reconstruire depuis groups[].option_ids.
+			// The group is not held by the option in the response: it has to be
+			// rebuilt from groups[].option_ids.
 			groupByOption := make(map[string]string)
 			for _, g := range p.Status.Groups {
 				for _, id := range g.OptionIDs {
@@ -128,16 +128,16 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 				}
 			}
 			rp.Options = convertOptions(p.Status.Options, groupByOption)
-			// Dans une réponse bien formée, une option de status appartient
-			// toujours à exactement un groupe : l'API en assigne un d'office,
-			// même quand la requête n'en fournit aucun. Un group vide ne veut
-			// donc pas dire « sans groupe », il veut dire « réponse tronquée ».
-			// Le laisser passer produirait une différence fantôme à chaque run
-			// du diff, puisque le désiré ne vaut jamais "".
+			// In a well-formed response, a status option always belongs to
+			// exactly one group: the API assigns one by default, even when the
+			// request provides none. An empty group therefore does not mean
+			// "no group", it means "truncated response". Letting it through
+			// would produce a phantom difference on every diff run, since the
+			// desired value is never "".
 			for _, o := range rp.Options {
 				if o.Group == "" {
 					return resources.RemoteDatabase{}, fmt.Errorf(
-						"propriété %q : l'option %q (id %s) n'apparaît dans aucun groupe — réponse de l'API incomplète",
+						"property %q: option %q (id %s) appears in no group — incomplete API response",
 						name, o.Name, o.ID)
 				}
 			}

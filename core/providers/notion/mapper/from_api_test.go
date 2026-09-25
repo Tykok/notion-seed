@@ -79,21 +79,21 @@ func TestRemoteDatabaseFromJSON(t *testing.T) {
 	}
 }
 
-// Les ids de propriété sont indispensables : ils distinguent un renommage
-// d'une suppression suivie d'une création.
+// Property ids are essential: they tell a rename from a deletion followed by
+// a creation.
 func TestRemoteDatabaseFromJSONKeepsPropertyIDs(t *testing.T) {
 	got, _ := RemoteDatabaseFromJSON([]byte(dbBody), []byte(dsBody))
 	if p := got.Properties["Budget"]; p.ID != "Q_bo" || p.NumberFormat != "euro" {
-		t.Errorf("Budget = %+v, want ID Q_bo et format euro", p)
+		t.Errorf("Budget = %+v, want ID Q_bo and format euro", p)
 	}
 	if p := got.Properties["Status"]; p.ID != "f%3Cyc" {
 		t.Errorf("Status.ID = %q, want %q", p.ID, "f%3Cyc")
 	}
 }
 
-// Le group n'est pas porté par l'option dans la réponse : il faut le
-// reconstruire depuis groups[].option_ids. Sans ça, un diff sur le groupe
-// serait impossible.
+// The group is not held by the option in the response: it has to be rebuilt
+// from groups[].option_ids. Without that, a diff on the group would be
+// impossible.
 func TestRemoteDatabaseFromJSONResolvesOptionGroupsFromOptionIDs(t *testing.T) {
 	got, _ := RemoteDatabaseFromJSON([]byte(dbBody), []byte(dsBody))
 	status := got.Properties["Status"]
@@ -102,10 +102,10 @@ func TestRemoteDatabaseFromJSONResolvesOptionGroupsFromOptionIDs(t *testing.T) {
 		byName[o.Name] = o.Group
 	}
 	if byName["To-Do"] != "To-do" {
-		t.Errorf("group de To-Do = %q, want %q", byName["To-Do"], "To-do")
+		t.Errorf("group of To-Do = %q, want %q", byName["To-Do"], "To-do")
 	}
 	if byName["Building"] != "In progress" {
-		t.Errorf("group de Building = %q, want %q", byName["Building"], "In progress")
+		t.Errorf("group of Building = %q, want %q", byName["Building"], "In progress")
 	}
 }
 
@@ -120,11 +120,11 @@ func TestRemoteDatabaseFromJSONKeepsOptionIDs(t *testing.T) {
 	}
 }
 
-// Dans une réponse bien formée, chaque option de status apparaît dans
-// exactement un groupe : l'API en assigne un d'office, même si la requête
-// n'en fournit aucun. Une option absente de tous les option_ids signale donc
-// une réponse tronquée, pas une option "sans groupe" — et doit être rejetée,
-// pas décodée avec un group vide qui produirait un diff fantôme permanent.
+// In a well-formed response, each status option appears in exactly one group:
+// the API assigns one by default, even if the request provides none. An
+// option missing from every option_ids therefore signals a truncated
+// response, not an option "without a group" — and must be rejected, not
+// decoded with an empty group that would produce a permanent phantom diff.
 const dsBodyMissingGroup = `{
   "object": "data_source",
   "id": "66666666-6666-4666-8666-666666666666",
@@ -149,14 +149,14 @@ const dsBodyMissingGroup = `{
 func TestRemoteDatabaseFromJSONRejectsStatusOptionMissingFromAnyGroup(t *testing.T) {
 	_, err := RemoteDatabaseFromJSON([]byte(dbBody), []byte(dsBodyMissingGroup))
 	if err == nil {
-		t.Fatal("RemoteDatabaseFromJSON() error = nil, want une erreur : Building n'apparaît dans aucun groupe")
+		t.Fatal("RemoteDatabaseFromJSON() error = nil, want an error: Building appears in no group")
 	}
 	if !strings.Contains(err.Error(), "Building") {
-		t.Errorf("erreur = %q, want qu'elle nomme l'option %q", err.Error(), "Building")
+		t.Errorf("error = %q, want it to name option %q", err.Error(), "Building")
 	}
 }
 
-// stubTransport rend une réponse par chemin appelé, et retient les chemins.
+// stubTransport returns one response per called path, and records the paths.
 type stubTransport struct {
 	byPath map[string]string
 	calls  []string
@@ -167,19 +167,19 @@ func (s *stubTransport) Execute(_ context.Context, req transport.APIRequest) (tr
 	return transport.APIResponse{Status: 200, Body: []byte(s.byPath[req.Path])}, nil
 }
 
-// La sonde minimale de resources.Read et le décodeur de ce paquet lisent tous
-// deux data_sources[0].id depuis le MÊME corps, avec deux structs distincts.
+// resources.Read's minimal probe and this package's decoder both read
+// data_sources[0].id from the SAME body, with two distinct structs.
 //
-// Ce test vit ici et non dans resources : là-bas, il ne pouvait qu'injecter une
-// closure codée en dur, donc renommer le tag `json:"data_sources"` de
-// from_api.go ne cassait rien — le contrôle compensatoire qui justifiait la
-// duplication n'existait pas. Ici, le vrai décodeur tourne sur la fixture que
-// la sonde a lue, et les deux doivent s'accorder sur l'id.
+// This test lives here and not in resources: there, it could only inject a
+// hard-coded closure, so renaming the `json:"data_sources"` tag of
+// from_api.go broke nothing — the compensating check that justified the
+// duplication did not exist. Here, the real decoder runs on the fixture the
+// probe read, and both must agree on the id.
 func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
-	const probeBody = `{"object":"database","id":"db1","data_sources":[{"id":"ds-attendu","name":"P"}]}`
+	const probeBody = `{"object":"database","id":"db1","data_sources":[{"id":"ds-expected","name":"P"}]}`
 	st := &stubTransport{byPath: map[string]string{
 		"/v1/databases/db1": probeBody,
-		"/v1/data_sources/ds-attendu": `{"id":"ds-attendu","title":[{"plain_text":"P"}],
+		"/v1/data_sources/ds-expected": `{"id":"ds-expected","title":[{"plain_text":"P"}],
 			"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`,
 	}}
 	r := resources.NewDatabaseResource(st, RemoteDatabaseFromJSON)
@@ -190,35 +190,35 @@ func TestProbeAndDecoderAgreeOnDataSourceID(t *testing.T) {
 	}
 	db, ok := state.(resources.RemoteDatabase)
 	if !ok {
-		t.Fatalf("Read() a rendu %T, want resources.RemoteDatabase", state)
+		t.Fatalf("Read() returned %T, want resources.RemoteDatabase", state)
 	}
-	if db.DataSourceID != "ds-attendu" {
-		t.Errorf("le décodeur a lu DataSourceID = %q, want %q", db.DataSourceID, "ds-attendu")
+	if db.DataSourceID != "ds-expected" {
+		t.Errorf("the decoder read DataSourceID = %q, want %q", db.DataSourceID, "ds-expected")
 	}
 	if len(st.calls) != 2 {
-		t.Fatalf("appels = %v, want database puis data_source", st.calls)
+		t.Fatalf("calls = %v, want database then data_source", st.calls)
 	}
 	if st.calls[1] != "/v1/data_sources/"+db.DataSourceID {
-		t.Errorf("la sonde a appelé %q, le décodeur a lu l'id %q : les deux formes ont dérivé",
+		t.Errorf("the probe called %q, the decoder read id %q: the two shapes drifted",
 			st.calls[1], db.DataSourceID)
 	}
 }
 
-// resources.Trash recalcule "archived || in_trash" localement, sans appeler ce
-// décodeur : un PATCH corbeille ne relit jamais le data source, que le
-// décodeur exige en plus de la database. Ce test fait tourner les deux règles
-// sur le MÊME corps de réponse : sans lui, faire dériver l'une des deux (par
-// exemple en oubliant in_trash dans l'une) ne casserait rien.
+// resources.Trash recomputes "archived || in_trash" locally, without calling
+// this decoder: a trash PATCH never reads back the data source, which the
+// decoder requires on top of the database. This test runs both rules on the
+// SAME response body: without it, making one of them drift (for example by
+// forgetting in_trash in one) would break nothing.
 func TestTrashLocalRuleAgreesWithDecoderRule(t *testing.T) {
 	const stubDSBody = `{"id":"ds1","title":[],"properties":{}}`
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
-		{"ni archived ni in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`},
-		{"archived seul", `{"object":"database","id":"db1","archived":true}`},
-		{"in_trash seul", `{"object":"database","id":"db1","in_trash":true}`},
-		{"les deux", `{"object":"database","id":"db1","archived":true,"in_trash":true}`},
+		{"neither archived nor in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`},
+		{"archived only", `{"object":"database","id":"db1","archived":true}`},
+		{"in_trash only", `{"object":"database","id":"db1","in_trash":true}`},
+		{"both", `{"object":"database","id":"db1","archived":true,"in_trash":true}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := &stubTransport{byPath: map[string]string{"/v1/databases/db1": tc.body}}
@@ -233,7 +233,7 @@ func TestTrashLocalRuleAgreesWithDecoderRule(t *testing.T) {
 				t.Fatalf("RemoteDatabaseFromJSON() error = %v", err)
 			}
 			if trashed != decoded.Archived {
-				t.Errorf("Trash() = %v, décodeur.Archived = %v : les deux règles ont dérivé",
+				t.Errorf("Trash() = %v, decoder.Archived = %v: the two rules drifted",
 					trashed, decoded.Archived)
 			}
 		})
@@ -254,10 +254,9 @@ func TestRemoteDatabaseFromJSONReadsEmojiIcon(t *testing.T) {
 	}
 }
 
-// Une icône de type file ou external n'est PAS exprimable dans le YAML, qui ne
-// déclare qu'un emoji. La décoder en autre chose que "" produirait une
-// différence que le plan afficherait à chaque run sans jamais pouvoir la
-// résoudre.
+// A file or external icon is NOT expressible in the YAML, which only declares
+// an emoji. Decoding it as anything other than "" would produce a difference
+// the plan would show on every run without ever being able to resolve it.
 func TestRemoteDatabaseFromJSONIgnoresNonEmojiIcon(t *testing.T) {
 	for _, body := range []string{
 		`{"id":"db-1","icon":{"type":"external","external":{"url":"https://e/i.png"}},
@@ -270,14 +269,14 @@ func TestRemoteDatabaseFromJSONIgnoresNonEmojiIcon(t *testing.T) {
 			t.Fatalf("RemoteDatabaseFromJSON() error = %v", err)
 		}
 		if got.Icon != "" {
-			t.Errorf("Icon = %q, want \"\" pour %s", got.Icon, body)
+			t.Errorf("Icon = %q, want \"\" for %s", got.Icon, body)
 		}
 	}
 }
 
-// Mettre une database à la corbeille emporte TOUS ses data sources, mais le
-// comptage n'en interroge qu'un : le décodeur garde leur nombre pour que le plan
-// puisse dire que son compte est un minorant.
+// Moving a database to the trash takes ALL its data sources with it, but the
+// count queries only one: the decoder keeps their number so the plan can say
+// its count is a lower bound.
 func TestRemoteDatabaseFromJSONCountsItsDataSources(t *testing.T) {
 	const twoSources = `{"object":"database","id":"db-1","archived":false,"in_trash":false,` +
 		`"data_sources":[{"id":"ds-1","name":"A"},{"id":"ds-2","name":"B"}]}`
@@ -286,7 +285,7 @@ func TestRemoteDatabaseFromJSONCountsItsDataSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.DataSourceID != "ds-1" || got.DataSourceCount != 2 {
-		t.Errorf("DataSourceID = %q, DataSourceCount = %d, want ds-1 et 2",
+		t.Errorf("DataSourceID = %q, DataSourceCount = %d, want ds-1 and 2",
 			got.DataSourceID, got.DataSourceCount)
 	}
 }

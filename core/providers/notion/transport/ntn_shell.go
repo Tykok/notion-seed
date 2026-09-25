@@ -15,16 +15,16 @@ import (
 	"github.com/tykok/notion-seed/core/preflight"
 )
 
-// DefaultNotionVersion est passée explicitement sur chaque appel. ntn a son
-// propre défaut, qui bouge avec ses versions ; on ne l'hérite jamais.
+// DefaultNotionVersion is passed explicitly on every call. ntn has its own
+// default, which moves with its versions; it is never inherited.
 const DefaultNotionVersion = "2025-09-03"
 
-// DefaultTimeout borne chaque appel. ntn api n'a aucun timeout interne et a
-// été observé bloquant plusieurs minutes sans produire un octet.
+// DefaultTimeout bounds each call. ntn api has no internal timeout and was
+// observed hanging for several minutes without producing a single byte.
 const DefaultTimeout = 30 * time.Second
 
-// NtnShell est la seule implémentation de Transport du MVP 0 : un shell-out
-// vers `ntn api`. ntn sert à la fois de transport et d'authentification.
+// NtnShell is the only Transport implementation in MVP 0: a shell-out to
+// `ntn api`. ntn serves as both transport and authentication.
 type NtnShell struct {
 	Binary         string
 	NotionVersion  string
@@ -65,13 +65,13 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 
 	cmd := exec.CommandContext(ctx, t.Binary, args...)
 
-	// Avec un body, il part sur stdin (-d @-) et son EOF vient de la fin de
-	// lecture. Sans body, on laisse cmd.Stdin nil : os/exec donne alors
-	// /dev/null à l'enfant, ce qui est exactement ce qu'on veut.
+	// With a body, it goes on stdin (-d @-) and its EOF comes from the end of
+	// the read. Without a body, cmd.Stdin is left nil: os/exec then gives
+	// /dev/null to the child, which is exactly what is wanted.
 	//
-	// Ne JAMAIS assigner os.Stdin ici. `ntn api` traite stdin comme une source
-	// de body valide, donc un stdin sans EOF le fait attendre indéfiniment —
-	// mesuré : 2 ms avec Stdin nil, blocage jusqu'au kill avec os.Stdin.
+	// NEVER assign os.Stdin here. `ntn api` treats stdin as a valid body
+	// source, so a stdin without EOF makes it wait forever — measured: 2 ms
+	// with a nil Stdin, hanging until killed with os.Stdin.
 	if len(req.Body) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Body)
 	}
@@ -82,7 +82,7 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 
 	runErr := cmd.Run()
 
-	// Un timeout ne dit pas si la mutation a été appliquée côté serveur.
+	// A timeout does not say whether the mutation was applied server-side.
 	if ctx.Err() != nil {
 		return APIResponse{}, &OutcomeUnknownError{Cause: ctx.Err()}
 	}
@@ -91,23 +91,23 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 	resp := APIResponse{Status: status, Headers: headers, Body: stdout.Bytes()}
 
 	if runErr == nil {
-		// Un exit 0 ne suffit pas : le statut ne vient QUE de la trace -v. Sans
-		// ligne de statut, on ne sait pas si l'API a été atteinte, ni avec quel
-		// code — rendre (resp, nil) rapporterait un succès qu'on n'a pas
-		// constaté. C'est le risque nommé par la spec, « ntn change son format
-		// de sortie », et il doit échouer vers le rouge.
+		// Exit 0 is not enough: the status comes ONLY from the -v trace.
+		// Without a status line, there is no knowing whether the API was
+		// reached, nor with which code — returning (resp, nil) would report a
+		// success nobody observed. It is the risk named by the spec, "ntn
+		// changes its output format", and it must fail red.
 		if parseErr != nil {
 			return resp, fmt.Errorf("%w\n  → %s", parseErr, preflight.PinNtnHint())
 		}
 		if !hasStatus {
 			return resp, fmt.Errorf(
-				"ntn est sorti en 0 mais sa trace -v ne contient aucune ligne de statut : "+
-					"notion-seed ne peut pas vérifier que l'appel a abouti\n  → %s",
+				"ntn exited with 0 but its -v trace contains no status line: "+
+					"notion-seed cannot verify that the call succeeded\n  → %s",
 				preflight.PinNtnHint())
 		}
-		// Rien en aval ne regarde resp.Status : si ntn rendait un 4xx/5xx en
-		// sortant en 0, l'erreur passerait pour un succès. On la reclasse ici,
-		// au seul endroit qui voit le statut.
+		// Nothing downstream looks at resp.Status: if ntn returned a 4xx/5xx
+		// while exiting with 0, the error would pass for a success. It is
+		// reclassified here, in the only place that sees the status.
 		if status >= 400 {
 			if apiErr, ok := ParseAPIError(stderr.Bytes()); ok {
 				return resp, apiErr
@@ -123,8 +123,8 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 
 	var exitErr *exec.ExitError
 	if !errors.As(runErr, &exitErr) {
-		// ntn introuvable, non exécutable : aucun appel n'a été émis, donc
-		// l'issue est connue — c'est un échec.
+		// ntn not found, not executable: no call was made, so the outcome is
+		// known — it is a failure.
 		return APIResponse{}, runErr
 	}
 
@@ -147,12 +147,12 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 			Message:    strings.TrimSpace(stderr.String()),
 		}
 	}
-	// Un exit non-nul ET une trace -v illisible (tronquée, ou un format que le
-	// scanner refuse) : parseErr était perdu ici, donc l'échec dégradait en
-	// OutcomeUnknownError générique sans dire que la trace elle-même était en
-	// cause — exactement le diagnostic que l'autre branche (exit 0) donne déjà.
-	// La classification OutcomeUnknownError reste correcte : une trace
-	// illisible sur un exit non-nul ne dit toujours pas ce qui s'est passé.
+	// A non-zero exit AND an unreadable -v trace (truncated, or a format the
+	// scanner rejects): parseErr was lost here, so the failure degraded into
+	// a generic OutcomeUnknownError without saying the trace itself was at
+	// fault — exactly the diagnosis the other branch (exit 0) already gives.
+	// The OutcomeUnknownError classification stays correct: an unreadable
+	// trace on a non-zero exit still does not say what happened.
 	if parseErr != nil {
 		return resp, &OutcomeUnknownError{
 			Cause: fmt.Errorf("%w\n  → %s", parseErr, preflight.PinNtnHint()),
@@ -161,19 +161,19 @@ func (t *NtnShell) Execute(ctx context.Context, req APIRequest) (APIResponse, er
 	return resp, &OutcomeUnknownError{Cause: runErr}
 }
 
-// checkPath refuse un chemin que notion-seed n'aurait pas dû construire. Il n'y
-// a pas d'injection possible aujourd'hui — argv part en éléments séparés, aucun
-// shell n'est impliqué — mais un id de page valant "../../v1/users" produit un
-// chemin que la couche HTTP peut normaliser vers un autre endpoint que celui
-// visé. La garde est ici, au plus près de l'appel, en plus du `pattern` UUID que
-// le schéma impose sur parent_page_id.
+// checkPath rejects a path notion-seed should not have built. No injection is
+// possible today — argv goes out as separate elements, no shell is involved —
+// but a page id equal to "../../v1/users" produces a path the HTTP layer can
+// normalize to an endpoint other than the intended one. The guard is here, as
+// close to the call as possible, on top of the UUID `pattern` the schema
+// enforces on parent_page_id.
 func checkPath(p string) error {
 	if !strings.HasPrefix(p, "/") {
-		return fmt.Errorf("chemin d'API %q : il doit commencer par \"/\"", p)
+		return fmt.Errorf("API path %q: it must start with \"/\"", p)
 	}
 	if p != path.Clean(p) {
 		return fmt.Errorf(
-			"chemin d'API %q : il contient un segment relatif, ce qui peut viser un autre endpoint que celui prévu", p)
+			"API path %q: it contains a relative segment, which can target an endpoint other than the intended one", p)
 	}
 	return nil
 }

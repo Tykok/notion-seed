@@ -9,10 +9,10 @@ import (
 	"testing"
 )
 
-// fakeNtnDir compile le faux ntn dans un dossier temporaire propre à l'appel et
-// retourne ce dossier, prêt à être mis en tête de PATH. La compilation est
-// refaite à chaque appel : le cache de build de Go la rend quasi gratuite après
-// la première.
+// fakeNtnDir builds the fake ntn in a temporary directory specific to the call
+// and returns that directory, ready to be put at the front of PATH. The build
+// is redone on every call: Go's build cache makes it nearly free after the
+// first one.
 func fakeNtnDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,8 +24,8 @@ func fakeNtnDir(t *testing.T) string {
 	return dir
 }
 
-// withFakeNtn met le faux ntn en tête du PATH et fixe le scénario, pour la
-// durée du test.
+// withFakeNtn puts the fake ntn at the front of PATH and sets the scenario,
+// for the duration of the test.
 func withFakeNtn(t *testing.T, scenario string) {
 	t.Helper()
 	dir := fakeNtnDir(t)

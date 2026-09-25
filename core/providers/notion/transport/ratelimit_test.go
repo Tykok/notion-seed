@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// fakeClock avance uniquement quand on le lui demande, ou quand un Sleep est
-// réclamé. Ça rend le débit vérifiable sans attendre en temps réel.
+// fakeClock moves forward only when asked to, or when a Sleep is requested.
+// It makes the rate verifiable without waiting in real time.
 type fakeClock struct {
 	mu    sync.Mutex
 	now   time.Time
@@ -55,7 +55,7 @@ func TestTokenBucketAllowsBurstWithoutSleeping(t *testing.T) {
 		}
 	}
 	if got := clock.totalSlept(); got != 0 {
-		t.Errorf("le burst de 10 a dormi %v, want 0", got)
+		t.Errorf("the burst of 10 slept %v, want 0", got)
 	}
 }
 
@@ -68,12 +68,12 @@ func TestTokenBucketThrottlesBeyondBurst(t *testing.T) {
 			t.Fatalf("Wait() #%d error = %v", i, err)
 		}
 	}
-	// 10 en burst, puis 5 à 5/s : exactement 1 seconde de sommeil cumulé. La
-	// borne SUPÉRIEURE compte autant que l'inférieure : --rate est exposé à
-	// l'utilisateur, et un limiteur qui sur-étrangle d'un facteur 10 passerait
-	// une assertion en `>=`.
+	// 10 in a burst, then 5 at 5/s: exactly 1 second of cumulative sleep. The
+	// UPPER bound matters as much as the lower one: --rate is exposed to the
+	// user, and a limiter that over-throttles by a factor of 10 would pass a
+	// `>=` assertion.
 	if got := clock.totalSlept(); got != time.Second {
-		t.Errorf("sommeil cumulé = %v, want exactement 1s", got)
+		t.Errorf("cumulative sleep = %v, want exactly 1s", got)
 	}
 }
 
@@ -86,16 +86,16 @@ func TestTokenBucketRefillsOverTime(t *testing.T) {
 			t.Fatalf("Wait() #%d error = %v", i, err)
 		}
 	}
-	// 2 secondes s'écoulent : le bucket se remplit à 10 (plafonné au burst).
+	// 2 seconds go by: the bucket refills to 10 (capped at the burst).
 	_ = clock.Sleep(context.Background(), 2*time.Second)
 	before := clock.totalSlept()
 	for i := 0; i < 10; i++ {
 		if err := b.Wait(context.Background()); err != nil {
-			t.Fatalf("Wait() après recharge #%d error = %v", i, err)
+			t.Fatalf("Wait() after refill #%d error = %v", i, err)
 		}
 	}
 	if got := clock.totalSlept() - before; got != 0 {
-		t.Errorf("après recharge, sommeil = %v, want 0", got)
+		t.Errorf("after refill, sleep = %v, want 0", got)
 	}
 }
 
@@ -104,18 +104,18 @@ func TestTokenBucketRespectsContextCancellation(t *testing.T) {
 	b := NewTokenBucket(1, 1, clock)
 
 	if err := b.Wait(context.Background()); err != nil {
-		t.Fatalf("premier Wait error = %v", err)
+		t.Fatalf("first Wait error = %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := b.Wait(ctx); err == nil {
-		t.Error("Wait sur un contexte annulé doit retourner une erreur")
+		t.Error("Wait on a cancelled context must return an error")
 	}
 }
 
-// RealClock.Sleep doit rendre dès l'annulation, pas au bout de la durée
-// demandée. Sans ça, un Ctrl+C pendant un apply rate-limité attendrait la fin
-// du backoff.
+// RealClock.Sleep must return as soon as it is cancelled, not at the end of
+// the requested duration. Without that, a Ctrl+C during a rate-limited apply
+// would wait for the end of the backoff.
 func TestRealClockSleepReturnsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -127,16 +127,16 @@ func TestRealClockSleepReturnsOnContextCancellation(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if err == nil {
-		t.Error("Sleep() error = nil, want une erreur d'annulation")
+		t.Error("Sleep() error = nil, want a cancellation error")
 	}
 	if elapsed > 2*time.Second {
-		t.Errorf("Sleep a duré %v : l'annulation n'a pas interrompu l'attente", elapsed)
+		t.Errorf("Sleep lasted %v: the cancellation did not interrupt the wait", elapsed)
 	}
 }
 
-// cancellingClock annule le contexte en effet de bord de son Sleep, puis rend
-// nil. Ça cible la revérification de ctx que Wait fait APRÈS le Sleep : sans
-// elle, un jeton serait consommé sur un contexte déjà annulé.
+// cancellingClock cancels the context as a side effect of its Sleep, then
+// returns nil. It targets the ctx re-check Wait does AFTER the Sleep: without
+// it, a token would be consumed on an already cancelled context.
 type cancellingClock struct {
 	now    time.Time
 	cancel context.CancelFunc
@@ -156,11 +156,11 @@ func TestTokenBucketRechecksContextAfterSleeping(t *testing.T) {
 	b := NewTokenBucket(1, 1, clock)
 
 	if err := b.Wait(ctx); err != nil {
-		t.Fatalf("premier Wait error = %v", err)
+		t.Fatalf("first Wait error = %v", err)
 	}
-	// Le bucket est vide : ce Wait dort, et le Sleep annule le contexte.
+	// The bucket is empty: this Wait sleeps, and the Sleep cancels the context.
 	if err := b.Wait(ctx); err == nil {
-		t.Error("Wait() error = nil : le contexte annulé pendant le Sleep a été ignoré")
+		t.Error("Wait() error = nil: the context cancelled during the Sleep was ignored")
 	}
 }
 
@@ -177,15 +177,15 @@ func TestTokenBucketIsSharedAcrossGoroutines(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// 30 appels, burst 10, 5/s : 20 jetons à produire, donc 4 secondes cumulées.
-	// Borne inférieure : sans partage, chaque goroutine aurait son propre burst
-	// et personne ne dormirait. Borne supérieure : le sommeil est découpé en
-	// tranches d'un jeton, mais leur somme ne doit pas dépasser le temps
-	// nécessaire — sinon --rate ne veut plus dire ce qu'il annonce. La marge
-	// d'une tranche couvre les réveils qui se croisent.
+	// 30 calls, burst 10, 5/s: 20 tokens to produce, so 4 cumulative seconds.
+	// Lower bound: without sharing, each goroutine would have its own burst
+	// and nobody would sleep. Upper bound: the sleep is split into one-token
+	// slices, but their sum must not exceed the time needed — otherwise --rate
+	// no longer means what it says. The one-slice margin covers wake-ups that
+	// cross.
 	const want = 4 * time.Second
 	got := clock.totalSlept()
 	if got < want || got > want+time.Second/5 {
-		t.Errorf("sommeil cumulé = %v, want %v (±1 tranche) — débit mal borné", got, want)
+		t.Errorf("cumulative sleep = %v, want %v (±1 slice) — rate badly bounded", got, want)
 	}
 }
