@@ -1163,3 +1163,252 @@ func TestRunLeavesStateUntouchedWhenTheFirstPatchFails(t *testing.T) {
 		t.Errorf("Name = %q, want Avant : rien n'a été écrit", snap.Databases["tasks"].Name)
 	}
 }
+
+// fakeTrasher enregistre les ids qu'on lui demande de mettre à la corbeille.
+// before, s'il est posé, tourne au début de chaque appel : c'est ce qui permet
+// de vérifier que le state est déjà sur disque au moment de l'appel suivant.
+type fakeTrasher struct {
+	ids       []string
+	confirmed bool
+	err       error
+	failAt    int
+	before    func(call int)
+}
+
+func (f *fakeTrasher) Trash(_ context.Context, id string) (bool, error) {
+	call := len(f.ids)
+	if f.before != nil {
+		f.before(call)
+	}
+	f.ids = append(f.ids, id)
+	if f.err != nil && call == f.failAt {
+		return false, f.err
+	}
+	return f.confirmed, nil
+}
+
+func destroyChange(key string) diff.Change {
+	return diff.Change{
+		Resource: "database." + key, Key: key,
+		Kind: resources.KindDestroy, Class: diff.ClassDestructive,
+		Details: []resources.Detail{
+			resources.NewDetail("-", "database."+key, diff.ClassDestructive),
+		},
+	}
+}
+
+// orphanSnapshot ancre chaque key avec l'id "db-<key>" : un test peut ainsi dire
+// quel id a été mis à la corbeille.
+func orphanSnapshot(keys ...string) *state.Snapshot {
+	snap := emptySnapshot()
+	for _, k := range keys {
+		snap.Databases[k] = state.Database{ID: "db-" + k, DataSourceID: "ds-" + k, Name: k}
+	}
+	return snap
+}
+
+// L'identité mise à la corbeille est celle du state, et le state est sauvé
+// après CHAQUE destruction : une interruption laisse un fichier exactement vrai.
+func TestRunTrashesEachOrphanFromItsStateIdentityAndSavesAfterEach(t *testing.T) {
+	dir := t.TempDir()
+	snap := orphanSnapshot("archive", "tasks")
+	// Le state est sur disque avant le premier appel, comme en vrai : sans ça,
+	// la relecture ci-dessous ne prouverait rien.
+	if err := state.Save(dir, snap); err != nil {
+		t.Fatal(err)
+	}
+	var goneBeforeSecond bool
+	tr := &fakeTrasher{confirmed: true, before: func(call int) {
+		if call != 1 {
+			return
+		}
+		loaded, err := state.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, still := loaded.Databases["archive"]
+		goneBeforeSecond = !still
+	}}
+	p := &diff.Plan{Changes: []diff.Change{destroyChange("archive"), destroyChange("tasks")}}
+
+	rep, err := Run(context.Background(), p, snap, Options{Dir: dir, Trasher: tr})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if want := []string{"db-archive", "db-tasks"}; !slices.Equal(tr.ids, want) {
+		t.Errorf("ids mis à la corbeille = %v, want %v", tr.ids, want)
+	}
+	if !goneBeforeSecond {
+		t.Error("l'entrée de database.archive était encore sur disque avant la deuxième destruction")
+	}
+	if len(rep.Destroyed) != 2 || !strings.HasPrefix(rep.Destroyed[0], "database.archive mise à la corbeille") {
+		t.Errorf("Destroyed = %v", rep.Destroyed)
+	}
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if len(loaded.Databases) != 0 {
+		t.Errorf("state = %v, want vide", loaded.Databases)
+	}
+	if !rep.Converged() {
+		t.Errorf("Converged() = false : %+v", rep)
+	}
+}
+
+// Review Focus #1 : un 200 qui ne confirme pas la corbeille garde l'entrée.
+// L'abandonner rendrait invisible une database encore vivante : ni déclarée, ni
+// dans le state.
+func TestRunKeepsTheStateEntryWhenTheAPIDoesNotConfirmTheTrash(t *testing.T) {
+	dir := t.TempDir()
+	snap := orphanSnapshot("tasks")
+	p := &diff.Plan{Changes: []diff.Change{destroyChange("tasks")}}
+
+	rep, err := Run(context.Background(), p, snap, Options{Dir: dir, Trasher: &fakeTrasher{}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(rep.Destroyed) != 0 {
+		t.Errorf("Destroyed = %v, want vide", rep.Destroyed)
+	}
+	if len(rep.Mismatches) != 1 || !strings.Contains(rep.Mismatches[0], "database.tasks") ||
+		!strings.Contains(rep.Mismatches[0], "gardée") {
+		t.Errorf("Mismatches = %v, want un écart nommant database.tasks et l'entrée gardée", rep.Mismatches)
+	}
+	if _, ok := snap.Databases["tasks"]; !ok {
+		t.Error("l'entrée a été retirée alors que la corbeille n'est pas confirmée")
+	}
+	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
+		t.Error("un state a été écrit alors que rien n'a été détruit")
+	}
+	if rep.Converged() {
+		t.Error("Converged() = true alors que la database n'est pas à la corbeille")
+	}
+}
+
+// Review Focus #2 et D-B1 : aucun échec ne retire l'entrée. Le 404 en
+// particulier ne vaut pas destruction — il renvoie au plan, qui relit le réel,
+// et n'accuse jamais le partage.
+func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		want     []string
+		unwanted []string
+	}{
+		{
+			name: "404",
+			err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
+				Message: "Could not find database with ID: db-tasks."},
+			want:     []string{"404", "notion-seed plan", "entrée de state obsolète"},
+			unwanted: []string{"partagée", "intégration"},
+		},
+		{
+			name: "ancêtre archivé",
+			err: &transport.APIError{Status: 400, NotionCode: "validation_error",
+				Message: "Can't edit page on block with an archived ancestor. You must " +
+					"unarchive the ancestor before editing page."},
+			want: []string{"page ancêtre", "restaurez la page parente", "relancez apply",
+				"supprimez définitivement la page parente", "404", "entrée de state obsolète"},
+		},
+		{
+			name: "issue inconnue",
+			err:  &transport.OutcomeUnknownError{Cause: context.DeadlineExceeded},
+			want: []string{"issue inconnue", "notion-seed plan", "entrée de state obsolète"},
+		},
+		{
+			name: "refus générique",
+			err: &transport.APIError{Status: 409, NotionCode: "conflict_error",
+				Message: "Conflict occurred while saving."},
+			want: []string{"impossible", "relancez apply"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			snap := orphanSnapshot("tasks")
+			p := &diff.Plan{Changes: []diff.Change{destroyChange("tasks")}}
+
+			_, err := Run(context.Background(), p, snap, Options{
+				Dir: dir, Trasher: &fakeTrasher{err: tc.err},
+			})
+			if err == nil {
+				t.Fatal("Run() error = nil, want l'échec de la corbeille")
+			}
+			wants := append([]string{"database.tasks", "entrée de state est gardée", "  → "}, tc.want...)
+			for _, want := range wants {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+				}
+			}
+			for _, unwanted := range tc.unwanted {
+				if strings.Contains(err.Error(), unwanted) {
+					t.Errorf("message = %q, il ne doit pas contenir %q", err.Error(), unwanted)
+				}
+			}
+			if _, ok := snap.Databases["tasks"]; !ok {
+				t.Error("l'entrée a été retirée malgré l'échec")
+			}
+			if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
+				t.Error("un state a été écrit malgré l'échec")
+			}
+		})
+	}
+}
+
+// Un échec au milieu de la série nomme ce qui est acquis avant lui : sans ça,
+// l'utilisateur ne sait pas quelles databases sont déjà à la corbeille.
+func TestRunNamesTheDestroysAcquiredBeforeAFailure(t *testing.T) {
+	dir := t.TempDir()
+	snap := orphanSnapshot("archive", "tasks")
+	tr := &fakeTrasher{confirmed: true, failAt: 1, err: &transport.APIError{
+		Status: 409, NotionCode: "conflict_error", Message: "Conflict occurred while saving."}}
+	p := &diff.Plan{Changes: []diff.Change{destroyChange("archive"), destroyChange("tasks")}}
+
+	_, err := Run(context.Background(), p, snap, Options{Dir: dir, Trasher: tr})
+	if err == nil {
+		t.Fatal("Run() error = nil, want l'échec de la seconde destruction")
+	}
+	if want := "déjà mises à la corbeille et retirées du state : database.archive"; !strings.Contains(err.Error(), want) {
+		t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+	}
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, ok := loaded.Databases["archive"]; ok {
+		t.Error("database.archive est encore dans le state alors qu'elle est à la corbeille")
+	}
+	if _, ok := loaded.Databases["tasks"]; !ok {
+		t.Error("database.tasks a quitté le state alors que sa destruction a échoué")
+	}
+}
+
+// Review Focus #4 : prevent_destroy est un accusé de lecture. Run ne le lit
+// pas, et la destruction part.
+func TestRunTrashesADestroyAcknowledgedByPreventDestroy(t *testing.T) {
+	c := destroyChange("tasks")
+	c.Acknowledged = []string{"prevent_destroy"}
+	tr := &fakeTrasher{confirmed: true}
+
+	rep, err := Run(context.Background(), &diff.Plan{Changes: []diff.Change{c}},
+		orphanSnapshot("tasks"), Options{Dir: t.TempDir(), Trasher: tr})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(tr.ids) != 1 || len(rep.Destroyed) != 1 {
+		t.Errorf("ids = %v, Destroyed = %v : prevent_destroy ne doit rien empêcher", tr.ids, rep.Destroyed)
+	}
+}
+
+func TestRunRefusesADestroyWithoutATrasher(t *testing.T) {
+	_, err := Run(context.Background(), &diff.Plan{Changes: []diff.Change{destroyChange("tasks")}},
+		orphanSnapshot("tasks"), Options{Dir: t.TempDir()})
+	if err == nil {
+		t.Fatal("error = nil, want un défaut interne nommé")
+	}
+	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}

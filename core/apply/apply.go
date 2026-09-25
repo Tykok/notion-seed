@@ -3,9 +3,10 @@
 // Package apply exécute le plan : il écrit dans Notion ce que le plan a
 // affiché, et rien d'autre.
 //
-// Périmètre de cette version : les créations, les modifications, et le nettoyage
-// des entrées de state dont la ressource a déjà disparu. Les destructions sont
-// NOMMÉES comme non appliquées plutôt que tentées à moitié.
+// Périmètre : les créations, les modifications, les destructions — une database
+// sortie du YAML est mise à la corbeille — et le nettoyage des entrées de state
+// dont la ressource a déjà disparu. Seul ce que l'API ne sait pas exprimer est
+// retenu, et nommé avec sa raison.
 package apply
 
 import (
@@ -41,20 +42,33 @@ type Updater interface {
 	DatabaseExists(ctx context.Context, id string) (bool, error)
 }
 
+// Trasher est ce dont apply a besoin pour mettre une database à la corbeille.
+//
+// Une interface à part plutôt qu'une méthode de plus sur Updater : la
+// destruction n'a besoin ni des deux PATCH ni de la sonde d'existence, et
+// chaque faux des tests n'implémente ainsi que ce qu'il exerce. Le booléen dit
+// si la réponse CONFIRME la corbeille.
+type Trasher interface {
+	Trash(ctx context.Context, id string) (bool, error)
+}
+
 // Options porte ce qui vient de la ligne de commande et de la configuration.
 type Options struct {
 	Dir          string
 	ParentPageID string
 	Creator      Creator
 	Updater      Updater
+	Trasher      Trasher
 }
 
 // Report est le compte rendu d'une exécution. Chaque champ est une liste de
 // lignes prêtes à afficher, dans l'ordre où elles se sont produites.
 type Report struct {
-	Created    []string
-	Updated    []string
-	Cleaned    []string
+	Created   []string
+	Updated   []string
+	Destroyed []string
+	Cleaned   []string
+	// Skipped nomme les ressources retenues : Withheld leur interdit l'écriture.
 	Skipped    []string
 	Mismatches []string
 }
@@ -103,7 +117,8 @@ func Check(p *diff.Plan, snap *state.Snapshot) error {
 	return nil
 }
 
-// Run écrit les créations et les modifications du plan, une ressource à la fois.
+// Run écrit les créations, les modifications et les destructions du plan, une
+// ressource à la fois.
 //
 // Le state est sauvegardé APRÈS CHAQUE écriture réussie, pas une fois à la fin :
 // un arrêt à n'importe quel instant laisse alors un state exactement vrai. Ce
@@ -146,19 +161,17 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 		// Check a garanti la forme de chaque changement autorisé : une cible pour
 		// une création ou une modification, une identité dans le state pour une
 		// destruction.
+		var err error
 		switch c.Kind {
 		case resources.KindCreate:
-			if err := createOne(ctx, c, &rep, snap, opts); err != nil {
-				return rep, err
-			}
+			err = createOne(ctx, c, &rep, snap, opts)
 		case resources.KindUpdate:
-			if err := updateOne(ctx, c, &rep, snap, opts); err != nil {
-				return rep, err
-			}
-		default:
-			// Les destructions ne sont pas encore écrites : Check les laisse
-			// passer, elles restent nommées sans être tentées.
-			rep.Skipped = append(rep.Skipped, c.Resource)
+			err = updateOne(ctx, c, &rep, snap, opts)
+		case resources.KindDestroy:
+			err = destroyOne(ctx, c, &rep, snap, opts)
+		}
+		if err != nil {
+			return rep, err
 		}
 	}
 
@@ -292,6 +305,9 @@ func acquiredBefore(rep Report) string {
 	}
 	if names := resourceNames(rep.Updated); len(names) > 0 {
 		parts = append(parts, "déjà modifiées et inscrites dans le state : "+strings.Join(names, ", "))
+	}
+	if names := resourceNames(rep.Destroyed); len(names) > 0 {
+		parts = append(parts, "déjà mises à la corbeille et retirées du state : "+strings.Join(names, ", "))
 	}
 	if len(parts) == 0 {
 		return "aucune écriture n'avait abouti avant celle-ci"
@@ -582,4 +598,110 @@ func genericUpdateError(c diff.Change, err error, here, acquired string, dbWritt
 		"modification de %s impossible: %w\n"+
 			"  → %s ; rien n'est annulé. %s ; %s",
 		c.Resource, err, next, here, acquired)
+}
+
+// destroyOne met une database à la corbeille, puis retire son entrée du state.
+//
+// L'identité vient du STATE, pas d'une cible : une destruction n'a pas d'état
+// après. Check a déjà garanti qu'elle y est.
+//
+// L'entrée n'est retirée que si l'API CONFIRME la corbeille. Toute autre issue
+// la garde, et le plan suivant relit le réel pour trancher : une database partie
+// y ressort en entrée de state obsolète, qu'apply retire sans rien écrire ; une
+// database encore là y ressort en destruction. Retirer l'entrée sur un doute
+// abandonnerait l'identité d'une database peut-être vivante, qui deviendrait
+// invisible à notion-seed : ni déclarée, ni dans le state.
+//
+// Run ne lit pas Acknowledged : lifecycle.prevent_destroy est un accusé de
+// lecture du plan, pas une interdiction d'écrire.
+func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
+	if opts.Trasher == nil {
+		return fmt.Errorf(
+			"%s : une destruction est à écrire mais aucun Trasher n'est branché\n"+
+				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
+				"sortie de `notion-seed plan`", c.Resource)
+	}
+	id := snap.Databases[c.Key].ID
+
+	trashed, err := opts.Trasher.Trash(ctx, id)
+	if err != nil {
+		return destroyError(c, *rep, err)
+	}
+	if !trashed {
+		rep.Mismatches = append(rep.Mismatches, fmt.Sprintf(
+			"%s — l'API a répondu sans mettre la database à la corbeille : son entrée "+
+				"de state est gardée", c.Resource))
+		return nil
+	}
+
+	delete(snap.Databases, c.Key)
+	if err := state.Save(opts.Dir, snap); err != nil {
+		return err
+	}
+	rep.Destroyed = append(rep.Destroyed, fmt.Sprintf(
+		"%s mise à la corbeille — id %s (entrée retirée du state)", c.Resource, id))
+	return nil
+}
+
+// destroyError rend l'échec d'une mise à la corbeille. Quel qu'il soit, l'entrée
+// de state est GARDÉE (voir destroyOne) : le message le dit, et nomme ce qui
+// était acquis avant.
+func destroyError(c diff.Change, rep Report, err error) error {
+	acquired := acquiredBefore(rep)
+
+	var unknown *transport.OutcomeUnknownError
+	if errors.As(err, &unknown) {
+		// Arrêt net, sans enchaîner : la ressource suivante travaillerait sur un
+		// workspace dans un état indéterminé.
+		return fmt.Errorf(
+			"mise à la corbeille de %s : issue inconnue: %w\n"+
+				"  → lancez `notion-seed plan` pour voir ce que Notion porte réellement : "+
+				"si la database est à la corbeille, elle y ressort en entrée de state "+
+				"obsolète, qu'apply retirera sans rien écrire ; sinon, sa destruction y "+
+				"est proposée de nouveau. Son entrée de state est gardée. %s",
+			c.Resource, err, acquired)
+	}
+
+	var apiErr *transport.APIError
+	if errors.As(err, &apiErr) {
+		switch {
+		case apiErr.Status == 400 && strings.Contains(apiErr.Message, "archived ancestor"):
+			// Mesuré le 2026-09-25 sur {"in_trash":true} : sous une page ancêtre
+			// déjà à la corbeille, Notion répond ce 400 et ne modifie rien — la
+			// database se relit ensuite en 200, archived:false. Les deux issues
+			// convergent : restaurer la page rend la destruction écrivable ; la
+			// supprimer définitivement fait répondre 404 au GET, et le plan suivant
+			// classe l'entrée comme obsolète.
+			return fmt.Errorf(
+				"mise à la corbeille de %s impossible : une page ancêtre de la database "+
+					"est déjà à la corbeille, et Notion refuse d'écrire sous elle — la "+
+					"database y part déjà avec sa page parente\n"+
+					"  → soit restaurez la page parente dans Notion, puis relancez apply ; "+
+					"soit supprimez définitivement la page parente depuis la corbeille de "+
+					"Notion : la database répondra alors 404, le prochain `notion-seed plan` "+
+					"classera son entrée comme entrée de state obsolète, et apply la retirera. "+
+					"Son entrée de state est gardée. %s",
+				c.Resource, acquired)
+		case apiErr.Status == 404:
+			// Le plan venait de la lire. Ce 404 n'est pas une preuve de
+			// disparition : seul le refresh du plan suivant en décide, par la même
+			// règle que pour toute orpheline. Aucune sonde d'existence ici : le cas
+			// de l'ancêtre à la corbeille est mesuré pour répondre 400 sur ce
+			// chemin, aucun 404 menteur n'y est mesuré, et le plan relit le réel.
+			return fmt.Errorf(
+				"mise à la corbeille de %s impossible : Notion ne trouve plus la database "+
+					"(404), alors que le plan venait de la lire\n"+
+					"  → lancez `notion-seed plan` : si elle a disparu, elle y ressort en "+
+					"entrée de state obsolète, qu'apply retirera sans rien écrire dans "+
+					"Notion. Son entrée de state est gardée : un 404 sur une écriture ne "+
+					"suffit pas à abandonner une identité. %s",
+				c.Resource, acquired)
+		}
+	}
+
+	return fmt.Errorf(
+		"mise à la corbeille de %s impossible: %w\n"+
+			"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est annulé, "+
+			"et son entrée de state est gardée. %s",
+		c.Resource, err, acquired)
 }
