@@ -415,6 +415,14 @@ corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
 se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
 nouveau, redéclarez-la puis lancez `notion-seed import`.
 
+Renommer la `key` d'une database dans le YAML n'est pas un renommage pour
+notion-seed, qui n'a que la key pour ancrer l'identité : l'ancienne key en
+ressort orpheline et part à la corbeille, la nouvelle est créée vide, et
+`plan` montre les deux séparément. Pour garder la database, gardez sa `key` —
+`name` peut changer librement — ou, si la key a déjà changé, ré-attachez la
+database existante à la nouvelle key avec `notion-seed import` avant de
+lancer `apply`.
+
 Il retire aussi les **entrées de state obsolètes** : une ressource que le YAML
 ne déclare plus et qui a déjà été supprimée dans Notion. C'est un nettoyage
 local, rien n'est écrit dans Notion — à ne pas confondre avec une destruction,
