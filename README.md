@@ -116,18 +116,18 @@ afficherait une dérive fantôme.
 
 ## État actuel
 
-`apply` crée les databases déclarées et absentes de Notion, et modifie celles
-qui existent déjà : nom, description, icône et propriétés déclarées. Le state
-est mis à jour après chaque ressource écrite. Les destructions ne sont pas encore
-écrites : elles sont affichées, nommées, et `apply` sort en code non nul tant
-qu'elles restent. Deux changements d'option, que l'API ne sait pas exprimer, sont
-retenus avec la migration à faire à la main — voir
+`apply` crée les databases déclarées et absentes de Notion, modifie celles qui
+existent déjà — nom, description, icône et propriétés déclarées — et met à la
+corbeille celles que le YAML ne déclare plus. Le state est mis à jour après
+chaque ressource écrite. Deux changements d'option, que l'API ne sait pas
+exprimer, sont retenus avec la migration à faire à la main, et `apply` sort en
+code non nul tant qu'ils restent — voir
 [Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire).
 
 | | |
 |---|---|
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
-| `apply` | créations et modifications ; destructions non écrites — voir [Appliquer](#appliquer) |
+| `apply` | créations, modifications et destructions — voir [Appliquer](#appliquer) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
 | `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
 | `--fail-on` | le garde-fou de CI — voir [En CI](#en-ci) |
@@ -297,10 +297,11 @@ Plan: 0 to add, 0 to change, 1 to destroy
 Impact : 1 database(s) à la corbeille.
 ```
 
-Elles disent « je sais ce que cette ressource porte », et rien de plus. C'est
-écrit noir sur blanc parce qu'une clé nommée `prevent_destroy` qu'on croirait
-bloquante serait un piège : vous compteriez sur elle, et elle ne vous
-retiendrait pas.
+Elles disent « je sais ce que cette ressource porte », et rien de plus. `apply`
+met donc à la corbeille une database déclarée dans `prevent_destroy` exactement
+comme une autre, en affichant la mention. C'est écrit noir sur blanc parce
+qu'une clé nommée `prevent_destroy` qu'on croirait bloquante serait un piège :
+vous compteriez sur elle, et elle ne vous retiendrait pas.
 
 Ce qui arrête une commande, désormais, c'est ce que vous demandez dans votre
 workflow : [`--fail-on`](#en-ci). Ce qui informe, c'est la mesure. Ce qui
@@ -404,34 +405,54 @@ L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
 sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins
 coûteux. `apply` le dit, et inscrit dans le state ce qui est passé.
 
+Les **destructions**. Une database que le state ancre, que le YAML ne déclare
+plus et que Notion porte encore est mise à la corbeille par un seul appel,
+`PATCH /v1/databases/{id}` avec `{"in_trash":true}`, puis son entrée est retirée
+du state. L'entrée n'est retirée que si la réponse de l'API confirme la
+corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
+`lifecycle.prevent_destroy` n'y change rien — voir
+[lifecycle](#lifecycle--des-accusés-de-lecture). Une database mise à la corbeille
+se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
+nouveau, redéclarez-la puis lancez `notion-seed import`.
+
 Il retire aussi les **entrées de state obsolètes** : une ressource que le YAML
 ne déclare plus et qui a déjà été supprimée dans Notion. C'est un nettoyage
-local, rien n'est écrit dans Notion.
+local, rien n'est écrit dans Notion — à ne pas confondre avec une destruction,
+qui écrit, et que la confirmation annonce sur sa propre ligne.
 
-### Ce qu'il n'écrit pas encore
+### Ce qu'il retient
 
-Les destructions. Elles ressortent sous `Non appliqué par cette version`, avec
-la marche à suivre : archiver la database dans Notion, ou attendre la version qui
-les écrit.
+Ce que l'API ne sait pas exprimer ressort sous `Retenu — migration requise` : ce
+n'est pas une limite de cette version, et attendre n'y changera rien — voir
+[Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire). `apply` sort en
+code non nul tant qu'il reste une ressource retenue — un apply qui ne converge
+pas doit être bruyant en CI.
 
-Ce que l'API ne sait pas exprimer ressort, lui, sous `Retenu — migration
-requise` : ce n'est pas une limite de cette version, et attendre n'y changera
-rien — voir [Ce que l'API ne sait pas faire](#ce-que-lapi-ne-sait-pas-faire).
-
-Dans les deux cas, `apply` sort en code non nul tant qu'il reste du travail —
-un apply qui ne converge pas doit être bruyant en CI.
-
-Une ressource retenue ou non appliquée n'est pas touchée du tout : aucun appel
-ne part pour elle. Une ressource écrite l'est en entier, à une exception près,
-qui n'est jamais silencieuse : une modification peut s'arrêter entre ses deux
-appels — voir [En cas d'échec](#en-cas-déchec).
+Une ressource retenue n'est pas touchée du tout : aucun appel ne part pour elle.
+Une ressource écrite l'est en entier, à une exception près, qui n'est jamais
+silencieuse : une modification peut s'arrêter entre ses deux appels — voir
+[En cas d'échec](#en-cas-déchec).
 
 ### La confirmation
 
-Le mot `apply`, tapé en entier, après le plan et son impact mesuré. Elle ne
-lève rien de ce qui arrête la commande : un plan bloqué — une ressource gérée
-que Notion ne connaît plus — ou une classe refusée par `--fail-on` n'atteint
-jamais le prompt.
+Le mot `apply`, tapé en entier, après le plan et ce qui va se passer, par
+nature : créations, modifications, mises à la corbeille, et entrées de state
+obsolètes à retirer — chacune sur sa ligne, puisque la dernière n'écrit rien
+dans Notion. La ligne `Impact` qu'affiche `apply` ne compte que les ressources
+qu'il va écrire : une ressource retenue en est exclue, puisqu'`apply` ne causera
+pas ce qu'elle coûterait. Sans ressource retenue, elle est identique à celle de
+`plan`.
+
+```
+Impact : 1 database(s) à la corbeille.
+
+1 database(s) vont être mises à la corbeille dans Notion.
+Confirmez en tapant « apply » :
+```
+
+Elle ne lève rien de ce qui arrête la commande : un plan bloqué — une ressource
+gérée que Notion ne connaît plus — ou une classe refusée par `--fail-on`
+n'atteint jamais le prompt.
 
 Hors terminal, `apply` exige `--auto-approve` plutôt que de s'exécuter parce que
 personne ne répondait.
@@ -447,8 +468,8 @@ est vérifié **avant** la confirmation et avant la moindre écriture.
 ### En cas d'échec
 
 Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
-personne n'a demandée. Ce qui a été créé ou modifié reste écrit, et reste dans
-le state.
+personne n'a demandée. Ce qui a été créé, modifié ou mis à la corbeille reste écrit, et le state le
+reflète.
 
 Une modification peut s'arrêter **entre ses deux appels** : le nom, la
 description ou l'icône sont passés, les propriétés non, et aucune donnée de ligne
@@ -459,6 +480,20 @@ Une database dont une page ancêtre est à la corbeille se lit comme vivante, ma
 refuse toute écriture. `apply` le diagnostique et demande de restaurer la page
 parente, plutôt que de relayer le `404` de l'API, qui accuse à tort le partage
 avec l'intégration.
+
+Une mise à la corbeille qui échoue — refus de l'API, `404`, issue inconnue —
+laisse l'entrée de state **en place** : `apply` s'arrête et renvoie à
+`notion-seed plan`, qui relit le réel. Une database déjà partie y ressort en
+entrée de state obsolète, qu'un `apply` suivant retire sans rien écrire ; une
+database encore là y ressort en destruction. Abandonner l'identité sur la foi
+d'un échec rendrait invisible une database peut-être encore vivante.
+
+Sous une page ancêtre déjà à la corbeille, Notion refuse aussi la mise à la
+corbeille, et la database y part de toute façon avec sa page. `apply` propose
+les deux issues : restaurer la page parente puis relancer `apply`, ou supprimer
+définitivement la page parente depuis la corbeille de Notion — la database
+répond alors `404`, et le `notion-seed plan` suivant classe son entrée comme
+obsolète.
 
 Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
 a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
