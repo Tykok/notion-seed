@@ -388,34 +388,6 @@ func TestApplyStopsWithoutRollbackWhenAPIRefuses(t *testing.T) {
 	}
 }
 
-// Ce qu'apply ne sait pas écrire est nommé avant la confirmation, et le code de
-// sortie dit que le plan n'a pas convergé.
-func TestApplyNamesWhatItCannotWriteAndFails(t *testing.T) {
-	withFakeNtn(t, "authenticated_database")
-	// La database importée n'a pas la propriété Estimate : c'est un update, que
-	// cette version n'écrit pas.
-	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml": workspaceYAML,
-		"databases/all.yaml": tasksWithStatus + `      Estimate:
-        type: number
-`,
-	})
-	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
-		t.Fatalf("import: %v", err)
-	}
-
-	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
-	if err == nil {
-		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
-	}
-	if !strings.Contains(out, "Non appliqué par cette version") {
-		t.Errorf("sortie:\n%s", out)
-	}
-	if !strings.Contains(out, "database.tasks") {
-		t.Errorf("la section ne nomme pas la ressource:\n%s", out)
-	}
-}
-
 // apply partage planOptions avec plan : --fail-on y apparaît donc dans l'aide.
 // Un flag affiché puis ignoré serait pire que pas de flag — la CI qui ÉCRIT est
 // justement celle qui croit se protéger. apply doit donc s'arrêter sur la
@@ -445,7 +417,7 @@ func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 	}
 }
 
-// La ligne Impact agrège TOUT le plan. apply n'écrivant que les créations, la
+// La ligne Impact agrège TOUT le plan. apply n'écrivant pas les destructions, la
 // lui faire afficher lui ferait annoncer une destruction qu'il ne fera pas —
 // contredite quatre lignes plus bas par sa propre section « Non appliqué ».
 // apply annonce lui-même ce qu'il va écrire, juste avant la confirmation.
@@ -479,5 +451,170 @@ func TestApplyDoesNotAnnounceAnImpactItWillNotCause(t *testing.T) {
 	}
 	if !strings.Contains(applyOut, "Non appliqué par cette version") {
 		t.Errorf("apply doit toujours nommer ce qu'il ne sait pas écrire:\n%s", applyOut)
+	}
+}
+
+// tasksWithRenamedOption reprend tasksWithStatus en changeant le NOM de
+// l'option "Fait" sans toucher à sa key : l'API ne sait pas renommer une
+// option, donc la ressource est retenue.
+const tasksWithRenamedOption = `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: "À faire"
+            color: blue
+            group: "To-do"
+          - key: done
+            name: "Terminé"
+            color: green
+            group: "Complete"
+`
+
+// tasksWithEstimate ajoute une propriété à la database importée : un update
+// que cette version écrit.
+const tasksWithEstimate = tasksWithStatus + `      Estimate:
+        type: number
+`
+
+// importThenDeclare importe la database du scénario à état de fakentn, puis
+// remplace le YAML par celui du test, dans le MÊME dossier.
+//
+// L'import se fait toujours avec tasksWithStatus : import joint les keys
+// d'options PAR NOM, donc importer avec un nom d'option changé laisserait
+// l'option renommée sans key, et le plan montrerait un retrait suivi d'un ajout
+// au lieu d'une migration. C'est le YAML déclaré APRÈS l'import qui porte le
+// changement à tester.
+//
+// Le scénario garde en fichier les PATCH qu'il reçoit et les fusionne dans ses
+// lectures suivantes : sans ça, la relecture qui suit une écriture rendrait
+// l'état d'avant, et apply signalerait un écart qui n'existe pas.
+func importThenDeclare(t *testing.T, databasesYAML string) string {
+	t.Helper()
+	withFakeNtn(t, "authenticated_database_updatable")
+	t.Setenv("FAKE_NTN_STATE_FILE", filepath.Join(t.TempDir(), "fakentn-state.json"))
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": tasksWithStatus,
+	})
+	if out, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
+		t.Fatalf("import: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
+		[]byte(databasesYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// applyAfterImport monte importThenDeclare puis lance apply sans confirmation.
+// Les tests d'update de ce fichier partagent ce montage : ce qui les distingue
+// est le YAML, pas la plomberie.
+func applyAfterImport(t *testing.T, databasesYAML string) (string, error) {
+	t.Helper()
+	dir := importThenDeclare(t, databasesYAML)
+	return runCmd(t, "apply", "--dir", dir, "--auto-approve")
+}
+
+func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
+	out, err := applyAfterImport(t, tasksWithRenamedOption)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
+	}
+	if !strings.Contains(out, "Retenu — migration requise") {
+		t.Errorf("sortie:\n%s", out)
+	}
+	if !strings.Contains(out, "database.tasks") {
+		t.Errorf("la section ne nomme pas la ressource:\n%s", out)
+	}
+	// La raison, pas seulement le fait : une ressource sautée sans motif renvoie
+	// l'utilisateur deviner.
+	if !strings.Contains(out, "migrée à la main") {
+		t.Errorf("la section ne dit pas quoi faire:\n%s", out)
+	}
+	// Retenu n'est pas « non appliqué par cette version » : la confusion
+	// enverrait l'utilisateur attendre une version qui ne changera rien.
+	if strings.Contains(out, "Non appliqué par cette version") {
+		t.Errorf("une ressource retenue est rangée avec ce que cette version n'écrit pas:\n%s", out)
+	}
+	// Le bilan ne doit pas dire « rien de non appliqué » alors qu'apply échoue
+	// à cause de cette ressource.
+	if !strings.Contains(out, "Retenu : 1") {
+		t.Errorf("le bilan ne compte pas la ressource retenue:\n%s", out)
+	}
+}
+
+// Une ressource retenue ne part pas : aucun PATCH, state intact.
+func TestApplyWritesNothingForAWithheldResource(t *testing.T) {
+	dir := importThenDeclare(t, tasksWithRenamedOption)
+	before := mustReadFile(t, filepath.Join(dir, state.FileName))
+
+	if out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve"); err == nil {
+		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
+	}
+	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
+		t.Error("le state a été réécrit pour une ressource retenue")
+	}
+	if _, err := os.Stat(os.Getenv("FAKE_NTN_STATE_FILE")); !os.IsNotExist(err) {
+		t.Error("un PATCH est parti pour une ressource retenue")
+	}
+}
+
+// L'annonce des modifications précède la confirmation : c'est le seul moment où
+// l'utilisateur décide, sur la foi de ce qui est à l'écran.
+func TestApplyAnnouncesUpdatesBeforeConfirmation(t *testing.T) {
+	dir := importThenDeclare(t, tasksWithEstimate)
+	forceInteractive(t)
+
+	out, err := runCmdWithStdin(t, "apply\n", "apply", "--dir", dir)
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	announce := strings.Index(out, "vont être modifiées")
+	prompt := strings.Index(out, "Confirmez")
+	if announce < 0 || prompt < 0 || announce > prompt {
+		t.Errorf("sortie:\n%s\nwant l'annonce des modifications avant la confirmation", out)
+	}
+}
+
+// Le chemin heureux de l'update, de bout en bout : la propriété part, la
+// relecture la rapporte, le state l'inscrit, le compte rendu la nomme, et le
+// plan suivant est vide.
+func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
+	dir := importThenDeclare(t, tasksWithEstimate)
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "~ database.tasks modifiée") {
+		t.Errorf("le compte rendu ne nomme pas la modification:\n%s", out)
+	}
+	if !strings.Contains(out, "1 modification(s)") {
+		t.Errorf("le bilan ne compte pas la modification:\n%s", out)
+	}
+	if strings.Contains(out, "Non appliqué par cette version") {
+		t.Errorf("une modification écrite est encore annoncée comme non appliquée:\n%s", out)
+	}
+
+	snap, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, ok := snap.Databases["tasks"].Properties["Estimate"]; !ok {
+		t.Errorf("state = %+v, want la propriété Estimate relue", snap.Databases["tasks"])
+	}
+
+	planOut, perr := runCmd(t, "plan", "--dir", dir)
+	if perr != nil {
+		t.Fatalf("plan: %v\n%s", perr, planOut)
+	}
+	if !strings.Contains(planOut, "Aucun changement") {
+		t.Errorf("le plan qui suit un apply réussi n'est pas vide:\n%s", planOut)
 	}
 }
