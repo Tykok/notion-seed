@@ -23,10 +23,10 @@ func TestFromConfigCarriesKeysAndNeverIDs(t *testing.T) {
 	got := FromConfig(db)
 
 	if got.ID != "" || got.DataSourceID != "" {
-		t.Errorf("la config ne connaît aucun id: %+v", got)
+		t.Errorf("the config knows no id: %+v", got)
 	}
 	if got.Name != "Tasks" || got.Description != "d" || got.Icon != "🗂" {
-		t.Errorf("attributs = %+v", got)
+		t.Errorf("attributes = %+v", got)
 	}
 	if f := got.Properties["Estimate"].Format; f != "number" {
 		t.Errorf("Format = %q, want number", f)
@@ -39,7 +39,7 @@ func TestFromConfigCarriesKeysAndNeverIDs(t *testing.T) {
 		t.Errorf("option 0 = %+v", opts[0])
 	}
 	if opts[1].Key != "" {
-		t.Errorf("option 1 ne déclare pas de key, Key = %q", opts[1].Key)
+		t.Errorf("option 1 declares no key, Key = %q", opts[1].Key)
 	}
 }
 
@@ -59,14 +59,14 @@ func TestFromRemoteCarriesIDsAndNeverKeys(t *testing.T) {
 		t.Errorf("ids = %+v", got)
 	}
 	if got.Properties["Estimate"].Format != "number" {
-		t.Error("NumberFormat doit atterrir dans Format")
+		t.Error("NumberFormat must land in Format")
 	}
 	opt := got.Properties["Statut"].Options[0]
 	if opt.ID != "o1" || opt.Color != "blue" || opt.Group != "To-do" {
 		t.Errorf("option = %+v", opt)
 	}
 	if opt.Key != "" {
-		t.Errorf("le réel ne connaît aucune key, Key = %q", opt.Key)
+		t.Errorf("the actual state knows no key, Key = %q", opt.Key)
 	}
 }
 
@@ -87,13 +87,13 @@ func TestJoinOptionKeysMatchesOnNameAndCountsOrphans(t *testing.T) {
 
 	opts := got.Properties["Statut"].Options
 	if opts[0].Key != "todo" {
-		t.Errorf("option jointe par nom: Key = %q, want todo", opts[0].Key)
+		t.Errorf("option joined by name: Key = %q, want todo", opts[0].Key)
 	}
 	if opts[0].ID != "o1" {
-		t.Errorf("la jointure ne doit pas perdre l'id: %+v", opts[0])
+		t.Errorf("the join must not lose the id: %+v", opts[0])
 	}
 	if opts[1].Key != "" {
-		t.Errorf("sans correspondance de nom, pas de key inventée: %+v", opts[1])
+		t.Errorf("without a name match, no invented key: %+v", opts[1])
 	}
 	if orphans != 1 {
 		t.Errorf("orphans = %d, want 1", orphans)
@@ -111,6 +111,6 @@ func TestJoinOptionKeysLeavesActualUntouched(t *testing.T) {
 	_, _ = JoinOptionKeys(actual, desired)
 
 	if k := actual.Properties["Statut"].Options[0].Key; k != "" {
-		t.Errorf("l'entrée a été mutée: Key = %q", k)
+		t.Errorf("the input was mutated: Key = %q", k)
 	}
 }

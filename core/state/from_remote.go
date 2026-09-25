@@ -4,13 +4,13 @@ package state
 
 import "github.com/tykok/notion-seed/core/providers/notion/resources"
 
-// FromRemote projette l'état lu dans l'API dans le type pivot.
+// FromRemote projects the state read from the API into the pivot type.
 //
-// Le résultat ne porte aucune key : l'API ne connaît pas cette notion. C'est la
-// voie « actual » du diff à trois voies.
+// The result carries no key: the API does not know this notion. It is the
+// "actual" side of the three-way diff.
 //
-// Icon porte l'emoji de la database, ou "" pour toute autre forme d'icône : le
-// YAML ne déclare qu'un emoji.
+// Icon holds the database's emoji, or "" for any other form of icon: the YAML
+// only declares an emoji.
 func FromRemote(rd resources.RemoteDatabase) Database {
 	out := Database{
 		ID:           rd.ID,
@@ -35,17 +35,17 @@ func FromRemote(rd resources.RemoteDatabase) Database {
 	return out
 }
 
-// JoinOptionKeys attache aux options de `actual` la key que `desired` leur
-// donne, en joignant sur le NOM.
+// JoinOptionKeys attaches to the options of `actual` the key `desired` gives
+// them, joining on the NAME.
 //
-// C'est une opération d'amorçage, valable au seul instant de l'import : le réel
-// ne connaît que des ids et des noms, et il faut bien accrocher la key quelque
-// part une première fois. Ensuite, l'id porte l'identité et le nom peut bouger
-// librement — c'est exactement ce qui rend un renommage détectable.
+// It is a bootstrap operation, valid only at the moment of import: the actual
+// state only knows ids and names, and the key has to be hooked somewhere a
+// first time. After that, the id holds the identity and the name can move
+// freely — that is exactly what makes a rename detectable.
 //
-// Une option sans correspondance de nom reste sans key, ce qui est l'exacte
-// vérité : on ne sait pas laquelle c'est. Le second retour les compte, pour que
-// l'import puisse dire tout de suite ce que le YAML ne couvre pas.
+// An option with no name match stays without a key, which is the exact truth:
+// notion-seed does not know which one it is. The second return value counts
+// them, so import can say right away what the YAML does not cover.
 func JoinOptionKeys(actual, desired Database) (Database, int) {
 	out := Database{
 		ID:           actual.ID,

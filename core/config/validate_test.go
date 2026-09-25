@@ -62,16 +62,15 @@ databases:
 `)
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de `formula`")
+		t.Fatal("ValidateDocument() error = nil, want `formula` rejected")
 	}
 	if !strings.Contains(err.Error(), "databases/projects.yaml") {
-		t.Errorf("message = %q, il doit nommer le fichier", err.Error())
+		t.Errorf("message = %q, it must name the file", err.Error())
 	}
 }
 
-// Le piège central : l'API n'accepte que "To-do", pas "To do". Un message
-// génarique d'énumération ne suffit pas, l'utilisateur ne verra pas le trait
-// d'union.
+// The central trap: the API accepts only "To-do", not "To do". A generic enum
+// message is not enough, the user will not see the hyphen.
 func TestValidateDocumentGivesDedicatedHintForToDoWithoutHyphen(t *testing.T) {
 	doc := []byte(`
 version: 1
@@ -86,17 +85,16 @@ databases:
 `)
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de `To do`")
+		t.Fatal("ValidateDocument() error = nil, want `To do` rejected")
 	}
 	msg := err.Error()
-	// Asserter la seule présence de "To-do" ne prouvait rien : le hint générique
-	// de groupe le contient aussi, comme le message d'énumération de la
-	// bibliothèque. Supprimer la branche dédiée au piège laissait ce test vert.
-	// Ce qui est propre à la branche dédiée, c'est de NOMMER le trait d'union et
-	// de dire de REMPLACER la valeur.
-	for _, want := range []string{"trait d'union", "Remplacez", `"To do"`, `"To-do"`} {
+	// Asserting only the presence of "To-do" proved nothing: the generic group
+	// hint contains it too, as does the library's enum message. Removing the
+	// branch dedicated to the trap left this test green. What is specific to
+	// the dedicated branch is NAMING the hyphen and saying to REPLACE the value.
+	for _, want := range []string{"hyphen", "Replace", `"To do"`, `"To-do"`} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("message = %q, il doit contenir %q", msg, want)
+			t.Errorf("message = %q, it must contain %q", msg, want)
 		}
 	}
 }
@@ -115,15 +113,15 @@ databases:
 `)
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de `Backlog`")
+		t.Fatal("ValidateDocument() error = nil, want `Backlog` rejected")
 	}
-	// `err != nil` seul ne disait pas si l'utilisateur apprend quoi que ce soit.
-	// Le message doit nommer la valeur refusée, les trois groupes acceptés, et le
-	// fait que l'API refuse les groupes nommés librement.
+	// `err != nil` alone did not say whether the user learns anything. The
+	// message must name the rejected value, the three accepted groups, and the
+	// fact that the API rejects freely named groups.
 	msg := err.Error()
-	for _, want := range []string{`"Backlog"`, `"To-do"`, `"In progress"`, `"Complete"`, "librement"} {
+	for _, want := range []string{`"Backlog"`, `"To-do"`, `"In progress"`, `"Complete"`, "freely named"} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("message = %q, il doit contenir %q", msg, want)
+			t.Errorf("message = %q, it must contain %q", msg, want)
 		}
 	}
 }
@@ -140,13 +138,13 @@ databases:
           - name: "nope"
 `)
 	if err := ValidateDocument("databases/projects.yaml", doc); err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de `options` sur un url")
+		t.Fatal("ValidateDocument() error = nil, want `options` on a url rejected")
 	}
 }
 
-// Le message d'un `not` est « 'not' failed » et rien d'autre : le mot-clé ne
-// porte aucune information sur ce qui a validé à tort. Sans hint, l'utilisateur
-// ne sait même pas quel champ retirer.
+// The message of a `not` is "'not' failed" and nothing else: the keyword
+// carries no information about what wrongly validated. Without a hint, the
+// user does not even know which field to remove.
 func TestValidateDocumentNamesTheOffendingFieldOnNotFailures(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -154,7 +152,7 @@ func TestValidateDocumentNamesTheOffendingFieldOnNotFailures(t *testing.T) {
 		contains []string
 	}{
 		{
-			"options sur un url",
+			"options on a url",
 			`
 version: 1
 databases:
@@ -168,7 +166,7 @@ databases:
 			[]string{"options", "url"},
 		},
 		{
-			"format sur un url",
+			"format on a url",
 			`
 version: 1
 databases:
@@ -185,24 +183,24 @@ databases:
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateDocument("databases/projects.yaml", []byte(tt.doc))
 			if err == nil {
-				t.Fatal("ValidateDocument() error = nil, want un rejet")
+				t.Fatal("ValidateDocument() error = nil, want a rejection")
 			}
 			msg := err.Error()
 			if strings.Contains(msg, "'not' failed") && !strings.Contains(msg, "→") {
-				t.Errorf("message = %q : « 'not' failed » nu, sans conseil", msg)
+				t.Errorf("message = %q: bare \"'not' failed\", without advice", msg)
 			}
 			for _, want := range tt.contains {
 				if !strings.Contains(msg, want) {
-					t.Errorf("message = %q, il doit contenir %q", msg, want)
+					t.Errorf("message = %q, it must contain %q", msg, want)
 				}
 			}
 		})
 	}
 }
 
-// Un hint ne doit jamais contredire l'erreur qu'il accompagne. Mesuré : filtrer
-// sur la forme du document faisait dire « retirez le bloc options » alors que
-// l'erreur réelle était « type manquant ».
+// A hint must never contradict the error it comes with. Measured: filtering on
+// the document's shape made it say "remove the options block" while the real
+// error was "missing type".
 func TestValidateDocumentHintNeverContradictsTheError(t *testing.T) {
 	doc := []byte(`
 version: 1
@@ -215,20 +213,20 @@ databases:
 `)
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet du type manquant")
+		t.Fatal("ValidateDocument() error = nil, want the missing type rejected")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "type") {
-		t.Errorf("message = %q, il doit signaler le type manquant", msg)
+		t.Errorf("message = %q, it must report the missing type", msg)
 	}
-	if strings.Contains(msg, "retirez le bloc `options`") {
-		t.Errorf("message = %q : le conseil contredit l'erreur — le vrai correctif est d'AJOUTER `type`", msg)
+	if strings.Contains(msg, "remove the `options` block") {
+		t.Errorf("message = %q: the advice contradicts the error — the real fix is to ADD `type`", msg)
 	}
 }
 
-// Un scalaire non quoté en forme de date est résolu par yaml.v3 en time.Time.
-// L'utilisateur est alors jugé sur une valeur qu'il n'a jamais tapée : le
-// message doit lui dire de mettre des guillemets.
+// An unquoted date-shaped scalar is resolved by yaml.v3 into a time.Time. The
+// user is then judged on a value they never typed: the message must tell them
+// to add quotes.
 func TestValidateDocumentExplainsYAMLDateCoercion(t *testing.T) {
 	doc := []byte(`
 version: 1
@@ -241,15 +239,15 @@ databases:
 `)
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de la key")
+		t.Fatal("ValidateDocument() error = nil, want the key rejected")
 	}
-	if !strings.Contains(err.Error(), "guillemets") {
-		t.Errorf("message = %q, il doit conseiller de mettre des guillemets", err.Error())
+	if !strings.Contains(err.Error(), "quotes") {
+		t.Errorf("message = %q, it must advise adding quotes", err.Error())
 	}
 }
 
-// Le schéma et SupportedPropertyTypes encodent la même liste de dix types de
-// façon indépendante. Rien ne les garde synchronisés, sauf ce test.
+// The schema and SupportedPropertyTypes encode the same list of ten types
+// independently. Nothing keeps them in sync, except this test.
 func TestSchemaAndSupportedPropertyTypesAgree(t *testing.T) {
 	var doc struct {
 		Defs struct {
@@ -263,14 +261,14 @@ func TestSchemaAndSupportedPropertyTypesAgree(t *testing.T) {
 		} `json:"$defs"`
 	}
 	if err := json.Unmarshal(schema.Bytes, &doc); err != nil {
-		t.Fatalf("schéma embarqué illisible: %v", err)
+		t.Fatalf("unreadable embedded schema: %v", err)
 	}
 	fromSchema := doc.Defs.Property.Properties.Type.Enum
 	if len(fromSchema) == 0 {
-		t.Fatal("aucun type lu depuis le schéma : la structure du schéma a changé")
+		t.Fatal("no type read from the schema: the schema structure changed")
 	}
 	if len(fromSchema) != len(SupportedPropertyTypes) {
-		t.Fatalf("schéma: %d types, SupportedPropertyTypes: %d — les deux listes ont dérivé\n  schéma: %v\n  Go: %v",
+		t.Fatalf("schema: %d types, SupportedPropertyTypes: %d — the two lists drifted\n  schema: %v\n  Go: %v",
 			len(fromSchema), len(SupportedPropertyTypes), fromSchema, SupportedPropertyTypes)
 	}
 	inGo := make(map[string]bool, len(SupportedPropertyTypes))
@@ -279,7 +277,7 @@ func TestSchemaAndSupportedPropertyTypesAgree(t *testing.T) {
 	}
 	for _, t2 := range fromSchema {
 		if !inGo[t2] {
-			t.Errorf("type %q présent dans le schéma mais absent de SupportedPropertyTypes", t2)
+			t.Errorf("type %q present in the schema but missing from SupportedPropertyTypes", t2)
 		}
 	}
 }
@@ -295,7 +293,7 @@ databases:
         type: title
 `)
 	if err := ValidateDocument("databases/projects.yaml", doc); err == nil {
-		t.Fatal("ValidateDocument() error = nil, want un rejet de la key `Mon Projet`")
+		t.Fatal("ValidateDocument() error = nil, want the key `Mon Projet` rejected")
 	}
 }
 
@@ -303,17 +301,17 @@ func TestValidateDocumentRejectsMalformedYAML(t *testing.T) {
 	doc := []byte("version: 1\ndatabases:\n  - name: [unclosed\n")
 	err := ValidateDocument("databases/projects.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() error = nil, want une erreur de parsing YAML")
+		t.Fatal("ValidateDocument() error = nil, want a YAML parsing error")
 	}
 	if !strings.Contains(err.Error(), "databases/projects.yaml") {
-		t.Errorf("message = %q, il doit nommer le fichier", err.Error())
+		t.Errorf("message = %q, it must name the file", err.Error())
 	}
 }
 
-// Une option de status sans group doit être refusée au chargement. C'est la
-// contrepartie de la suppression du défaut "To-do" dans le mapper : sans
-// défaut, une option sans group produirait un payload que l'API rangerait
-// silencieusement dans le premier groupe.
+// A status option without a group must be rejected at load time. It is the
+// counterpart of removing the "To-do" default in the mapper: without a
+// default, an option without a group would produce a payload the API would
+// silently put in the first group.
 func TestValidateRejectsStatusOptionWithoutGroup(t *testing.T) {
 	doc := []byte(`
 databases:
@@ -328,20 +326,20 @@ databases:
 `)
 	err := ValidateDocument("databases/tasks.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() = nil, want un refus sur l'option sans group")
+		t.Fatal("ValidateDocument() = nil, want the option without a group rejected")
 	}
 	for _, want := range []string{"group", "À faire", "To-do", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// Une propriété status sans bloc `options` partirait vers l'API avec une liste
-// vide. Notion la peuplerait alors de ses propres options par défaut, que le
-// plan n'a jamais affichées — et dont le retrait ultérieur se classe en
-// réécriture silencieuse, que rien ne débloque. Déclarer un status sans dire ce
-// qu'il porte est la même abdication que de ne pas déclarer son group.
+// A status property without an `options` block would go to the API with an
+// empty list. Notion would then fill it with its own default options, which
+// the plan never showed — and whose later removal is classified as a silent
+// rewrite, which nothing unblocks. Declaring a status without saying what it
+// holds is the same abdication as not declaring its group.
 func TestValidateRejectsStatusPropertyWithoutOptions(t *testing.T) {
 	doc := []byte(`
 databases:
@@ -353,16 +351,16 @@ databases:
 `)
 	err := ValidateDocument("databases/tasks.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() = nil, want un refus du status sans options")
+		t.Fatal("ValidateDocument() = nil, want the status without options rejected")
 	}
 	for _, want := range []string{"options", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// Une liste d'options vide n'est pas mieux qu'une absente.
+// An empty options list is no better than a missing one.
 func TestValidateRejectsStatusPropertyWithEmptyOptions(t *testing.T) {
 	doc := []byte(`
 databases:
@@ -374,12 +372,12 @@ databases:
         options: []
 `)
 	if err := ValidateDocument("databases/tasks.yaml", doc); err == nil {
-		t.Fatal("ValidateDocument() = nil, want un refus de la liste vide")
+		t.Fatal("ValidateDocument() = nil, want the empty list rejected")
 	}
 }
 
-// select et multi_select gardent leur liberté : leurs options peuvent être
-// gérées à la main dans Notion sans risque de réécriture silencieuse.
+// select and multi_select keep their freedom: their options can be managed by
+// hand in Notion without risk of a silent rewrite.
 func TestValidateAcceptsSelectWithoutOptions(t *testing.T) {
 	doc := []byte(`
 databases:
@@ -394,7 +392,7 @@ databases:
 	}
 }
 
-// Symétrique du traitement de `format` : `group` n'a de sens que sur status.
+// Symmetric with the handling of `format`: `group` only makes sense on status.
 func TestValidateRejectsGroupOnSelectOption(t *testing.T) {
 	doc := []byte(`
 databases:
@@ -409,14 +407,14 @@ databases:
 `)
 	err := ValidateDocument("databases/tasks.yaml", doc)
 	if err == nil {
-		t.Fatal("ValidateDocument() = nil, want un refus de group sur un select")
+		t.Fatal("ValidateDocument() = nil, want group on a select rejected")
 	}
 	if !strings.Contains(err.Error(), "group") {
-		t.Errorf("message = %q, il doit nommer `group`", err.Error())
+		t.Errorf("message = %q, it must name `group`", err.Error())
 	}
 }
 
-// Le chemin heureux ne doit pas régresser.
+// The happy path must not regress.
 func TestValidateAcceptsStatusOptionWithGroup(t *testing.T) {
 	doc := []byte(`
 databases:

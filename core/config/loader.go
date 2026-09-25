@@ -12,16 +12,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// WorkspaceFile est le fichier de configuration globale, à la racine du
-// dossier de config.
+// WorkspaceFile is the global configuration file, at the root of the config
+// directory.
 const WorkspaceFile = "workspace.yaml"
 
-// DatabasesDir contient un fichier par database, à la manière de Terraform
-// chargeant tous les .tf d'un répertoire. Pas de système d'include.
+// DatabasesDir holds one file per database, the way Terraform loads every .tf
+// of a directory. No include system.
 const DatabasesDir = "databases"
 
-// DuplicateKeyError signale deux ressources déclarant la même key. Nomme les
-// deux fichiers : sans ça, l'utilisateur doit chercher le doublon à la main.
+// DuplicateKeyError reports two resources declaring the same key. It names
+// both files: without that, the user has to hunt for the duplicate by hand.
 type DuplicateKeyError struct {
 	Key        string
 	FirstFile  string
@@ -30,20 +30,20 @@ type DuplicateKeyError struct {
 
 func (e *DuplicateKeyError) Error() string {
 	return fmt.Sprintf(
-		"key %q déclarée deux fois : dans %s et dans %s\n"+
-			"  → une key est une identité, elle doit être unique sur l'ensemble des "+
-			"fichiers : renommez l'une des deux déclarations, ou fusionnez-les",
+		"key %q declared twice: in %s and in %s\n"+
+			"  → a key is an identity, it must be unique across all "+
+			"files: rename one of the two declarations, or merge them",
 		e.Key, e.FirstFile, e.SecondFile)
 }
 
-// globalSections sont les sections que seul workspace.yaml peut porter. Deux
-// d'entre elles décident de quelque chose de sensible : `workspace` choisit la
-// cible d'écriture, `lifecycle` porte le garde-fou de destruction.
+// globalSections are the sections only workspace.yaml may hold. Two of them
+// decide something sensitive: `workspace` picks the write target, `lifecycle`
+// holds the destruction safeguard.
 var globalSections = []string{"version", "workspace", "lifecycle"}
 
-// document est la forme d'un fichier de config individuel. Tous les champs
-// sont optionnels : workspace.yaml porte le workspace, les fichiers de
-// databases/ portent des databases.
+// document is the shape of an individual config file. Every field is
+// optional: workspace.yaml holds the workspace, the files of databases/ hold
+// databases.
 type document struct {
 	Version   int        `yaml:"version"`
 	Workspace *Workspace `yaml:"workspace"`
@@ -51,19 +51,19 @@ type document struct {
 	Lifecycle *Lifecycle `yaml:"lifecycle"`
 }
 
-// Load charge et fusionne toute la configuration d'un dossier.
+// Load loads and merges the whole configuration of a directory.
 //
-// L'ordre des passes est impératif : chaque fichier est validé
-// individuellement, PUIS l'ensemble est fusionné, PUIS l'unicité globale des
-// key est vérifiée. Vérifier l'unicité fichier par fichier laisserait deux
-// fichiers déclarer la même key sans qu'aucune validation échoue.
+// The order of the passes is mandatory: each file is validated individually,
+// THEN everything is merged, THEN global key uniqueness is checked. Checking
+// uniqueness file by file would let two files declare the same key without
+// any validation failing.
 func Load(dir string) (*Config, error) {
 	wsPath := filepath.Join(dir, WorkspaceFile)
 	if _, err := os.Stat(wsPath); err != nil {
 		return nil, fmt.Errorf(
-			"%s introuvable dans %s\n"+
-				"  → créez-le avec `version: 1` et `workspace.parent_page_id: \"<id de la page parente>\"`, "+
-				"ou pointez le bon dossier avec --dir",
+			"%s not found in %s\n"+
+				"  → create it with `version: 1` and `workspace.parent_page_id: \"<parent page id>\"`, "+
+				"or point to the right directory with --dir",
 			WorkspaceFile, dir)
 	}
 
@@ -75,54 +75,54 @@ func Load(dir string) (*Config, error) {
 	paths = append(paths, dbPaths...)
 
 	cfg := &Config{Version: 1}
-	// firstSeen retient, pour chaque key, le fichier qui l'a déclarée.
+	// firstSeen records, for each key, the file that declared it.
 	firstSeen := make(map[string]string)
 
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"lecture de %s impossible: %w\n"+
-					"  → %s et les fichiers de databases/ doivent être des fichiers YAML "+
-					"lisibles ; si celui-ci est un dossier, renommez-le ou supprimez-le",
+				"failed to read %s: %w\n"+
+					"  → %s and the files of databases/ must be readable YAML "+
+					"files; if this one is a directory, rename or delete it",
 				path, err, WorkspaceFile)
 		}
 
-		// Les sections présentes sont lues sur une forme LAXISTE, pas sur
-		// `document` : une valeur du mauvais type y produirait une erreur de
-		// décodage yaml avant qu'on puisse dire quoi que ce soit d'utile, alors
-		// que le schéma, lui, sait la nommer.
+		// The sections present are read on a LOOSE shape, not on `document`: a
+		// value of the wrong type would produce a yaml decoding error there
+		// before anything useful could be said, whereas the schema can name
+		// it.
 		var top map[string]any
 		if err := yaml.Unmarshal(raw, &top); err != nil {
 			if isNonMappingRoot(err) {
 				return nil, &ValidationError{
 					Path:    path,
-					Message: "la racine du document n'est pas un mapping (clé: valeur)",
+					Message: "the document root is not a mapping (key: value)",
 					Hint: fmt.Sprintf(
-						"un fichier de config doit être un mapping à sa racine — une liste de "+
-							"databases se déclare sous une clé `databases:`, pas directement à la "+
-							"racine (cause : %s)", err),
+						"a config file must be a mapping at its root — a list of "+
+							"databases is declared under a `databases:` key, not directly at the "+
+							"root (cause: %s)", err),
 				}
 			}
-			return nil, &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
+			return nil, &ValidationError{Path: path, Message: "unreadable YAML: " + err.Error()}
 		}
 
-		// Un fichier de databases/ ne porte QUE des databases. Démontré :
-		// `databases/z.yaml` déclarant `workspace.parent_page_id` détournait la
-		// cible d'écriture sans un avertissement, et un `lifecycle: {}` y effaçait
-		// prevent_destroy. workspace.yaml étant traité en premier, n'importe quel
-		// fichier de databases/ gagnait.
+		// A file of databases/ holds ONLY databases. Demonstrated:
+		// `databases/z.yaml` declaring `workspace.parent_page_id` hijacked the
+		// write target without a warning, and a `lifecycle: {}` there erased
+		// prevent_destroy. With workspace.yaml processed first, any file of
+		// databases/ won.
 		if path != wsPath {
 			if err := rejectGlobalSections(path, top); err != nil {
 				return nil, err
 			}
 		}
 
-		// Pour workspace.yaml, vérifier la version AVANT la validation du schéma,
-		// sinon le schéma rejette une version fausse avec son propre message avant
-		// qu'on puisse donner notre message plus utile. Tout autre document qui
-		// porte `version` a déjà été rejeté ci-dessus, avec son propre message :
-		// le message d'énumération générique du schéma ne sort jamais sur ce champ.
+		// For workspace.yaml, check the version BEFORE schema validation,
+		// otherwise the schema rejects a wrong version with its own message
+		// before ours, more useful, can be given. Any other document holding
+		// `version` has already been rejected above, with its own message: the
+		// schema's generic enum message never comes out on this field.
 		if path == wsPath {
 			if err := checkVersion(path, raw, top); err != nil {
 				return nil, err
@@ -134,7 +134,7 @@ func Load(dir string) (*Config, error) {
 		}
 		var doc document
 		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			return nil, &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
+			return nil, &ValidationError{Path: path, Message: "unreadable YAML: " + err.Error()}
 		}
 		if doc.Workspace != nil {
 			cfg.Workspace = *doc.Workspace
@@ -154,7 +154,7 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 
-	// Unicité des key explicites, sur l'ensemble des fichiers.
+	// Uniqueness of explicit keys, across all files.
 	for _, db := range cfg.Databases {
 		if db.Key == "" {
 			continue
@@ -169,20 +169,20 @@ func Load(dir string) (*Config, error) {
 		firstSeen[db.Key] = db.SourceFile
 	}
 
-	// Les key manquantes sont dérivées et dédupliquées ensuite, une fois
-	// l'ensemble des key explicites connu.
+	// Missing keys are derived and deduplicated afterwards, once all explicit
+	// keys are known.
 	cfg.Databases = ResolveKeys(cfg.Databases, parentNameHint(cfg))
 
-	// Ordre déterministe : la sortie de plan doit être stable entre deux runs.
+	// Deterministic order: the plan output must be stable between two runs.
 	sort.Slice(cfg.Databases, func(i, j int) bool {
 		return cfg.Databases[i].Key < cfg.Databases[j].Key
 	})
 	return cfg, nil
 }
 
-// rejectGlobalSections refuse les sections globales dans un fichier autre que
-// workspace.yaml. Le fichier ET la section fautive sont nommés : sans ça,
-// l'utilisateur ne sait pas lequel de ses fichiers a gagné la fusion.
+// rejectGlobalSections rejects global sections in a file other than
+// workspace.yaml. The file AND the offending section are named: without that,
+// the user does not know which of their files won the merge.
 func rejectGlobalSections(path string, top map[string]any) error {
 	var found []string
 	for _, section := range globalSections {
@@ -193,25 +193,25 @@ func rejectGlobalSections(path string, top map[string]any) error {
 	if len(found) == 0 {
 		return nil
 	}
-	subject := fmt.Sprintf("section %s interdite ici", quotedList(found))
+	subject := fmt.Sprintf("section %s not allowed here", quotedList(found))
 	if len(found) > 1 {
-		subject = fmt.Sprintf("sections %s interdites ici", quotedList(found))
+		subject = fmt.Sprintf("sections %s not allowed here", quotedList(found))
 	}
 	return &ValidationError{
 		Path: path,
 		Message: fmt.Sprintf(
-			"%s : un fichier de %s/ ne déclare que des databases",
+			"%s: a file of %s/ declares only databases",
 			subject, DatabasesDir),
 		Hint: globalSectionsHint(found),
 	}
 }
 
-// globalSectionsHint donne l'action correcte, par section. `version` se
-// SUPPRIME : workspace.yaml déclare déjà `version: 1`, la déplacer n'aurait
-// aucun effet. `workspace` et `lifecycle` se DÉPLACENT, avec le rappel de ce
-// qu'ils font ailleurs qu'ici. Mesuré : un conseil unique de « déplacer »
-// disait de déplacer `version`, ce que personne ne peut faire utilement —
-// c'était le seul cas où suivre le message produisait l'action fausse.
+// globalSectionsHint gives the right action, per section. `version` is
+// DELETED: workspace.yaml already declares `version: 1`, moving it would have
+// no effect. `workspace` and `lifecycle` are MOVED, with a reminder of what
+// they do elsewhere than here. Measured: a single "move" advice said to move
+// `version`, which nobody can usefully do — it was the only case where
+// following the message led to the wrong action.
 func globalSectionsHint(found []string) string {
 	var move []string
 	removeVersion := false
@@ -226,25 +226,25 @@ func globalSectionsHint(found []string) string {
 	var parts []string
 	if len(move) > 0 {
 		parts = append(parts, fmt.Sprintf(
-			"déplacez %s dans %s, le seul fichier qui porte la configuration globale — "+
-				"sinon `workspace.parent_page_id` y détourne la cible d'écriture et "+
-				"`lifecycle` y efface le garde-fou prevent_destroy",
+			"move %s to %s, the only file that holds the global configuration — "+
+				"otherwise `workspace.parent_page_id` there hijacks the write target and "+
+				"`lifecycle` there erases the prevent_destroy safeguard",
 			quotedList(move), WorkspaceFile))
 	}
 	if removeVersion {
 		parts = append(parts, fmt.Sprintf(
-			"supprimez `version` : %s la déclare déjà, elle n'a rien à faire ici",
+			"delete `version`: %s already declares it, it does not belong here",
 			WorkspaceFile))
 	}
-	return strings.Join(parts, " ; ")
+	return strings.Join(parts, "; ")
 }
 
-// isNonMappingRoot reconnaît l'échec de décodage YAML spécifique où la
-// racine du document n'est pas un mapping (une séquence ou un scalaire nu) :
-// gopkg.in/yaml.v3 rend alors un *yaml.TypeError qui nomme le type refusé.
-// Une vraie erreur de syntaxe (indentation, ':' manquant...) rend un type
-// d'erreur différent et n'est pas interceptée ici : elle garde le message
-// "YAML illisible" brut, faute de mieux à dire.
+// isNonMappingRoot recognizes the specific YAML decoding failure where the
+// document root is not a mapping (a sequence or a bare scalar):
+// gopkg.in/yaml.v3 then returns a *yaml.TypeError naming the rejected type. A
+// real syntax error (indentation, missing ':'...) returns a different error
+// type and is not caught here: it keeps the raw "unreadable YAML" message, for
+// lack of anything better to say.
 func isNonMappingRoot(err error) bool {
 	te, ok := err.(*yaml.TypeError)
 	if !ok || len(te.Errors) != 1 {
@@ -253,37 +253,37 @@ func isNonMappingRoot(err error) bool {
 	return strings.Contains(te.Errors[0], "into map[string]interface {}")
 }
 
-// checkVersion exige `version: 1`. La présence du champ est lue sur la forme
-// laxiste, sa valeur sur `document` : distinguer « absent » de « présent mais
-// faux » change le conseil, et `version: 0` est présent, pas absent.
+// checkVersion requires `version: 1`. The field's presence is read on the
+// loose shape, its value on `document`: telling "missing" from "present but
+// wrong" changes the advice, and `version: 0` is present, not missing.
 func checkVersion(path string, raw []byte, top map[string]any) error {
 	var doc document
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return &ValidationError{Path: path, Message: "YAML illisible: " + err.Error()}
+		return &ValidationError{Path: path, Message: "unreadable YAML: " + err.Error()}
 	}
 	value, present := top["version"]
 	if present && doc.Version == 1 {
 		return nil
 	}
-	hint := "ajoutez `version: 1` en tête du fichier"
-	what := "absent"
+	hint := "add `version: 1` at the top of the file"
+	what := "missing"
 	if present {
-		hint = fmt.Sprintf("remplacez `version: %v` par `version: 1`", value)
-		what = fmt.Sprintf("trouvé %v", value)
+		hint = fmt.Sprintf("replace `version: %v` with `version: 1`", value)
+		what = fmt.Sprintf("found %v", value)
 	}
 	return &ValidationError{
 		Path:    path,
-		Message: fmt.Sprintf("`version: 1` est obligatoire dans %s (%s)", WorkspaceFile, what),
+		Message: fmt.Sprintf("`version: 1` is required in %s (%s)", WorkspaceFile, what),
 		Hint:    hint,
 	}
 }
 
-// checkExactlyOneTitle rejette une database qui ne déclare pas exactement une
-// propriété de type title. L'API Notion n'en accepte qu'une par data source, ni
-// zéro ni deux ; JSON Schema ne sait pas compter sur `additionalProperties`,
-// donc la vérification est ici. Sans elle, `plan` annonce une création que
-// l'API refusera certainement — un défaut de la promesse centrale de l'outil,
-// pas une fonctionnalité manquante.
+// checkExactlyOneTitle rejects a database that does not declare exactly one
+// title property. The Notion API accepts only one per data source, neither
+// zero nor two; JSON Schema cannot count over `additionalProperties`, so the
+// check lives here. Without it, `plan` announces a creation the API will
+// certainly reject — a defect in the tool's central promise, not a missing
+// feature.
 func checkExactlyOneTitle(db Database) error {
 	var titles []string
 	for name, p := range db.Properties {
@@ -297,36 +297,36 @@ func checkExactlyOneTitle(db Database) error {
 		return &ValidationError{
 			Path: db.SourceFile,
 			Message: fmt.Sprintf(
-				"la database %q ne déclare aucune propriété de type title", db.Name),
-			Hint: "l'API Notion en exige exactement une par database — passez une de ses " +
-				"propriétés en `type: title`, ou ajoutez `Name: {type: title}`",
+				"database %q declares no title property", db.Name),
+			Hint: "the Notion API requires exactly one per database — switch one of its " +
+				"properties to `type: title`, or add `Name: {type: title}`",
 		}
 	case len(titles) > 1:
 		return &ValidationError{
 			Path: db.SourceFile,
 			Message: fmt.Sprintf(
-				"la database %q déclare %d propriétés de type title : %s",
+				"database %q declares %d title properties: %s",
 				db.Name, len(titles), quotedList(titles)),
-			Hint: "l'API Notion n'en accepte qu'une par database — gardez-en une seule et " +
-				"donnez un autre type aux autres (`rich_text` pour du texte libre)",
+			Hint: "the Notion API accepts only one per database — keep a single one and " +
+				"give the others another type (`rich_text` for free text)",
 		}
 	}
 	return nil
 }
 
-// checkUniqueOptions refuse deux options de même key, ou de même nom, dans une
-// même propriété. JSON Schema ne sait pas exprimer l'unicité d'un champ dans
-// une liste d'objets, donc la vérification est ici.
+// checkUniqueOptions rejects two options with the same key, or the same name,
+// in one property. JSON Schema cannot express the uniqueness of a field in a
+// list of objects, so the check lives here.
 //
-// Les deux doublons cassent l'appariement aux options distantes, et chacun à
-// sa façon :
-//   - deux keys identiques désignent la MÊME option distante, dont l'id
-//     partirait deux fois dans un seul PATCH ;
-//   - deux noms identiques : le second ne trouve plus de position libre et part
-//     en option neuve portant un nom qui existe déjà — un 400 de l'API, APRÈS
-//     que le PATCH database est passé.
+// Both duplicates break the matching with remote options, each in its own
+// way:
+//   - two identical keys designate the SAME remote option, whose id would go
+//     out twice in a single PATCH;
+//   - two identical names: the second no longer finds a free position and goes
+//     out as a new option carrying a name that already exists — a 400 from the
+//     API, AFTER the database PATCH went through.
 //
-// Refuser au chargement arrête les deux avant le moindre appel.
+// Rejecting at load time stops both before any call.
 func checkUniqueOptions(db Database) error {
 	names := make([]string, 0, len(db.Properties))
 	for name := range db.Properties {
@@ -342,10 +342,10 @@ func checkUniqueOptions(db Database) error {
 					return &ValidationError{
 						Path: db.SourceFile,
 						Message: fmt.Sprintf(
-							"la database %q, propriété %q : deux options portent la key %q",
+							"database %q, property %q: two options have the key %q",
 							db.Name, prop, o.Key),
-						Hint: "la key d'une option est son identité : donnez à chaque option " +
-							"de la propriété une key distincte",
+						Hint: "an option's key is its identity: give each option " +
+							"of the property a distinct key",
 					}
 				}
 				keys[o.Key] = true
@@ -354,10 +354,10 @@ func checkUniqueOptions(db Database) error {
 				return &ValidationError{
 					Path: db.SourceFile,
 					Message: fmt.Sprintf(
-						"la database %q, propriété %q : deux options portent le nom %q",
+						"database %q, property %q: two options have the name %q",
 						db.Name, prop, o.Name),
-					Hint: "deux options de même nom sont indiscernables, pour Notion comme " +
-						"pour notion-seed : renommez l'une des deux, ou retirez le doublon",
+					Hint: "two options with the same name are indistinguishable, for Notion as " +
+						"for notion-seed: rename one of them, or remove the duplicate",
 				}
 			}
 			optNames[o.Name] = true
@@ -366,10 +366,10 @@ func checkUniqueOptions(db Database) error {
 	return nil
 }
 
-// parentNameHint fournit le préfixe de désambiguïsation des key. Au MVP 0 les
-// pages ne sont pas des ressources, donc on n'a pas leur nom : on se rabat sur
-// l'id de la page parente, tronqué. Quand les pages arriveront (post-MVP),
-// remplacer par le nom réel de la page.
+// parentNameHint provides the key disambiguation prefix. In MVP 0 pages are
+// not resources, so their name is not known: it falls back to the parent
+// page's id, truncated. When pages arrive (post-MVP), replace it with the
+// page's real name.
 func parentNameHint(cfg *Config) string {
 	id := cfg.Workspace.ParentPageID
 	if len(id) > 8 {
@@ -378,8 +378,8 @@ func parentNameHint(cfg *Config) string {
 	return id
 }
 
-// yamlFiles liste les *.yaml d'un dossier, hors fichiers cachés. Un dossier
-// absent n'est pas une erreur : une config peut n'avoir aucune database.
+// yamlFiles lists the *.yaml of a directory, excluding hidden files. A missing
+// directory is not an error: a config may have no database.
 func yamlFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
