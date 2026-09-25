@@ -66,6 +66,43 @@ func (r Report) Converged() bool {
 	return len(r.Skipped) == 0 && len(r.Mismatches) == 0
 }
 
+// Check refuse, AVANT toute écriture, un plan qu'apply ne saurait pas parcourir
+// en entier.
+//
+// L'autorisation d'écrire est Withheld == "", et elle seule : une ressource dont
+// Withheld est vide DOIT être écrite. Une création ou une modification sans
+// cible, ou une destruction dont le state ne porte pas l'identité, ne peut venir
+// que d'un défaut de notion-seed. La sauter ferait converger un apply qui n'a
+// pas écrit ce que le plan montrait ; s'arrêter sur elle laisserait écrites les
+// ressources qui la précèdent. On refuse donc le plan entier, avant le premier
+// appel.
+//
+// La commande l'appelle avant la confirmation ; Run l'appelle de nouveau, parce
+// que la garde doit vivre dans le paquet qui écrit.
+func Check(p *diff.Plan, snap *state.Snapshot) error {
+	for _, c := range p.Changes {
+		if c.Withheld != "" {
+			continue
+		}
+		switch c.Kind {
+		case resources.KindCreate, resources.KindUpdate:
+			if c.Target != nil {
+				continue
+			}
+		case resources.KindDestroy:
+			if snap != nil && snap.Databases[c.Key].ID != "" {
+				continue
+			}
+		}
+		return fmt.Errorf(
+			"%s : le plan autorise son écriture sans dire quoi écrire, rien n'a été "+
+				"appliqué\n"+
+				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
+				"sortie de `notion-seed plan`", c.Resource)
+	}
+	return nil
+}
+
 // Run écrit les créations et les modifications du plan, une ressource à la fois.
 //
 // Le state est sauvegardé APRÈS CHAQUE écriture réussie, pas une fois à la fin :
@@ -90,6 +127,12 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 				"  → levez chaque blocage listé par `notion-seed plan` avant de relancer")
 	}
 
+	// Check AVANT la première écriture : un changement autorisé qu'apply ne
+	// saurait pas écrire arrête le plan entier, pas la moitié de la série.
+	if err := Check(p, snap); err != nil {
+		return rep, err
+	}
+
 	if snap.Databases == nil {
 		snap.Databases = map[string]state.Database{}
 	}
@@ -100,16 +143,21 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 			rep.Skipped = append(rep.Skipped, c.Resource)
 			continue
 		}
-		switch {
-		case c.Kind == resources.KindCreate && c.Target != nil:
+		// Check a garanti la forme de chaque changement autorisé : une cible pour
+		// une création ou une modification, une identité dans le state pour une
+		// destruction.
+		switch c.Kind {
+		case resources.KindCreate:
 			if err := createOne(ctx, c, &rep, snap, opts); err != nil {
 				return rep, err
 			}
-		case c.Kind == resources.KindUpdate && c.Target != nil:
+		case resources.KindUpdate:
 			if err := updateOne(ctx, c, &rep, snap, opts); err != nil {
 				return rep, err
 			}
 		default:
+			// Les destructions ne sont pas encore écrites : Check les laisse
+			// passer, elles restent nommées sans être tentées.
 			rep.Skipped = append(rep.Skipped, c.Resource)
 		}
 	}

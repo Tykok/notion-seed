@@ -29,19 +29,23 @@ type Result struct {
 	// chemin de la configuration vers l'API ne la contourne, et c'est ce qui
 	// rend impossible — plutôt que corrigée — une écriture non annoncée.
 	//
-	// Non nulle sur les chemins où il y a un état après écriture : la création et
-	// la mise à jour. Pour une mise à jour, c'est `actual` auquel on applique les
-	// SEULS changements déclarés — ce qui préserve les propriétés hors config, et
-	// ce qui fait porter à la cible les ids d'options distants.
+	// Target dit CE QU'ON ÉCRIT, et n'a de sens que pour la création et la mise
+	// à jour : les deux chemins où il existe un état après écriture. Pour une
+	// mise à jour, c'est `actual` auquel on applique les SEULS changements
+	// déclarés — ce qui préserve les propriétés hors config, et ce qui fait
+	// porter à la cible les ids d'options distants.
 	//
-	// L'AUTORISATION d'écrire, elle, est portée par Withheld : une destruction
-	// n'a pas d'état après, donc elle ne pourrait pas être autorisée par une
-	// cible.
+	// Target ne dit PAS si l'on a le droit d'écrire : c'est Withheld == "" qui
+	// l'autorise. Une destruction n'a pas d'état après, donc jamais de cible ;
+	// elle est autorisée par un Withheld vide comme le reste, et apply prend
+	// dans le state l'identité à mettre à la corbeille. Une cible nulle ne
+	// permet donc de rien conclure sur l'autorisation.
 	Target *state.Database
 
 	// Withheld dit POURQUOI cette ressource ne sera pas écrite, ou "" si elle
-	// peut l'être. C'est désormais l'autorisation d'écrire : `Target` dit ce
-	// qu'on écrit, `Withheld` dit si on a le droit.
+	// peut l'être. Withheld == "" EST l'autorisation d'écrire, pour les trois
+	// natures de changement : création, mise à jour, destruction. `Target` dit
+	// ce qu'on écrit, `Withheld` dit si on a le droit.
 	//
 	// Une raison plutôt qu'un booléen : une ressource sautée sans motif renvoie
 	// l'utilisateur deviner, et notion-seed ne laisse jamais deviner.
