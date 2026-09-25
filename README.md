@@ -10,7 +10,7 @@ API, in number of rows, what each change will cost your data.
 Declaring a Notion workspace in files is not the hard problem. The hard problem
 is knowing what the API will do to your data when the declaration changes.
 
-Six behaviors measured against the API, which a tool that just sends the
+Nine behaviors measured against the API, which a tool that just sends the
 request does not warn you about:
 
 | Change | What the API does |
@@ -21,13 +21,17 @@ request does not warn you about:
 | Remove a `status` option | **Reassigns the rows to another option**, without an error |
 | `multi_select` → `select` | **Keeps only one value** on rows that held several |
 | `select` → `multi_select` | Recreates the options: a row keeps its value only if the YAML redeclares an option **with the same name**; the others are emptied |
+| `status` → `select` | Empties every row whose option is not redeclared, **and every row that never received a status**, although it reads "Not started" |
+| Any type → `status` | **Gives every row a value**, empty ones included |
+| Change the type of a `title` | Refused, `400` |
 
 Measured on 2026-09-24 against API `2025-09-03`, on populated rows — the last
-one on 2026-09-25.
+four on 2026-09-25, with the 90 type changes listed in
+[Type changes](#type-changes).
 
-Removing a `status` option and `multi_select` → `select` are the ones that
-justify the tool: the data is not lost, it is replaced by a plausible, wrong
-value, indistinguishable after the fact.
+Removing a `status` option, `multi_select` → `select` and any type → `status`
+are the ones that justify the tool: the data is not lost, it is replaced by a
+plausible, wrong value, indistinguishable after the fact.
 
 `notion-seed` does not stop you. It tells you, **before writing**, how many
 rows are affected. A `status` option removed from the YAML, held by two rows:
@@ -52,11 +56,8 @@ What could not be counted — offline, or when the query fails — comes out as
 
 ### What can be counted, and what cannot
 
-Counting takes a filter, and `notion-seed` can only build one for `select`,
-`status` and `multi_select`.
-
-An **option removal** is therefore always quantified: options only exist on
-these three types.
+An **option removal** is always quantified: options only exist on `select`,
+`status` and `multi_select`, and each has its filter.
 
 A **destruction** is too, without a filter: the count covers every row of the
 database's data source — the one the plan just read back —, the rows that go
@@ -65,25 +66,89 @@ all with it, but only one is counted: the line and the aggregate then say "at
 least N row(s)", and how many data sources were not counted. It stays
 `destructive` whatever the count, 0 included.
 
-A **type change** is quantified only if the source column is of one of them.
-Of the three dangerous pairs measured above, only one is:
+A **type change** is quantified with the filter the 2026-09-25 campaign checked
+against the rows each pair really touches, on the source column, before the
+write. Not every filter is exact, and the figure says which bound it is:
 
-| Pair | Quantified? |
-|---|---|
-| `multi_select` → `select` | yes — the source column can be filtered |
-| `rich_text` → `number` | no |
-| `checkbox` → `number` | no |
+| Figure | Filter | Pairs |
+|---|---|---|
+| `N rows` | every row | any type → `status`, when no option can keep a value |
+| `N rows` | `is_not_empty` | every pair where nothing survives (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
+| `N rows` | checked rows | `checkbox` → `number`, `date`, `people`, and → `select` / `multi_select` without an option `Yes` |
+| `N rows` | empty rows | `select` → `status`: the empty rows receive an option |
+| `at least N rows` | `is_not_empty` on `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people`: text made only of spaces or line breaks is not counted, and is lost too |
+| `at least N rows` | non-empty, except the declared options | `rich_text` / `url` → `select`, `multi_select`, `status` with declared options: a value that differs from an option only by case may not be counted |
+| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` or `date`, `multi_select` → `select` / `status`: some values survive the conversion |
+| unknown | none | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
 
-In the last two cases, the line carries no number but says so:
+A lower bound of zero never makes a change `safe`: it reads "no rows counted,
+which does not mean none is touched". An exact or upper-bound zero does — an
+empty column has nothing to lose.
+
+A `checkbox` counts only its checked rows: an unchecked box is emptied too, but
+a checkbox has no empty state, so "unchecked" carries nothing "never set" does
+not. The line says so.
+
+Where no filter is sound, the line carries no number and says why:
 
 ```
-      ~ property "Notes" — rich_text → number  [silent rewrite]
-          → actual impact unknown: notion-seed cannot count the rows of a rich_text property.
+      ~ property "Notes" — rich_text → number: the leading number is kept ('42 text' → 42, '2026-01-15' → 2026, a false value); everything else is emptied  [silent rewrite]
+          → actual impact unknown: no filter separates the text that survives the conversion from the rest.
+```
+
+```
+      ~ property "Statut" — status → select: a value survives only where an option with the same name is declared; a row that never received a status is emptied  [destructive]
+          → actual impact unknown: a row that never received a status reads as the default option, is emptied too, and no filter isolates it.
+      + option "Not started" (property "Statut")
+      + option "Done" (property "Statut")
+      - option "In progress" (property "Statut") — not redeclared under this name: the type change re-creates the options  [destructive]
+          → 2 rows will be emptied.
 ```
 
 The class stays the one from the measurement — you know the change is
-dangerous, you do not know on how many rows. And `--fail-on=unknown` catches
-them.
+dangerous, you do not always know on how many rows.
+
+### Type changes
+
+All 90 ordered pairs of managed types were measured against the API, 7 on
+2026-09-24 and the 83 others on 2026-09-25. The class is the cost of the body
+notion-seed sends: the options the YAML declares, by name, without an id. The
+plan line says, for each pair, what survives.
+
+| from \ to | title | rich_text | number | url | select | status | multi_select | date | checkbox | people |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **title** | | M | M | M | M | M | M | M | M | M |
+| **rich_text** | M | | R | S | D¹ | R | D¹ | D | D | D |
+| **number** | M | S | | S | D | R | D | D | D | D |
+| **url** | M | S | R | | D¹ | R | D¹ | D | D | D |
+| **select** | M | S | R | S | | R² | S² | D | D | D |
+| **status** | M | D | D | D | D² | | D² | D | D | D |
+| **multi_select** | M | S | R | S | R² | R² | | D | D | D |
+| **date** | M | S | D | D | D | R | D | | D | D |
+| **checkbox** | M | S | D | S | D³ | R³ | D³ | D | | D |
+| **people** | M | S | D | D | D | R | D | D | D | |
+
+S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
+
+- **The API never creates an option.** Toward `select`, `multi_select` or
+  `status`, a value survives only where an option with exactly its text is
+  declared in the same write; from `rich_text` or `url`, the text is cut at the
+  first comma (`multi_select`: split on commas). ¹ With declared options, these
+  pairs become `silent rewrite`.
+- ² Between option types, each current option the YAML does not redeclare
+  under the same name comes out as its own `-` line with its count. Toward
+  `status` its rows are not emptied: they get the first declared option.
+- ³ `checkbox` becomes `Yes` / `No`: → `select` / `multi_select` is `safe` with
+  an option `Yes`, → `status` with `Yes` and `No`.
+- **Toward `status`, every row gets a value**, empty ones included: the API's
+  default option without declared options, the first declared one otherwise.
+- **`status` as a source:** a row that never received a status reads as the
+  default option, yet every conversion empties it.
+- **`status` → `select` was documented as lossless until 2026-09-25.** It was
+  wrong: re-measured, it empties every row with no option redeclared, and
+  empties the never-set rows even with them.
+- **`title`:** the API refuses both directions with `400`. notion-seed withholds
+  the database — see [What the API cannot do](#what-the-api-cannot-do).
 
 You are responsible for your database. notion-seed is responsible for what you
 know when you press enter. In CI, [`--fail-on`](#in-ci) hands the decision to
@@ -91,12 +156,13 @@ the workflow.
 
 ### What the API cannot do
 
-Two changes are not expressible, measured on 2026-09-24:
+Three changes are not expressible, measured on 2026-09-24 and 2026-09-25:
 
 | Change | What the API does |
 |---|---|
 | Rename an option | Returns `200`, changes nothing |
 | Change an option's color | Returns `400`, whether the option is designated by its id or by its name, and the whole PATCH of the property fails |
+| Change the type of a `title` property, or turn a property into a `title` | Returns `400`: a data source holds a single title property |
 
 `notion-seed` therefore does not write them, and withholds the whole database
 as long as they are declared. The other databases of the plan are applied. The
@@ -118,8 +184,18 @@ Withheld — migration required
       → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
 ```
 
-It is the only declared change notion-seed refuses to write — and it is not a
-judgment on the cost, it is a limit of the API. Writing anyway would record in
+A `title` type change is withheld the same way, with its own procedure:
+
+```
+Withheld — migration required
+
+  ~ database.tasks
+      the API refuses to change the type of a title property, in either direction
+      → add a new property of the wanted type, copy the values into it in Notion, then remove the type change from the YAML and rerun
+```
+
+These are the only declared changes notion-seed refuses to write — and it is
+not a judgment on the cost, it is a limit of the API. Writing anyway would record in
 the state a state Notion does not hold, and every following run would show
 phantom drift.
 
@@ -128,9 +204,9 @@ phantom drift.
 `apply` creates the databases that are declared and absent from Notion, updates
 the ones that already exist — name, description, icon and declared properties
 — and moves to the trash the ones the YAML no longer declares. The state is
-updated after each resource written. Two option changes, which the API cannot
-express, are withheld with the migration to do by hand, and `apply` exits with
-a non-zero code as long as they remain — see
+updated after each resource written. Two option changes and the type change
+of a `title`, which the API cannot express, are withheld with the migration to
+do by hand, and `apply` exits with a non-zero code as long as they remain — see
 [What the API cannot do](#what-the-api-cannot-do).
 
 | | |
@@ -402,9 +478,9 @@ property. Existing options are sent with their id, new ones without: the API
 creates one for them, which the read-back brings back to the state. Under a
 type change, the options are recreated: only the YAML's go out, without an id,
 and each current option the YAML does not redeclare under the same name comes
-out as `-`, with the number of rows it empties. Only `select` → `multi_select`
-was measured; the other pairs among `select`, `multi_select` and `status`
-follow the same rule, without having been measured.
+out as `-`, with the number of rows it empties — or, toward `status`, that it
+reassigns to the first declared option. Measured on 2026-09-25 for every pair
+among `select`, `multi_select` and `status`.
 
 The order is chosen for failure. If the second call fails, the name and the
 icon are up to date and **no row data was touched** — the least costly failure.
@@ -578,7 +654,7 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 |---|---|
 | `destructive` | data is lost, without any wrong value being written |
 | `silent-rewrite` | data is replaced by other data, without a trace |
-| `unknown` | the impact could not be measured: type outside the table, failed count, or offline |
+| `unknown` | the impact could not be measured: failed count, or offline |
 | `migration` | the API accepts the request and changes nothing: the rows must be migrated by hand |
 
 Five things to know:
@@ -603,8 +679,10 @@ Five things to know:
   `--fail-on=destructive,silent-rewrite` no longer catches it and exits with
   `0`. Add `unknown` to your list if you want the safeguard to hold even when
   the API refuses to count — otherwise a CI believes it is protected precisely
-  the day it is not. Only exception: a destruction whose row count fails stays
-  `destructive`, since the database goes to the trash whatever the count.
+  the day it is not. Two exceptions: a destruction whose row count fails stays
+  `destructive`, since the database goes to the trash whatever the count; and
+  a type change keeps its measured class, since its nature is known — only its
+  extent is not.
 
 `--fail-on` also applies to `apply`, where it is checked before any write.
 Beware of `--skip-preflight`: offline, nothing is counted, and every line that
