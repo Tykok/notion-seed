@@ -134,6 +134,17 @@ type Detail struct {
 	// wrongly marked true would instead make a working remedy disappear. So
 	// the default leans the right way.
 	Unmeasurable bool
+
+	// CountFailed says a count was asked and did not succeed: a 403, an
+	// exhausted 429, a misunderstood response. It is the one "no figure" that
+	// rerunning may clear — unlike Unmeasurable, and unlike a count that was
+	// never attempted (no data source id, --skip-preflight).
+	//
+	// Only core/measure sets it. A plan file comparison (core/planfile) reads
+	// it to say that rerunning apply may be enough. The default, false, is
+	// the cautious one: at worst it asks for a new review where a rerun would
+	// have done.
+	CountFailed bool
 }
 
 // NewDetail builds an unmeasured detail. Use it SYSTEMATICALLY: a Detail

@@ -61,6 +61,7 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				// Rerunning will not make rich_text filterable.
 				if !errors.Is(err, ErrUnsupportedFilter) {
 					failures = append(failures, fmt.Sprintf("%s: %v", ch.Resource, err))
+					d.CountFailed = true
 				} else {
 					d.Unmeasurable = true
 				}
