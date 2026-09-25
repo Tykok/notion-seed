@@ -336,13 +336,30 @@ func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 
 	upd, err := opts.Updater.Update(ctx, c.Target.ID, c.Target.DataSourceID, dbBody, dsBody)
 	if err != nil {
+		// Le PATCH database est passé avant l'échec : Notion porte déjà ces
+		// champs. Les inscrire garde le state exactement vrai — sinon notre
+		// propre écriture ressortirait au prochain plan comme une dérive venue
+		// d'ailleurs.
+		if upd.DatabaseWritten {
+			snap.Databases[c.Key] = overlayWritten(snap.Databases[c.Key], *c.Target, fields, nil)
+			if serr := state.Save(opts.Dir, snap); serr != nil {
+				return serr
+			}
+		}
 		return updateError(ctx, c, *rep, err, upd, fields, len(dbBody) > 0, opts)
 	}
 	if upd.ReadErr != nil {
+		// Les deux écritures sont passées, seule la relecture manque : on inscrit
+		// ce qui a été ÉCRIT, faute de pouvoir inscrire ce qui a été relu.
+		snap.Databases[c.Key] = overlayWritten(snap.Databases[c.Key], *c.Target, fields, props)
+		if serr := state.Save(opts.Dir, snap); serr != nil {
+			return serr
+		}
 		return fmt.Errorf(
 			"%s a été modifiée mais son état n'a pas pu être relu: %w\n"+
-				"  → son entrée de %s porte encore l'état d'avant l'écriture. Relancez "+
-				"`notion-seed plan` pour voir le réel",
+				"  → son entrée de %s porte ce qui a été écrit, sans les ids des options "+
+				"neuves que seule la relecture rapporte. Relancez `notion-seed plan` pour "+
+				"voir le réel",
 			c.Resource, upd.ReadErr, state.FileName)
 	}
 
@@ -356,6 +373,42 @@ func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 		c.Resource, len(fields), len(props)))
 	rep.Mismatches = append(rep.Mismatches, mismatchLines(c, adopted)...)
 	return nil
+}
+
+// overlayWritten superpose à l'entrée de state antérieure EXACTEMENT ce qui a
+// été écrit : les champs de database du jeu d'écriture et, si le data source a
+// été écrit, les propriétés du jeu, prises dans la cible.
+//
+// La cible n'est pas inscrite en bloc : elle ne porte que le réel relu au plan
+// et le déclaré, et écraserait ce que le state sait d'autre. Les keys d'options
+// viennent de la cible elle-même, qui les porte déjà : JoinOptionKeys, qui part
+// d'un réel relu, n'a rien à apporter ici.
+func overlayWritten(prior, target state.Database, fields, props []string) state.Database {
+	out := prior
+	out.ID, out.DataSourceID = target.ID, target.DataSourceID
+	for _, f := range fields {
+		switch f {
+		case "name":
+			out.Name = target.Name
+		case "description":
+			out.Description = target.Description
+		case "icon":
+			out.Icon = target.Icon
+		}
+	}
+	// Copie : l'entrée antérieure partage sa map avec le snapshot.
+	out.Properties = make(map[string]state.Property, len(prior.Properties)+len(props))
+	for name, prop := range prior.Properties {
+		out.Properties[name] = prop
+	}
+	for _, name := range props {
+		if prop, ok := target.Properties[name]; ok {
+			out.Properties[name] = prop
+		} else {
+			delete(out.Properties, name)
+		}
+	}
+	return out
 }
 
 // fieldLabels nomme, en français, les champs de database écrits.

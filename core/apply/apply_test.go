@@ -855,13 +855,37 @@ func TestRunStopsOnAnUnknownOutcome(t *testing.T) {
 	}
 }
 
-// Écrite mais pas relue : le state garde l'état d'avant, et l'erreur le dit.
-func TestRunReportsAnUpdateThatCouldNotBeReRead(t *testing.T) {
+// overlayFixture : une entrée de state antérieure qui connaît une propriété
+// hors config (Hors), et une cible qui renomme la database et ajoute une option
+// à Prio.
+func overlayFixture() (prior state.Database, target *state.Database, p *diff.Plan) {
+	prior = state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Avant",
+		Properties: map[string]state.Property{
+			"Prio": {ID: "p1", Type: "select"},
+			"Hors": {ID: "h1", Type: "number"},
+		},
+	}
+	target = &state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio":  {ID: "p1", Type: "select", Options: []state.Option{{Key: "haute", Name: "Haute"}}},
+			"Notes": {ID: "n1", Type: "rich_text"},
+		},
+	}
+	p = &diff.Plan{Changes: []diff.Change{updateChange("tasks", target, nameDetail, prioDetail)}}
+	return prior, target, p
+}
+
+// Écrite mais pas relue : le state porte ce qui a été ÉCRIT, superposé à
+// l'entrée d'avant. Garder l'entrée d'avant ferait passer notre propre écriture
+// pour une dérive venue d'ailleurs au prochain plan.
+func TestRunRecordsWhatWasWrittenWhenTheReReadFails(t *testing.T) {
 	dir := t.TempDir()
+	prior, _, p := overlayFixture()
 	up := &fakeUpdater{readErr: errors.New("relecture impossible")}
-	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), prioDetail)}}
 	snap := emptySnapshot()
-	snap.Databases["tasks"] = state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Avant"}
+	snap.Databases["tasks"] = prior
 
 	_, err := Run(context.Background(), p, snap, Options{Dir: dir, Updater: up})
 	if err == nil {
@@ -870,7 +894,67 @@ func TestRunReportsAnUpdateThatCouldNotBeReRead(t *testing.T) {
 	if !strings.Contains(err.Error(), "relecture impossible") || !strings.Contains(err.Error(), "  → ") {
 		t.Errorf("erreur = %q", err)
 	}
+
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	got := loaded.Databases["tasks"]
+	if got.Name != "Tasks" {
+		t.Errorf("Name = %q, want Tasks (écrit)", got.Name)
+	}
+	if opts := got.Properties["Prio"].Options; len(opts) != 1 || opts[0].Key != "haute" {
+		t.Errorf("Prio.Options = %v, want l'option écrite, key comprise", opts)
+	}
+	if got.Properties["Hors"].ID != "h1" {
+		t.Error("Hors, connue du state mais hors du jeu d'écriture, a été perdue")
+	}
+	if _, ok := got.Properties["Notes"]; ok {
+		t.Error("Notes n'a pas été écrite : elle ne doit pas entrer dans le state")
+	}
+}
+
+// Second PATCH en échec : seul le nom est passé. Le state le porte, et garde
+// les propriétés d'avant, que rien n'a touchées.
+func TestRunRecordsTheDatabaseFieldsWhenTheSecondPatchFails(t *testing.T) {
+	dir := t.TempDir()
+	prior, _, p := overlayFixture()
+	up := &fakeUpdater{err: &transport.APIError{Status: 400, NotionCode: "validation_error", Message: "boom"}}
+	snap := emptySnapshot()
+	snap.Databases["tasks"] = prior
+
+	if _, err := Run(context.Background(), p, snap, Options{Dir: dir, Updater: up}); err == nil {
+		t.Fatal("error = nil")
+	}
+
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	got := loaded.Databases["tasks"]
+	if got.Name != "Tasks" {
+		t.Errorf("Name = %q, want Tasks (le PATCH database est passé)", got.Name)
+	}
+	if opts := got.Properties["Prio"].Options; len(opts) != 0 {
+		t.Errorf("Prio.Options = %v, want l'état d'avant : le data source n'a pas été écrit", opts)
+	}
+	if got.Properties["Hors"].ID != "h1" {
+		t.Error("Hors a été perdue")
+	}
+}
+
+// Premier PATCH en échec : rien n'est passé, rien n'est inscrit.
+func TestRunLeavesStateUntouchedWhenTheFirstPatchFails(t *testing.T) {
+	dir := t.TempDir()
+	prior, _, p := overlayFixture()
+	up := &fakeUpdater{err: &transport.APIError{Status: 400, NotionCode: "validation_error", Message: "boom"}, dbFails: true}
+	snap := emptySnapshot()
+	snap.Databases["tasks"] = prior
+
+	if _, err := Run(context.Background(), p, snap, Options{Dir: dir, Updater: up}); err == nil {
+		t.Fatal("error = nil")
+	}
 	if snap.Databases["tasks"].Name != "Avant" {
-		t.Error("le state a été écrit sans relecture")
+		t.Errorf("Name = %q, want Avant : rien n'a été écrit", snap.Databases["tasks"].Name)
 	}
 }
