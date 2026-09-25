@@ -469,8 +469,11 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 
 // checkParentPageAlive refuse une page parente à la corbeille.
 //
-// Une page à la corbeille se lit en 200 : le code de statut ne dit rien, seuls
-// ses champs archived et in_trash le disent. Mesuré le 2026-09-25 : sans ce
+// Une page à la corbeille se lit en 200 : le code de statut ne dit rien, seul
+// son champ in_trash le dit. Mesuré le 2026-09-25 contre l'API 2025-09-03 :
+// une page porte in_trash (true à la corbeille, false sinon) et aucun champ
+// archived. archived reste lu, par prudence envers une réponse d'une autre
+// version de l'API, mais ce n'est pas lui qui détecte. Sans ce
 // contrôle, plan annonçait « Aucun changement » alors que toute écriture sous
 // la page est refusée (`400 validation_error — Can't edit page on block with
 // an archived ancestor`).
