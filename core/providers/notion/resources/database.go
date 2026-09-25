@@ -213,9 +213,9 @@ func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedData
 		out.ReadErr = err
 		return out, nil
 	}
-	rd, ok := remote.(RemoteDatabase)
-	if !ok {
-		out.ReadErr = fmt.Errorf("relecture de %s : type inattendu %T", probe.ID, remote)
+	rd, err := asRemoteDatabase(probe.ID, remote)
+	if err != nil {
+		out.ReadErr = err
 		return out, nil
 	}
 	out.Remote = rd
@@ -286,13 +286,28 @@ func (r *DatabaseResource) Update(
 		out.ReadErr = err
 		return out, nil
 	}
-	rd, ok := remote.(RemoteDatabase)
-	if !ok {
-		out.ReadErr = fmt.Errorf("relecture de %s : type inattendu %T", id, remote)
+	rd, err := asRemoteDatabase(id, remote)
+	if err != nil {
+		out.ReadErr = err
 		return out, nil
 	}
 	out.Remote = rd
 	return out, nil
+}
+
+// asRemoteDatabase ramène la relecture d'une database à son type concret. Read
+// ne rend jamais autre chose : un autre type ne peut venir que d'un défaut de
+// notion-seed, et le message le dit plutôt que de laisser chercher du côté de
+// Notion.
+func asRemoteDatabase(id string, remote RemoteState) (RemoteDatabase, error) {
+	rd, ok := remote.(RemoteDatabase)
+	if !ok {
+		return RemoteDatabase{}, fmt.Errorf(
+			"relecture de %s : type inattendu %T\n"+
+				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
+				"sortie de `notion-seed plan`", id, remote)
+	}
+	return rd, nil
 }
 
 // Diff compare une database désirée à son état distant. Au MVP 0, l'état

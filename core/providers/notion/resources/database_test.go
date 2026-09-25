@@ -460,3 +460,28 @@ func TestDatabaseResourceDatabaseExistsOnOtherErrorReturnsIt(t *testing.T) {
 		t.Error("DatabaseExists() = true, want false")
 	}
 }
+
+type otherRemote struct{}
+
+func (otherRemote) Exists() bool { return true }
+
+// Create et Update partagent cette conversion. Read ne rend jamais autre chose
+// qu'une RemoteDatabase : un autre type est un défaut interne, et le message
+// doit le dire avec son action, plutôt que de laisser chercher du côté de
+// Notion.
+func TestAsRemoteDatabaseNamesAnUnexpectedTypeAsAnInternalDefect(t *testing.T) {
+	_, err := asRemoteDatabase("db-1", otherRemote{})
+	if err == nil {
+		t.Fatal("asRemoteDatabase() error = nil, want un défaut interne")
+	}
+	for _, want := range []string{"db-1", "type inattendu", "  → ", "défaut interne"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+
+	rd, err := asRemoteDatabase("db-1", RemoteDatabase{ID: "db-1"})
+	if err != nil || rd.ID != "db-1" {
+		t.Errorf("asRemoteDatabase(RemoteDatabase) = %v, %v", rd, err)
+	}
+}
