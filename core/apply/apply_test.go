@@ -853,6 +853,37 @@ func TestRunDiagnosesAnArchivedAncestorOnA404(t *testing.T) {
 	}
 }
 
+// Un ancêtre à la corbeille fait échouer le PATCH database le PREMIER. Quand ce
+// PATCH est passé, un 404 du data source ne peut donc pas venir d'un ancêtre
+// archivé, même si la database se lit encore : conseiller de restaurer la page
+// parente enverrait l'utilisateur chercher une cause qui n'existe pas.
+func TestRunDoesNotBlameAnArchivedAncestorAfterADatabaseWrite(t *testing.T) {
+	up := &fakeUpdater{
+		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
+			Message: "Could not find data_source"},
+		exists: true,
+	}
+	p := &diff.Plan{Changes: []diff.Change{updateChange("tasks", prioTarget(), nameDetail, prioDetail)}}
+
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{Dir: t.TempDir(), Updater: up})
+	if err == nil {
+		t.Fatal("error = nil, want une erreur diagnostiquée")
+	}
+	if len(up.dbBodies) != 1 || up.dbBodies[0] == nil {
+		t.Fatalf("montage faux : le PATCH database devait partir")
+	}
+	for _, unwanted := range []string{"ancêtre", "corbeille", "restaurez la page parente"} {
+		if strings.Contains(err.Error(), unwanted) {
+			t.Errorf("erreur = %q, want SANS %q : le PATCH database réussi l'exclut", err, unwanted)
+		}
+	}
+	for _, want := range []string{"data source", "partagé", "déjà écrit sur cette ressource : le nom", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err, want)
+		}
+	}
+}
+
 func TestRunDiagnosesAVanishedDatabaseOnA404(t *testing.T) {
 	up := &fakeUpdater{
 		err: &transport.APIError{Status: 404, NotionCode: "object_not_found",
