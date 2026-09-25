@@ -94,6 +94,10 @@ func apiPath() string {
 }
 
 func main() {
+	if err := logCall(); err != nil {
+		fmt.Fprintf(os.Stderr, "fakentn: call log not written: %v\n", err)
+		os.Exit(70)
+	}
 	switch os.Getenv("FAKE_NTN_SCENARIO") {
 	case "authenticated":
 		// ntn present, up to date, authenticated: the happy path of preflight
@@ -473,4 +477,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fakentn: unknown scenario")
 		os.Exit(64)
 	}
+}
+
+// logCall appends the arguments of this invocation to the file named by
+// FAKE_NTN_CALL_LOG, one line per call, reads included: a test can then say
+// that a command made NO call at all, not only no write. Without the
+// variable, nothing is logged.
+func logCall() error {
+	name := os.Getenv("FAKE_NTN_CALL_LOG")
+	if name == "" {
+		return nil
+	}
+	f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintln(f, strings.Join(os.Args[1:], " "))
+	return err
 }
