@@ -1373,3 +1373,39 @@ func TestTypeChangeToATypeWithoutOptionsAnnouncesNoRemoval(t *testing.T) {
 		}
 	}
 }
+
+// Une option neuve sur une propriété existante part avec sa couleur et son
+// groupe, comme à la création : le plan doit les montrer, sinon apply écrit ce
+// qu'il n'a jamais affiché.
+func TestUpdateShowsTheAttributesOfANewOption(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Etat"] = state.Property{Type: "status", Options: []state.Option{
+		{Key: "todo", Name: "À faire", Group: "To-do"},
+		{Key: "bloque", Name: "Bloqué", Color: "red", Group: "In progress"},
+	}}
+	actual.Properties["Etat"] = state.Property{ID: "e1", Type: "status", Options: []state.Option{
+		{ID: "o-todo", Name: "À faire", Group: "To-do"},
+	}}
+	applied.Properties["Etat"] = actual.Properties["Etat"]
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	lines := detailStrings(res.Changeset.Details)
+	for _, want := range []string{
+		`+ option "Moyenne" (propriété "Prio") color orange`,
+		`+ option "Bloqué" (propriété "Etat") color red, group In progress`,
+	} {
+		if !containsSub(lines, want) {
+			t.Errorf("il manque %q dans :\n%s", want, strings.Join(lines, "\n"))
+		}
+	}
+	// Et c'est bien ce que la cible écrit.
+	var sent state.Option
+	for _, o := range res.Target.Properties["Prio"].Options {
+		if o.Name == "Moyenne" {
+			sent = o
+		}
+	}
+	if sent.Color != "orange" {
+		t.Errorf("option écrite = %+v, want color orange", sent)
+	}
+}

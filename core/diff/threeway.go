@@ -271,8 +271,8 @@ func createLines(target *state.Database) []resources.Detail {
 }
 
 // newOptionLines annonce les options d'une propriété écrite sans aucune
-// identité distante : à la création, sous une propriété neuve, ou sous un
-// changement de type. Toutes partent, avec leur couleur et leur groupe : les
+// identité distante : à la création, sous une propriété neuve, sous un
+// changement de type, ou quand une option déclarée n'a pas d'appariement. Toutes partent, avec leur couleur et leur groupe : les
 // taire serait écrire ce que le plan n'a jamais montré.
 //
 // L'ordre des options est celui du YAML : il est visible dans Notion, le trier
@@ -524,10 +524,9 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
 			continue
 		}
-		d := resources.NewDetail("+",
-			fmt.Sprintf("option %q (propriété %q)", w.Name, propName), change.ClassSafe)
-		d.Property = propName
-		out = append(out, d)
+		// Une option sans appariement part neuve, avec sa couleur et son groupe :
+		// la même ligne qu'à la création, depuis la même fonction.
+		out = append(out, newOptionLines(propName, []state.Option{w})...)
 	}
 
 	// Passe 3 : ce que le YAML ne réclame pas SERA détruit dès qu'on écrit cette
