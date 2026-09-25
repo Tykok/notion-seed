@@ -224,7 +224,7 @@ func TestRenderMarksBlockingChanges(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "réécriture silencieuse") {
+	if !strings.Contains(got, "silent rewrite") {
 		t.Errorf("sortie = %q, elle doit nommer la classe du changement", got)
 	}
 	if !strings.Contains(got, "bloqué") {
@@ -276,7 +276,7 @@ func TestRenderShowsDriftBeforePlan(t *testing.T) {
 	if iDrift < 0 || iPlan < 0 || iDrift > iPlan {
 		t.Errorf("la dérive doit précéder le plan:\n%s", out)
 	}
-	if !strings.Contains(out, "[migration requise]") {
+	if !strings.Contains(out, "[migration required]") {
 		t.Errorf("la classe de la ligne doit apparaître:\n%s", out)
 	}
 }
@@ -383,7 +383,7 @@ func TestRenderLineClassIsIndependentOfResourceClass(t *testing.T) {
 	if strings.Contains(safeLine, "[") {
 		t.Errorf("une ligne sûre ne doit pas hériter de l'étiquette de la ressource: %q", safeLine)
 	}
-	if !strings.Contains(rewriteLine, "[réécriture silencieuse]") {
+	if !strings.Contains(rewriteLine, "[silent rewrite]") {
 		t.Errorf("la ligne dangereuse doit porter sa classe: %q", rewriteLine)
 	}
 }
@@ -1037,7 +1037,7 @@ func TestRenderSaysHowManyRowsADestroyTakesWithIt(t *testing.T) {
 		if !strings.Contains(b.String(), tt.want) {
 			t.Errorf("count=%d:\n%s\nwant %q", tt.count, b.String(), tt.want)
 		}
-		if !strings.Contains(b.String(), "[destructif]") {
+		if !strings.Contains(b.String(), "[destructive]") {
 			t.Errorf("count=%d : la destruction a perdu sa classe:\n%s", tt.count, b.String())
 		}
 	}

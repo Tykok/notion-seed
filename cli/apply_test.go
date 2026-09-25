@@ -426,7 +426,7 @@ func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 	if !strings.Contains(err.Error(), "--fail-on") {
 		t.Errorf("message = %q, il doit dire que --fail-on a déclenché", err.Error())
 	}
-	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+	if !strings.Contains(err.Error(), "silent rewrite") {
 		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
 	}
 }
@@ -686,7 +686,7 @@ func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
 		t.Fatalf("plan: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"  - database.tasks  [destructif]",
+		"  - database.tasks  [destructive]",
 		"          → 3 ligne(s) partent à la corbeille avec elle.",
 		"Impact : 1 database(s) à la corbeille avec 3 ligne(s).",
 	} {

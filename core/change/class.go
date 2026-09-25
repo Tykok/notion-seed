@@ -1,106 +1,109 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package change porte la classification des changements : ce qui est sûr, ce
-// qui exige une migration, ce qui détruit, et ce qui réécrit silencieusement.
+// Package change holds the classification of changes: what is safe, what
+// requires a migration, what destroys, and what silently rewrites.
 //
-// C'est un paquet feuille, sans dépendance interne, précisément pour que
-// `resources` puisse porter une Class sur chaque ligne de changement sans créer
-// de cycle avec `diff`, qui importe `resources`.
+// It is a leaf package, with no internal dependency, precisely so that
+// `resources` can carry a Class on each change line without creating a cycle
+// with `diff`, which imports `resources`.
 package change
 
-// Class est la catégorie d'un changement. Elle décrit ce qu'il COÛTE — sûr,
-// migration requise, destructif, réécriture silencieuse, ou impact inconnu —
-// elle ne décide plus s'il passe : notion-seed ne refuse plus rien sur la foi
-// d'une classe, il la mesure et la dit.
+// Class is the category of a change. It describes what it COSTS — safe,
+// migration required, destructive, silent rewrite, or unknown impact — it no
+// longer decides whether it goes through: notion-seed no longer refuses
+// anything on the strength of a class, it measures it and says it.
 type Class int
 
 const (
-	// ClassSafe : ajout d'une database, d'une propriété, d'une option neuve.
+	// ClassSafe: adding a database, a property, a new option.
 	ClassSafe Class = iota
 
-	// ClassMigration : même key d'option, name différent. L'API ne sait pas
-	// renommer une option — elle accepte la requête et renvoie 200 sans rien
-	// changer. Il faut créer, migrer les lignes, puis retirer l'ancienne.
+	// ClassMigration: same option key, different name. The API cannot rename
+	// an option — it accepts the request and returns 200 without changing
+	// anything. The option must be created, the rows migrated, then the old
+	// one removed.
 	ClassMigration
 
-	// ClassDestructive : suppression d'une option de select ou multi_select,
-	// suppression d'une propriété, changement de type. La donnée est perdue,
-	// mais aucune fausse valeur n'est écrite.
+	// ClassDestructive: removing a select or multi_select option, deleting a
+	// property, changing a type. The data is lost, but no false value is
+	// written.
 	//
-	// select et multi_select partagent la classe, PAS le comportement, et le
-	// rendu les sépare : mesuré le 2026-09-24, un select retiré vide la cellule,
-	// un multi_select ne lui retire que cette valeur — ['Un','Deux'] moins 'Un'
-	// donne ['Deux']. La perte est réelle des deux côtés, son étendue non.
+	// select and multi_select share the class, NOT the behaviour, and the
+	// rendering tells them apart: measured on 2026-09-24, a removed select
+	// empties the cell, a multi_select only loses that value — ['Un','Deux']
+	// minus 'Un' gives ['Deux']. The loss is real on both sides, its extent is
+	// not the same.
 	ClassDestructive
 
-	// ClassSilentRewrite : suppression d'une option de status. Les lignes qui
-	// la portaient sont réassignées à UNE AUTRE option, sans erreur ni
-	// avertissement de l'API. La donnée n'est pas seulement perdue : elle est
-	// remplacée par une valeur fausse, indistinguable après coup.
+	// ClassSilentRewrite: removing a status option. The rows that held it are
+	// reassigned to ANOTHER option, with no error or warning from the API. The
+	// data is not merely lost: it is replaced by a false value,
+	// indistinguishable after the fact.
 	//
-	// « une autre » et pas « l'option par défaut » : la mesure du 2026-09-24
-	// donne À faire → Fait, qui n'est pas l'option par défaut du groupe. Laquelle
-	// l'API choisit n'a pas été mesuré, donc n'est pas affirmé.
+	// "another" and not "the default option": the 2026-09-24 measurement gives
+	// À faire → Fait, which is not the group's default option. Which one the
+	// API picks has not been measured, so it is not asserted.
 	ClassSilentRewrite
 
-	// ClassUnknownImpact : on ne sait pas ce que ce changement coûte. Un couple
-	// de types hors de la table mesurée, ou une mesure qui n'a pas pu être
-	// faite (--skip-preflight, requête en échec).
+	// ClassUnknownImpact: we don't know what this change costs. A pair of
+	// types outside the measured table, or a measurement that could not be
+	// made (--skip-preflight, failed request).
 	//
-	// En dernier de l'énumération DÉLIBÉRÉMENT : WorstClass prend le maximum, et
-	// un impact qu'on ne sait pas nommer doit dominer l'en-tête d'une ressource.
-	// Ne pas savoir mérite plus d'attention que savoir que c'est sûr.
+	// Last in the enumeration DELIBERATELY: WorstClass takes the maximum, and
+	// an impact that cannot be named must dominate a resource's header. Not
+	// knowing deserves more attention than knowing it is safe.
 	ClassUnknownImpact
 )
 
 func (c Class) String() string {
 	switch c {
 	case ClassSafe:
-		return "sûr"
+		return "safe"
 	case ClassMigration:
-		return "migration requise"
+		return "migration required"
 	case ClassDestructive:
-		return "destructif"
+		return "destructive"
 	case ClassSilentRewrite:
-		return "réécriture silencieuse"
+		return "silent rewrite"
 	case ClassUnknownImpact:
-		return "impact inconnu"
+		return "unknown impact"
 	default:
-		return "inconnu"
+		return "unknown"
 	}
 }
 
-// ClassifyOptionRemoval donne le coût du retrait d'une option, selon le type de
-// la propriété ET le nombre de lignes qui la portent.
+// ClassifyOptionRemoval gives the cost of removing an option, according to the
+// property's type AND the number of rows that hold it.
 //
-// count < 0 signifie « non mesuré » : sous --skip-preflight, ou quand la
-// requête de comptage a échoué.
+// count < 0 means "not measured": under --skip-preflight, or when the count
+// query failed.
 //
-// Mesuré le 2026-09-24 contre l'API 2025-09-03 : retirer une option de select
-// vide la ligne ; retirer une option de status RÉASSIGNE la ligne à une autre
-// option, sans erreur ni avertissement. Le premier cas perd une donnée, le
-// second la remplace par une valeur plausible et fausse.
+// Measured on 2026-09-24 against API 2025-09-03: removing a select option
+// empties the row; removing a status option REASSIGNS the row to another
+// option, with no error or warning. The first case loses data, the second
+// replaces it with a plausible, false value.
 //
-// Le compte change tout : une option que personne n'utilise peut être retirée
-// sans rien coûter, quel que soit son type. C'est ce que le blocage par
-// principe ne savait pas voir, et pourquoi il a été remplacé par une mesure.
+// The count changes everything: an option nobody uses can be removed at no
+// cost, whatever its type. That is what blocking on principle could not see,
+// and why it was replaced by a measurement.
 func ClassifyOptionRemoval(propertyType string, count int) Class {
 	return classifyLoss(count, propertyType == "status")
 }
 
-// ClassifyRetypedOptionRemoval donne le coût d'une option qui disparaît avec un
-// changement de type, parce que le YAML ne la redéclare pas sous le même nom.
+// ClassifyRetypedOptionRemoval gives the cost of an option that disappears
+// with a type change, because the YAML does not redeclare it under the same
+// name.
 //
-// Mesuré le 2026-09-25 contre l'API, sur select → multi_select seulement : une
-// ligne ne garde sa valeur que si une option de même nom part dans le payload,
-// sinon elle passe à vide. Aucune option ne reste où réassigner la ligne, donc
-// l'ancien type — status compris — ne change rien : c'est une perte.
+// Measured on 2026-09-25 against the API, on select → multi_select only: a row
+// keeps its value only if an option with the same name goes in the payload,
+// otherwise it is emptied. No option remains to reassign the row to, so the
+// old type — status included — changes nothing: it is a loss.
 func ClassifyRetypedOptionRemoval(count int) Class {
 	return classifyLoss(count, false)
 }
 
-// classifyLoss est la règle commune aux deux retraits : le compte d'abord, le
-// sort des lignes ensuite.
+// classifyLoss is the rule shared by both removals: the count first, the fate
+// of the rows second.
 func classifyLoss(count int, reassigns bool) Class {
 	switch {
 	case count < 0:

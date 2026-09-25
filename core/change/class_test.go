@@ -4,9 +4,9 @@ package change
 
 import "testing"
 
-// Le compte décide, pas le type seul. Retirer une option que personne n'utilise
-// ne coûte rien, quel que soit le type — c'est ce que le blocage par principe
-// ne savait pas voir.
+// The count decides, not the type alone. Removing an option nobody uses costs
+// nothing, whatever the type — that is what blocking on principle could not
+// see.
 func TestClassifyOptionRemovalIsSafeWhenNoRowUsesTheOption(t *testing.T) {
 	for _, propType := range []string{"select", "multi_select", "status"} {
 		if got := ClassifyOptionRemoval(propType, 0); got != ClassSafe {
@@ -15,17 +15,16 @@ func TestClassifyOptionRemovalIsSafeWhenNoRowUsesTheOption(t *testing.T) {
 	}
 }
 
-// Mesuré le 2026-09-24 : sur un status, les lignes sont RÉASSIGNÉES à une autre
-// option, pas vidées. La donnée est remplacée par une valeur plausible et
-// fausse — indistinguable après coup.
+// Measured on 2026-09-24: on a status, the rows are REASSIGNED to another
+// option, not emptied. The data is replaced by a plausible, false value —
+// indistinguishable after the fact.
 func TestClassifyOptionRemovalOnStatusWithRowsIsSilentRewrite(t *testing.T) {
 	if got := ClassifyOptionRemoval("status", 47); got != ClassSilentRewrite {
 		t.Errorf("ClassifyOptionRemoval(status, 47) = %v, want ClassSilentRewrite", got)
 	}
 }
 
-// Mesuré le 2026-09-24 : sur un select, la ligne passe à vide. Perdue, mais
-// visiblement.
+// Measured on 2026-09-24: on a select, the row is emptied. Lost, but visibly.
 func TestClassifyOptionRemovalOnSelectWithRowsIsDestructive(t *testing.T) {
 	for _, propType := range []string{"select", "multi_select"} {
 		if got := ClassifyOptionRemoval(propType, 3); got != ClassDestructive {
@@ -34,8 +33,8 @@ func TestClassifyOptionRemovalOnSelectWithRowsIsDestructive(t *testing.T) {
 	}
 }
 
-// Un compte négatif dit « pas mesuré ». Ce n'est ni sûr ni dangereux : c'est
-// inconnu, et le dire est la seule réponse honnête.
+// A negative count says "not measured". It is neither safe nor dangerous: it
+// is unknown, and saying so is the only honest answer.
 func TestClassifyOptionRemovalIsUnknownWhenNotMeasured(t *testing.T) {
 	for _, propType := range []string{"select", "status"} {
 		if got := ClassifyOptionRemoval(propType, -1); got != ClassUnknownImpact {
@@ -49,10 +48,10 @@ func TestClassStringIsStable(t *testing.T) {
 		c    Class
 		want string
 	}{
-		{ClassSafe, "sûr"},
-		{ClassMigration, "migration requise"},
-		{ClassDestructive, "destructif"},
-		{ClassSilentRewrite, "réécriture silencieuse"},
+		{ClassSafe, "safe"},
+		{ClassMigration, "migration required"},
+		{ClassDestructive, "destructive"},
+		{ClassSilentRewrite, "silent rewrite"},
 	}
 	for _, tt := range tests {
 		if got := tt.c.String(); got != tt.want {
