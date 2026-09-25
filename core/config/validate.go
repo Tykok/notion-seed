@@ -168,7 +168,7 @@ func hintFor(pointer string, errKind any, jsonBytes []byte) string {
 				return "a status property must declare its `options`. Created without them, " +
 					"it gets filled by the API with its own default options, which the plan will " +
 					"not have shown — and removing them later silently reassigns the " +
-					"rows, which `allow_data_loss` does not unblock."
+					"rows, a loss `acknowledge_data_loss` only acknowledges, it does not undo it."
 			}
 		}
 	}
