@@ -40,16 +40,16 @@ func newApplyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Applique le plan : crée et modifie les databases déclarées, et met le state à jour",
+		Short: "Applique le plan : crée, modifie et met à la corbeille les databases, et met le state à jour",
 		Long: "apply recalcule le plan, l'affiche, demande confirmation, puis écrit.\n" +
 			"Il ne prend aucun argument : il n'y a pas de fichier de plan à rejouer,\n" +
 			"donc pas de plan périmé à appliquer par mégarde.\n\n" +
-			"Cette version écrit les créations, les modifications, et le nettoyage des\n" +
-			"entrées de state dont la ressource a déjà disparu. Une modification que\n" +
-			"l'API ne sait pas exprimer — renommer une option, changer sa couleur — est\n" +
-			"nommée sous « Retenu », avec la migration à faire à la main. Les\n" +
-			"destructions sont nommées sous « Non appliqué » plutôt que tentées à\n" +
-			"moitié. apply sort en code non nul tant qu'il reste du travail.\n\n" +
+			"apply écrit les créations, les modifications, les destructions — une\n" +
+			"database que le YAML ne déclare plus est mise à la corbeille de Notion —\n" +
+			"et le nettoyage des entrées de state dont la ressource a déjà disparu.\n" +
+			"Une modification que l'API ne sait pas exprimer — renommer une option,\n" +
+			"changer sa couleur — est nommée sous « Retenu », avec la migration à faire\n" +
+			"à la main, et apply sort en code non nul tant qu'elle reste.\n\n" +
 			"La confirmation ne lève aucun blocage : un plan bloqué par une ressource\n" +
 			"gérée que Notion ne connaît plus n'atteint jamais le prompt.",
 		Args: cobra.NoArgs,
@@ -83,18 +83,15 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 	reportMeasureFailures(cmd, prep)
 
 	out := cmd.OutOrStdout()
-	// Sans la ligne d'agrégat : elle couvre tout le plan, alors qu'apply n'en
-	// écrit qu'une partie. apply annonce lui-même ce qu'il va écrire, juste
-	// avant la confirmation.
-	if err := diff.RenderWithoutImpact(out, prep.plan); err != nil {
+	// La ligne d'agrégat ne compte que ce qu'apply va écrire : une ressource
+	// retenue garde un impact qu'apply ne causera pas, et l'annoncer ici le
+	// ferait mentir juste avant la confirmation.
+	if err := diff.RenderForApply(out, prep.plan); err != nil {
 		return err
 	}
 
-	toCreate, toUpdate, toClean, withheld, skipped := splitByWritability(prep.plan)
-	if err := renderWithheld(out, withheld); err != nil {
-		return err
-	}
-	if err := renderSkipped(out, skipped); err != nil {
+	todo := splitByWritability(prep.plan)
+	if err := renderWithheld(out, todo.withheld); err != nil {
 		return err
 	}
 
@@ -113,14 +110,20 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 		return err
 	}
 
-	if toCreate == 0 && toUpdate == 0 && toClean == 0 && len(withheld) == 0 && len(skipped) == 0 {
+	// Un changement autorisé qu'apply ne saurait pas écrire est un défaut
+	// interne : refusé avant la confirmation, donc avant la moindre écriture.
+	if err := apply.Check(prep.plan, prep.snap); err != nil {
+		return err
+	}
+
+	if !todo.writes() && len(todo.withheld) == 0 {
 		// Plan convergé. Un prompt de cérémonie sur un plan vide apprendrait à
 		// taper « apply » sans lire.
 		return nil
 	}
 
-	if toCreate > 0 || toUpdate > 0 || toClean > 0 {
-		announceWhatWillHappen(out, toCreate, toUpdate, toClean, prep.cfg.Workspace.ParentPageID)
+	if todo.writes() {
+		announceWhatWillHappen(out, todo, prep.cfg.Workspace.ParentPageID)
 		ok, err := confirm(cmd, autoApprove)
 		if err != nil {
 			return err
@@ -140,67 +143,74 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 		prep.snap.WorkspaceID = prep.workspaceID
 	}
 
-	// La même ressource sert aux deux rôles : créer et modifier passent par le
-	// même transport et le même décodeur de relecture.
+	// La même ressource sert aux trois rôles : créer, modifier et mettre à la
+	// corbeille passent par le même transport.
 	res := resources.NewDatabaseResource(prep.tr, mapper.RemoteDatabaseFromJSON)
 	rep, runErr := apply.Run(cmd.Context(), prep.plan, prep.snap, apply.Options{
 		Dir:          opts.dir,
 		ParentPageID: prep.cfg.Workspace.ParentPageID,
 		Creator:      res,
 		Updater:      res,
+		Trasher:      res,
 	})
 	// Le compte rendu est affiché même en échec : c'est lui qui dit ce qui est
 	// acquis, et l'utilisateur en a d'autant plus besoin quand ça s'est mal
 	// passé.
-	renderReport(out, rep, len(withheld), len(skipped))
+	renderReport(out, rep, len(todo.withheld))
 	if runErr != nil {
 		return runErr
 	}
 	if !rep.Converged() {
 		return fmt.Errorf(
-			"apply n'a pas convergé : %d ressource(s) retenue(s), %d changement(s) "+
-				"non appliqué(s), %d écart(s)\n"+
-				"  → chaque ressource retenue ou non appliquée est détaillée ci-dessus, "+
-				"avec ce qui la débloque ; relancez `notion-seed plan` pour voir ce qui reste",
-			len(withheld), len(skipped), len(rep.Mismatches))
+			"apply n'a pas convergé : %d ressource(s) retenue(s), %d écart(s)\n"+
+				"  → chaque ressource retenue et chaque écart sont détaillés ci-dessus ; "+
+				"relancez `notion-seed plan` pour voir ce qui reste",
+			len(todo.withheld), len(rep.Mismatches))
 	}
 	return nil
 }
 
+// pending compte ce qu'apply s'apprête à faire, par nature, et ce qu'il retient.
+//
+// Créations, modifications, destructions et nettoyages sont comptés
+// SÉPARÉMENT : retirer une entrée de state obsolète n'écrit rien dans Notion,
+// mettre une database à la corbeille, si. Les confondre ferait mentir la phrase
+// de confirmation — le seul moment où l'utilisateur décide, sur la foi de ce qui
+// est à l'écran. Le nettoyage compte pourtant comme une écriture : c'est une
+// identité qu'on jette, et elle ne se retrouve que par un import.
+type pending struct {
+	create, update, destroy, clean int
+	withheld                       []withheldChange
+}
+
+// writes dit si quelque chose va être écrit — dans Notion ou dans le state.
+func (n pending) writes() bool {
+	return n.create+n.update+n.destroy+n.clean > 0
+}
+
 // splitByWritability sépare ce qui part vers Notion, ce qui ne touche que le
-// state local, ce qui est RETENU, et ce qu'apply ne sait pas encore écrire.
-//
-// Créations, modifications et nettoyages sont comptés SÉPARÉMENT : retirer une
-// entrée de state obsolète n'écrit rien dans Notion, et les confondre ferait
-// mentir la phrase de confirmation — le seul moment où l'utilisateur décide, sur
-// la foi de ce qui est à l'écran. Le nettoyage compte pourtant comme une
-// écriture : c'est une identité qu'on jette, et elle ne se retrouve que par un
-// import.
-//
-// Retenu et non appliqué ne se confondent pas : le premier demande une action de
-// l'utilisateur — migrer des lignes à la main — le second demande d'attendre une
-// version. Les mélanger enverrait l'utilisateur migrer des lignes pour une
-// database qu'il suffit d'attendre.
+// state local, et ce qui est RETENU.
 //
 // Withheld est lu EN PREMIER, comme dans apply.Run : c'est lui, et non Target,
-// qui porte l'interdiction d'écrire.
-func splitByWritability(p *diff.Plan) (toCreate, toUpdate, toClean int, withheld []withheldChange, skipped []skippedChange) {
-	toClean = len(p.StaleState)
+// qui porte l'interdiction d'écrire. La forme des changements autorisés est
+// vérifiée par apply.Check, pas ici.
+func splitByWritability(p *diff.Plan) pending {
+	n := pending{clean: len(p.StaleState)}
 	for _, c := range p.Changes {
 		if c.Withheld != "" {
-			withheld = append(withheld, withheldChange{resource: c.Resource, reason: c.Withheld})
+			n.withheld = append(n.withheld, withheldChange{resource: c.Resource, reason: c.Withheld})
 			continue
 		}
-		switch {
-		case c.Kind == resources.KindCreate && c.Target != nil:
-			toCreate++
-		case c.Kind == resources.KindUpdate && c.Target != nil:
-			toUpdate++
-		default:
-			skipped = append(skipped, skippedChange{resource: c.Resource, kind: c.Kind})
+		switch c.Kind {
+		case resources.KindCreate:
+			n.create++
+		case resources.KindUpdate:
+			n.update++
+		case resources.KindDestroy:
+			n.destroy++
 		}
 	}
-	return toCreate, toUpdate, toClean, withheld, skipped
+	return n
 }
 
 // withheldChange porte la raison avec le nom : une ressource retenue sans
@@ -210,34 +220,29 @@ type withheldChange struct {
 	reason   string
 }
 
-// skippedChange porte le Kind en plus du nom : sans lui, une destruction en
-// attente serait présentée comme une modification de propriétés, et le message
-// enverrait l'utilisateur faire la mauvaise chose sur l'opération la plus
-// destructrice du produit.
-type skippedChange struct {
-	resource string
-	kind     resources.ChangeKind
-}
-
 // announceWhatWillHappen dit ce qui va se passer, par nature. Une seule phrase
-// qui parlerait d'« écritures » pour les deux serait fausse pour le nettoyage.
-func announceWhatWillHappen(w io.Writer, toCreate, toUpdate, toClean int, parentPageID string) {
-	if toCreate > 0 {
+// qui parlerait d'« écritures » pour tout serait fausse pour le nettoyage, et
+// la corbeille a sa propre ligne : c'est la seule qui détruit.
+func announceWhatWillHappen(w io.Writer, n pending, parentPageID string) {
+	if n.create > 0 {
 		fmt.Fprintf(w, "%d database(s) vont être créées dans la page %s.\n",
-			toCreate, parentPageID)
+			n.create, parentPageID)
 	}
-	if toUpdate > 0 {
-		fmt.Fprintf(w, "%d database(s) vont être modifiées dans Notion.\n", toUpdate)
+	if n.update > 0 {
+		fmt.Fprintf(w, "%d database(s) vont être modifiées dans Notion.\n", n.update)
 	}
-	if toClean > 0 {
+	if n.destroy > 0 {
+		fmt.Fprintf(w, "%d database(s) vont être mises à la corbeille dans Notion.\n", n.destroy)
+	}
+	if n.clean > 0 {
 		fmt.Fprintf(w, "%d entrée(s) obsolètes vont être retirées du state. "+
-			"Rien ne sera écrit dans Notion pour celles-là.\n", toClean)
+			"Rien ne sera écrit dans Notion pour celles-là.\n", n.clean)
 	}
 }
 
 // renderWithheld affiche les ressources qu'apply refuse d'écrire faute de
-// pouvoir l'exprimer. Cette section, contrairement à la suivante, ne disparaîtra
-// pas : sa cause est une limite de l'API, pas une limite de cette version.
+// pouvoir l'exprimer. Sa cause est une limite de l'API, pas une limite de cette
+// version : attendre une version n'y changera rien.
 func renderWithheld(w io.Writer, withheld []withheldChange) error {
 	if len(withheld) == 0 {
 		return nil
@@ -262,53 +267,18 @@ func renderWithheld(w io.Writer, withheld []withheldChange) error {
 	return err
 }
 
-// renderSkipped affiche ce qu'apply ne sait pas encore écrire : depuis que les
-// modifications s'écrivent, les seules destructions. La section disparaîtra
-// d'elle-même quand destroy arrivera : le contrat de sortie, lui, ne bougera
-// pas.
-func renderSkipped(w io.Writer, skipped []skippedChange) error {
-	if len(skipped) == 0 {
-		return nil
-	}
-	if _, err := fmt.Fprintln(w,
-		"Non appliqué par cette version — apply n'écrit pas encore les destructions"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w); err != nil {
-		return err
-	}
-	for _, s := range skipped {
-		// Le repli ne devrait plus servir : une création ou une modification
-		// sans cible ne sort pas du plan. S'il sert quand même, il ne prétend
-		// rien sur ce qui est en attente.
-		marker, hint := "~", "notion-seed ne sait pas encore écrire ce changement. "+
-			"Appliquez-le dans Notion, ou attendez."
-		if s.kind == resources.KindDestroy {
-			// Le marqueur DOIT correspondre à celui du plan affiché plus haut, et
-			// l'action corrective à l'opération réellement en attente.
-			marker, hint = "-", "la destruction des databases arrive dans une version "+
-				"suivante. Archivez-la dans Notion, ou attendez."
-		}
-		if _, err := fmt.Fprintf(w, "  %s %s\n", marker, s.resource); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "      → %s\n", hint); err != nil {
-			return err
-		}
-	}
-	_, err := fmt.Fprintln(w)
-	return err
-}
-
-// renderReport dit ce qui est acquis. Le bilan compte le retenu et le non
-// appliqué chacun dans son terme : un « Non appliqué : 0 » affiché pendant
-// qu'apply échoue sur une ressource retenue contredirait le code de sortie.
-func renderReport(w io.Writer, rep apply.Report, withheld, skipped int) {
+// renderReport dit ce qui est acquis. Le bilan compte le retenu dans son
+// propre terme : un apply qui échoue sur une ressource retenue ne doit pas
+// afficher un bilan qui laisse croire que tout est passé.
+func renderReport(w io.Writer, rep apply.Report, withheld int) {
 	for _, l := range rep.Created {
 		fmt.Fprintf(w, "+ %s\n", l)
 	}
 	for _, l := range rep.Updated {
 		fmt.Fprintf(w, "~ %s\n", l)
+	}
+	for _, l := range rep.Destroyed {
+		fmt.Fprintf(w, "- %s\n", l)
 	}
 	for _, l := range rep.Cleaned {
 		fmt.Fprintf(w, "- %s\n", l)
@@ -321,11 +291,20 @@ func renderReport(w io.Writer, rep apply.Report, withheld, skipped int) {
 			fmt.Fprintf(w, "  %s\n", l)
 		}
 	}
-	if len(rep.Created)+len(rep.Updated)+len(rep.Cleaned)+withheld+skipped > 0 {
-		fmt.Fprintf(w, "\nAppliqué : %d création(s), %d modification(s), "+
-			"%d entrée(s) de state nettoyée(s). Retenu : %d. Non appliqué : %d changement(s).\n",
-			len(rep.Created), len(rep.Updated), len(rep.Cleaned), withheld, skipped)
+	lines := len(rep.Created) + len(rep.Updated) + len(rep.Destroyed) + len(rep.Cleaned)
+	// Les écarts comptent : un apply qui échoue sur une seule corbeille non
+	// confirmée doit garder son bilan, qui dit que rien n'a été acquis.
+	if lines+withheld+len(rep.Mismatches) == 0 {
+		return
 	}
+	// Une ligne vide sépare le bilan des lignes du rapport, et d'elles seules :
+	// la section « Retenu », qui peut le précéder, se termine déjà par une.
+	if lines+len(rep.Mismatches) > 0 {
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintf(w, "Appliqué : %d création(s), %d modification(s), %d mise(s) à la corbeille, "+
+		"%d entrée(s) de state nettoyée(s). Retenu : %d ressource(s).\n",
+		len(rep.Created), len(rep.Updated), len(rep.Destroyed), len(rep.Cleaned), withheld)
 }
 
 // confirm lit la confirmation. Seul le mot exact vaut oui : « oui », « APPLY »
