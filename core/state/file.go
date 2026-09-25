@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
+
+	"github.com/tykok/notion-seed/internal/atomicfile"
 )
 
 // Load reads the state file of a configuration directory.
@@ -73,40 +74,14 @@ func Save(dir string, s *Snapshot) error {
 	}
 	body = append(body, '\n')
 
-	tmp, err := os.CreateTemp(dir, ".notion-seed.state.*.json")
-	if err != nil {
+	// os.CreateTemp creates the file as 0600; that is not the mode of a file
+	// meant to be versioned, reviewed and read by the CI, so 0644 is asked
+	// explicitly.
+	if err := atomicfile.Write(Path(dir), body, 0o644); err != nil {
 		return fmt.Errorf(
 			"failed to write %s: %w\n"+
 				"  → check the write permissions on %s; the previous state is intact",
 			FileName, err, dir)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-
-	if _, err := tmp.Write(body); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to write %s: %w\n"+
-			"  → the previous state is intact", FileName, err)
-	}
-	// os.CreateTemp creates the file as 0600; that is not the mode of a file
-	// meant to be versioned, reviewed and read by the CI.
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to change the permissions of %s: %w\n"+
-			"  → the previous state is intact", FileName, err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to sync %s: %w\n"+
-			"  → the previous state is intact", FileName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close %s: %w\n"+
-			"  → the previous state is intact", FileName, err)
-	}
-	if err := os.Rename(tmpName, filepath.Join(dir, FileName)); err != nil {
-		return fmt.Errorf("failed to replace %s: %w\n"+
-			"  → the previous state is intact", FileName, err)
 	}
 	return nil
 }
