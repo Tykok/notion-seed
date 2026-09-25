@@ -12,58 +12,58 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Result est la sortie du comparateur pour UNE ressource.
+// Result is the comparator's output for ONE resource.
 //
-// Les trois champs répondent à trois questions distinctes, et les mélanger
-// serait l'erreur à ne pas commettre : Changeset dit ce qu'on écrirait, Drift
-// dit ce que quelqu'un a fait à la main, Unmanaged dit ce qui existe sans être
-// déclaré et qu'on ne touchera pas.
+// The three fields answer three distinct questions, and mixing them up would
+// be the mistake not to make: Changeset says what would be written, Drift
+// says what someone did by hand, Unmanaged says what exists without being
+// declared and will not be touched.
 type Result struct {
 	Changeset resources.Changeset
 	Drift     []string
 	Unmanaged []string
 
-	// Target est l'état EXACT qu'aura la ressource après écriture, sur la seule
-	// surface gérée. C'est la source unique : Render en dérive ses lignes,
-	// mapper en dérive son payload, state en dérive ce qu'il inscrit. Aucun
-	// chemin de la configuration vers l'API ne la contourne, et c'est ce qui
-	// rend impossible — plutôt que corrigée — une écriture non annoncée.
+	// Target is the EXACT state the resource will have after the write, on the
+	// managed surface only. It is the single source: Render derives its lines
+	// from it, mapper its payload, state what it records. No path from the
+	// configuration to the API goes around it, and that is what makes an
+	// unannounced write impossible — rather than corrected.
 	//
-	// Target dit CE QU'ON ÉCRIT, et n'a de sens que pour la création et la mise
-	// à jour : les deux chemins où il existe un état après écriture. Pour une
-	// mise à jour, c'est `actual` auquel on applique les SEULS changements
-	// déclarés — ce qui préserve les propriétés hors config, et ce qui fait
-	// porter à la cible les ids d'options distants.
+	// Target says WHAT GETS WRITTEN, and only makes sense for a creation and an
+	// update: the two paths where a state exists after the write. For an
+	// update, it is `actual` with ONLY the declared changes applied — which
+	// preserves unmanaged properties, and which makes the target carry the
+	// remote option ids.
 	//
-	// Target ne dit PAS si l'on a le droit d'écrire : c'est Withheld == "" qui
-	// l'autorise. Une destruction n'a pas d'état après, donc jamais de cible ;
-	// elle est autorisée par un Withheld vide comme le reste, et apply prend
-	// dans le state l'identité à mettre à la corbeille. Une cible nulle ne
-	// permet donc de rien conclure sur l'autorisation.
+	// Target does NOT say whether writing is allowed: Withheld == "" allows
+	// it. A destruction has no state afterwards, hence never a target; it is
+	// allowed by an empty Withheld like the rest, and apply takes the identity
+	// to move to the trash from the state. A nil target therefore allows no
+	// conclusion about the permission.
 	Target *state.Database
 
-	// Withheld dit POURQUOI cette ressource ne sera pas écrite, ou "" si elle
-	// peut l'être. Withheld == "" EST l'autorisation d'écrire, pour les trois
-	// natures de changement : création, mise à jour, destruction. `Target` dit
-	// ce qu'on écrit, `Withheld` dit si on a le droit.
+	// Withheld says WHY this resource will not be written, or "" if it can be.
+	// Withheld == "" IS the permission to write, for all three kinds of change:
+	// creation, update, destruction. `Target` says what gets written,
+	// `Withheld` says whether it is allowed.
 	//
-	// Une raison plutôt qu'un booléen : une ressource sautée sans motif renvoie
-	// l'utilisateur deviner, et notion-seed ne laisse jamais deviner.
+	// A reason rather than a boolean: a resource skipped with no reason leaves
+	// the user guessing, and notion-seed never leaves anyone guessing.
 	Withheld string
 }
 
-// CompareDatabase compare les trois voies d'une database.
+// CompareDatabase compares the three ways of a database.
 //
-// Un pointeur nul signifie « absente de cette voie » :
-//   - desired nil, applied non nil  → ressource orpheline, destruction planifiée
-//   - applied nil                   → jamais appliquée, donc création
-//   - actual nil avec applied non nil → l'appelant n'a pas pu la lire ; ce cas
-//     est traité par Compute, pas ici, parce que la raison (404, archivée) vient
-//     du transport.
+// A nil pointer means "absent from this way":
+//   - desired nil, applied non-nil  → orphan resource, destruction planned
+//   - applied nil                   → never applied, hence a creation
+//   - actual nil with applied non-nil → the caller could not read it; this case
+//     is handled by Compute, not here, because the reason (404, archived) comes
+//     from the transport.
 //
-// La fonction est PURE : ni réseau, ni fichier, ni horloge. C'est ce qui permet
-// de la couvrir en table sur des triplets, et c'est là que vit toute la sûreté
-// du produit.
+// The function is PURE: no network, no file, no clock. That is what allows
+// covering it with a table of triples, and that is where all of the product's
+// safety lives.
 func CompareDatabase(key string, desired, applied, actual *state.Database) Result {
 	res := Result{Changeset: resources.Changeset{Resource: "database." + key}}
 
@@ -72,37 +72,37 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 		return res
 
 	case desired == nil && actual == nil:
-		// Plus dans la config, et le réel ne la porte pas — ou n'a pas été lu.
-		// Les deux situations se distinguent par la raison du refresh, que seul
-		// Compute connaît : c'est donc lui qui tranche entre « entrée de state
-		// obsolète » et « non comparé ». Conclure ici à une destruction
-		// proposerait de détruire ce qui n'existe déjà plus.
+		// No longer in the config, and the actual state does not hold it — or
+		// was not read. The two situations are told apart by the reason of the
+		// refresh, which only Compute knows: so it decides between "stale state
+		// entry" and "not compared". Concluding a destruction here would offer
+		// to destroy what already no longer exists.
 		return res
 
 	case desired == nil:
-		// Dans le state, TOUJOURS dans Notion, plus dans la config : l'identité
-		// n'a plus d'ancre déclarée. Plus strict que la règle des propriétés hors
-		// config, et c'est voulu — garder un id « géré mais non déclaré » le
-		// rendrait invisible.
+		// In the state, STILL in Notion, no longer in the config: the identity
+		// no longer has a declared anchor. Stricter than the rule for unmanaged
+		// properties, and on purpose — keeping a "managed but not declared" id
+		// would make it invisible.
 		res.Changeset.Kind = resources.KindDestroy
 		//
-		// La classe reste destructive quel que soit le compte : il dit ce qui
-		// part à la corbeille avec la database, pas si elle y part.
+		// The class stays destructive whatever the count: it says what goes to
+		// the trash with the database, not whether it goes.
 		d := resources.NewDetail("-", "database."+key, change.ClassDestructive)
-		d.Note = "présente dans le state, absente de la configuration"
+		d.Note = "present in the state, absent from the configuration"
 		d.Measure = &resources.Measurement{AllRows: true}
 		res.Changeset.Details = []resources.Detail{d}
 		return res
 
 	case actual == nil && applied != nil:
-		// Le state l'ancre, mais le réel n'a pas été lu — c'est le cas de
-		// --skip-preflight, qui ne fait aucun appel. On ne sait rien, donc on ne
-		// dit rien : annoncer une création ici proposerait de recréer une
-		// database déjà importée.
+		// The state anchors it, but the actual state was not read — that is the
+		// case of --skip-preflight, which makes no call. We know nothing, so we
+		// say nothing: announcing a creation here would offer to re-create an
+		// already imported database.
 		return res
 
 	case actual == nil:
-		// Jamais appliquée : création complète, aucun appel API n'a eu lieu.
+		// Never applied: full creation, no API call took place.
 		res.Changeset.Kind = resources.KindCreate
 		target := *desired
 		res.Target = &target
@@ -110,7 +110,7 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 		return res
 	}
 
-	// Les trois voies existent : diff fin.
+	// All three ways exist: fine-grained diff.
 	res.Drift = driftLines(applied, actual)
 	res.Changeset.Details = planLines(desired, applied, actual)
 	res.Unmanaged = unmanagedLines(desired, actual)
@@ -125,38 +125,37 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 	return res
 }
 
-// withheldReason dit pourquoi une ressource ne peut pas être écrite, ou "" si
-// elle peut l'être.
+// withheldReason says why a resource cannot be written, or "" if it can be.
 //
-// Une seule cause aujourd'hui, mesurée deux fois : une ligne `migration
-// requise` est inexprimable dans l'API. Un renommage d'option rend 200 sans
-// rien changer ; une couleur d'option rend 400 et fait échouer tout le PATCH.
-// Dans le premier cas, écrire inscrirait dans le state un nom que Notion ne
-// porte pas, et chaque run suivant afficherait une dérive fantôme.
+// A single cause today, measured twice: a `migration required` line is not
+// expressible in the API. An option rename returns 200 without changing
+// anything; an option color returns 400 and fails the whole PATCH. In the
+// first case, writing would record in the state a name Notion does not hold,
+// and every following run would show phantom drift.
 //
-// Ce n'est PAS un refus de sûreté : notion-seed ne refuse rien sur la foi d'une
-// classe, il mesure et il dit. C'est une limite de l'API, nommée comme telle,
-// avec sa procédure.
+// It is NOT a safety refusal: notion-seed refuses nothing on the strength of a
+// class, it measures and it says. It is a limit of the API, named as such,
+// with its procedure.
 func withheldReason(ds []resources.Detail) string {
 	for _, d := range ds {
 		if d.Class == change.ClassMigration {
-			return "une option doit être migrée à la main : l'API ne sait ni renommer " +
-				"une option ni changer sa couleur\n" +
-				"  → créez la nouvelle option dans Notion, déplacez-y les lignes " +
-				"comptées ci-dessus, retirez l'ancienne, puis relancez"
+			return "an option must be migrated by hand: the API can neither rename " +
+				"an option nor change its color\n" +
+				"  → create the new option in Notion, move the rows " +
+				"counted above to it, remove the old one, then rerun"
 		}
 	}
 	return ""
 }
 
-// updateTarget résout l'état exact qu'aura la database après écriture : c'est
-// `actual` auquel on applique les SEULS changements déclarés.
+// updateTarget resolves the exact state the database will have after the
+// write: it is `actual` with ONLY the declared changes applied.
 //
-// Partir de `desired` — ce que faisait la version qui n'écrivait pas — ferait
-// disparaître tout ce que le YAML ne déclare pas. Partir d'`actual` est ce qui
-// donne son sens à « propriété non déclarée = non touchée », et c'est aussi ce
-// qui fait porter à la cible les ids d'options distants, sans lesquels le
-// premier PATCH détruirait chaque option qu'il croit modifier.
+// Starting from `desired` — what the version that did not write did — would
+// make everything the YAML does not declare disappear. Starting from `actual`
+// is what gives its meaning to "undeclared property = untouched", and it is
+// also what makes the target carry the remote option ids, without which the
+// first PATCH would destroy every option it thinks it updates.
 func updateTarget(desired, applied, actual *state.Database) state.Database {
 	target := state.Database{
 		ID:           actual.ID,
@@ -166,8 +165,8 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 		Icon:         actual.Icon,
 		Properties:   make(map[string]state.Property, len(desired.Properties)),
 	}
-	// Même garde de non-vacuité que dans planLines : ce que le YAML ne déclare
-	// pas n'est pas écrit, donc n'entre pas dans la cible.
+	// Same non-emptiness guard as in planLines: what the YAML does not declare
+	// is not written, so it does not enter the target.
 	if desired.Name != "" {
 		target.Name = desired.Name
 	}
@@ -181,16 +180,16 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 	for name, want := range desired.Properties {
 		have, exists := actual.Properties[name]
 		if !exists {
-			// Propriété neuve : la valeur du YAML, options toutes neuves.
+			// New property: the YAML value, all options new.
 			target.Properties[name] = newProperty(want)
 			continue
 		}
 		if want.Type != have.Type {
-			// Mesuré le 2026-09-24 : un changement de type recrée les options et
-			// ignore les ids transmis. planLines annonce ces mêmes options, toutes
-			// en `+`, depuis le même newProperty : les deux restent alignés. Les
-			// options actuelles que le YAML ne redéclare pas sous le même nom ne
-			// partent pas : planLines les annonce en `-`, avec leur compte.
+			// Measured on 2026-09-24: a type change re-creates the options and
+			// ignores the ids sent. planLines announces these same options, all
+			// as `+`, from the same newProperty: the two stay aligned. The
+			// current options the YAML does not redeclare under the same name
+			// are not sent: planLines announces them as `-`, with their count.
 			p := newProperty(want)
 			p.ID = have.ID
 			target.Properties[name] = p
@@ -207,11 +206,11 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 			if i := pr.At[wi]; i != -1 {
 				remote := have.Options[i]
 				o.ID = remote.ID
-				// Le nom et la couleur d'une option existante ne sont pas
-				// écrivables : un nom divergent rend 200 sans effet, une couleur
-				// divergente rend 400. Les deux cas retiennent la ressource
-				// entière, donc la cible ne sert pas — mais elle doit rester VRAIE
-				// plutôt que de promettre une écriture impossible.
+				// The name and color of an existing option are not writable: a
+				// diverging name returns 200 with no effect, a diverging color
+				// returns 400. Both cases withhold the whole resource, so the
+				// target is not used — but it must stay TRUE rather than promise
+				// an impossible write.
 				o.Name = remote.Name
 				o.Color = remote.Color
 				if o.Group == "" {
@@ -225,9 +224,9 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 	return target
 }
 
-// newProperty rend la valeur cible d'une propriété dont aucune option ne peut
-// hériter d'une identité distante : une propriété neuve, ou une propriété dont
-// le type change. Aucune option ne porte d'id.
+// newProperty returns the target value of a property none of whose options can
+// inherit a remote identity: a new property, or a property whose type changes.
+// No option carries an id.
 func newProperty(want state.Property) state.Property {
 	out := state.Property{Type: want.Type, Format: want.Format}
 	for _, o := range want.Options {
@@ -238,21 +237,20 @@ func newProperty(want state.Property) state.Property {
 	return out
 }
 
-// createLines détaille une création depuis la cible résolue : propriétés ET
-// options, avec leur couleur et leur groupe.
+// createLines details a creation from the resolved target: properties AND
+// options, with their color and group.
 //
-// Les options y figurent parce que la création les ÉCRIT. Les omettre — ce que
-// faisait la version précédente — laissait apply poser des couleurs et des
-// groupes que le plan n'avait jamais montrés. C'est le même défaut, à la
-// création, que celui du groupe substitué par le mapper.
+// The options are listed because the creation WRITES them. Omitting them —
+// what the previous version did — let apply set colors and groups the plan had
+// never shown. It is the same flaw, at creation, as the group substituted by
+// the mapper.
 func createLines(target *state.Database) []resources.Detail {
 	var out []resources.Detail
 
-	// Le nom, la description et l'icône partent AUSSI dans le payload de
-	// création. Les omettre ici serait exactement le défaut que les options
-	// avaient : écrit, jamais affiché. La même garde de non-vacuité qu'ailleurs
-	// s'applique — ce que le YAML ne déclare pas n'est pas écrit, donc n'est pas
-	// annoncé.
+	// The name, description and icon ALSO go in the creation payload.
+	// Omitting them here would be exactly the flaw the options had: written,
+	// never shown. The same non-emptiness guard as elsewhere applies — what the
+	// YAML does not declare is not written, so it is not announced.
 	for _, f := range []struct{ field, value string }{
 		{"name", target.Name},
 		{"description", target.Description},
@@ -278,19 +276,18 @@ func createLines(target *state.Database) []resources.Detail {
 	return out
 }
 
-// newOptionLines annonce les options d'une propriété écrite sans aucune
-// identité distante : à la création, sous une propriété neuve, sous un
-// changement de type, ou quand une option déclarée n'a pas d'appariement.
-// Toutes partent, avec leur couleur et leur groupe : les taire serait écrire ce
-// que le plan n'a jamais montré.
+// newOptionLines announces the options of a property written with no remote
+// identity at all: at creation, under a new property, under a type change, or
+// when a declared option has no pairing. All are sent, with their color and
+// group: hiding them would be writing what the plan never showed.
 //
-// L'ordre des options est celui du YAML : il est visible dans Notion, le trier
-// le rendrait faux.
+// The order of the options is the YAML's: it is visible in Notion, sorting it
+// would make it wrong.
 func newOptionLines(propName string, opts []state.Option) []resources.Detail {
 	var out []resources.Detail
 	for _, o := range opts {
 		d := resources.NewDetail("+",
-			fmt.Sprintf("option %q (propriété %q)", o.Name, propName), change.ClassSafe)
+			fmt.Sprintf("option %q (property %q)", o.Name, propName), change.ClassSafe)
 		d.Property = propName
 		d.Note = optionAttrNote(o)
 		out = append(out, d)
@@ -298,9 +295,9 @@ func newOptionLines(propName string, opts []state.Option) []resources.Detail {
 	return out
 }
 
-// optionAttrNote rend les attributs déclarés d'une option, dans un ordre fixe.
-// Vide si le YAML n'en déclare aucun : une note vide vaut mieux qu'une note qui
-// annonce une valeur que notion-seed n'écrira pas.
+// optionAttrNote returns the declared attributes of an option, in a fixed
+// order. Empty if the YAML declares none: an empty note is better than a note
+// announcing a value notion-seed will not write.
 func optionAttrNote(o state.Option) string {
 	var parts []string
 	if o.Color != "" {
@@ -312,7 +309,7 @@ func optionAttrNote(o state.Option) string {
 	return strings.Join(parts, ", ")
 }
 
-// planLines produit ce qu'on écrirait pour ramener `actual` vers `desired`.
+// planLines produces what would be written to bring `actual` to `desired`.
 func planLines(desired, applied, actual *state.Database) []resources.Detail {
 	var out []resources.Detail
 
@@ -341,42 +338,42 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 
 		if !exists {
 			note := ""
-			// Un nom disparu du YAML en même temps qu'un autre apparaît du même
-			// type : très probablement un renommage. On ne DÉCIDE rien là-dessus
-			// (une propriété hors config n'est jamais touchée), on prévient, parce
-			// que l'utilisateur croit avoir renommé et va trouver une colonne vide.
+			// A name gone from the YAML while another of the same type appears:
+			// most likely a rename. Nothing is DECIDED on that basis (an
+			// unmanaged property is never touched), the user is warned, because
+			// they think they renamed and will find an empty column.
 			if old := renamedFrom(name, want, desired, applied, actual); old != "" {
 				note = fmt.Sprintf(
-					"%q n'est pas renommée, elle reste hors config avec ses données", old)
+					"%q is not renamed, it stays unmanaged with its data", old)
 			}
 			d := resources.NewDetail("+",
 				fmt.Sprintf("property %q (%s)", name, want.Type), change.ClassSafe)
 			d.Property = name
 			d.Note = note
 			out = append(out, d)
-			// Mêmes options que celles que la cible écrit : newProperty est la
-			// seule source des deux.
+			// Same options as the ones the target writes: newProperty is the
+			// single source of both.
 			out = append(out, newOptionLines(name, newProperty(want).Options)...)
 			continue
 		}
 
 		if want.Type != have.Type {
-			// La table mesurée suffit à classer ; le compte des valeurs non vides
-			// précisera l'ampleur.
+			// The measured table is enough to classify; the count of non-empty
+			// values will specify the extent.
 			class := change.ClassifyTypeChange(have.Type, want.Type)
 			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), class)
 			d.Property = name
 			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
-			// Un couple que la table dit SÛR (select→multi_select,
-			// number→rich_text, status→select, date→rich_text) ne demande aucune
-			// mesure : le compte ne changerait ni sa classe ni la décision, et
-			// notion-seed paierait un appel contre l'API pour un nombre qui ne dit
-			// rien. Ne pas payer d'appels pour rien est une propriété du produit,
-			// pas une optimisation.
+			// A pair the table says is SAFE (select→multi_select,
+			// number→rich_text, status→select, date→rich_text) requires no
+			// measurement: the count would change neither its class nor the
+			// decision, and notion-seed would pay an API call for a number that
+			// says nothing. Not paying for calls for nothing is a property of the
+			// product, not an optimization.
 			//
-			// Sûr pour les valeurs dont le nom revient, pas pour les autres :
-			// celles-là sont annoncées et mesurées une à une par
-			// retypedRemovalLines, ligne de retrait par option.
+			// Safe for the values whose name comes back, not for the others:
+			// those are announced and measured one by one by
+			// retypedRemovalLines, one removal line per option.
 			if class != change.ClassSafe {
 				d.Measure = &resources.Measurement{
 					Property:     name,
@@ -384,8 +381,8 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				}
 			}
 			out = append(out, d)
-			// Un changement de type recrée les options : toutes celles du YAML
-			// partent neuves, sans id, exactement comme sous une propriété neuve.
+			// A type change re-creates the options: all the YAML's go out new,
+			// with no id, exactly as under a new property.
 			out = append(out, newOptionLines(name, newProperty(want).Options)...)
 			out = append(out, retypedRemovalLines(name, want, have)...)
 			continue
@@ -401,30 +398,28 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 	return out
 }
 
-// pairing est le résultat de l'appariement des options déclarées aux options
-// distantes. Un seul exemplaire de cette règle existe : optionLines en dérive
-// les lignes du plan, updateTarget en dérive la cible écrite. Deux règles
-// d'identité divergentes feraient écrire une option que le plan aurait montrée
-// ailleurs.
+// pairing is the result of pairing the declared options with the remote
+// options. Only one copy of this rule exists: optionLines derives the plan
+// lines from it, updateTarget the written target. Two diverging identity rules
+// would write an option the plan would have shown elsewhere.
 type pairing struct {
-	// At donne, pour chaque option déclarée, la position de l'option distante
-	// appariée, ou -1.
+	// At gives, for each declared option, the position of the paired remote
+	// option, or -1.
 	At []int
-	// ViaKey dit que l'appariement est passé par la key de config. Il sépare les
-	// deux passes de optionLines, dont l'ordre de sortie est visible.
+	// ViaKey says the pairing went through the config key. It separates the
+	// two passes of optionLines, whose output order is visible.
 	ViaKey []bool
-	// Claimed dit quelles positions distantes ont été prises. Les autres seront
-	// détruites par l'écriture : l'API remplace la liste entière.
+	// Claimed says which remote positions were taken. The others will be
+	// destroyed by the write: the API replaces the whole list.
 	Claimed []bool
 }
 
-// pairOptions suit la chaîne d'identité : applied ↔ actual par id, desired ↔
-// applied par key, à défaut par nom.
+// pairOptions follows the identity chain: applied ↔ actual by id, desired ↔
+// applied by key, failing that by name.
 //
-// La réclamation se fait par POSITION dans have.Options, pas par nom : un
-// renommage libère son ancien nom, et une réclamation par nom croirait ce nom
-// encore occupé. L'index est aussi robuste à un id vide, qu'un state écrit à la
-// main peut porter.
+// Claiming is done by POSITION in have.Options, not by name: a rename frees
+// its old name, and claiming by name would think that name still taken. The
+// index is also robust to an empty id, which a hand-written state can carry.
 func pairOptions(want, have, applied state.Property) pairing {
 	p := pairing{
 		At:      make([]int, len(want.Options)),
@@ -456,7 +451,7 @@ func pairOptions(want, have, applied state.Property) pairing {
 		}
 	}
 
-	// Passe 1 : les options à key, qui ont une identité stable.
+	// Pass 1: the options with a key, which have a stable identity.
 	for wi, w := range want.Options {
 		if w.Key == "" {
 			continue
@@ -468,8 +463,8 @@ func pairOptions(want, have, applied state.Property) pairing {
 		p.At[wi], p.ViaKey[wi], p.Claimed[i] = i, true, true
 	}
 
-	// Passe 2 : les autres, appariées par nom — mais seulement sur une position
-	// que la passe 1 n'a pas déjà prise.
+	// Pass 2: the others, paired by name — but only on a position pass 1 has not
+	// already taken.
 	for wi, w := range want.Options {
 		if p.At[wi] != -1 {
 			continue
@@ -481,13 +476,12 @@ func pairOptions(want, have, applied state.Property) pairing {
 	return p
 }
 
-// optionLines compare les options d'une propriété.
+// optionLines compares the options of a property.
 //
-// L'appariement suit la chaîne d'identité : applied ↔ actual par id Notion,
-// desired ↔ applied par key si déclarée, sinon par nom. C'est elle qui rend un
-// renommage visible plutôt que de le faire passer pour un retrait suivi d'un
-// ajout — et un retrait d'option de status, lui, réassigne silencieusement les
-// lignes.
+// The pairing follows the identity chain: applied ↔ actual by Notion id,
+// desired ↔ applied by key if declared, otherwise by name. It is what makes a
+// rename visible rather than passing it off as a removal followed by an
+// addition — and removing a status option silently reassigns the rows.
 func optionLines(propName string, want, have, applied state.Property) []resources.Detail {
 	if len(want.Options) == 0 && len(have.Options) == 0 {
 		return nil
@@ -496,7 +490,7 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 
 	var out []resources.Detail
 
-	// Passe 1 : les options dont la key a résolu.
+	// Pass 1: the options whose key resolved.
 	for wi, w := range want.Options {
 		if !p.ViaKey[wi] {
 			continue
@@ -504,27 +498,27 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		current := have.Options[p.At[wi]]
 		if current.Name != w.Name {
 			d := resources.NewDetail("~",
-				fmt.Sprintf("option %q → %q (propriété %q)", current.Name, w.Name, propName),
+				fmt.Sprintf("option %q → %q (property %q)", current.Name, w.Name, propName),
 				change.ClassMigration)
 			d.Property = propName
-			d.Note = "l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer"
-			// Le remède passe par le retrait de l'ancienne option : son coût est
-			// le nombre de lignes qui la portent, et c'est le nom ACTUEL qui sait
-			// les filtrer.
+			d.Note = "the API returns 200 without changing anything: create, migrate the rows, then remove"
+			// The fix goes through removing the old option: its cost is the
+			// number of rows holding it, and it is the CURRENT name that can
+			// filter them.
 			d.Measure = &resources.Measurement{
 				Property: propName, PropertyType: have.Type, Option: current.Name,
 			}
 			out = append(out, d)
 			continue
 		}
-		// Le nom coïncide : pas de migration en cours sur cette ligne, donc la
-		// place est libre pour comparer color et group. Sur une migration, la
-		// ligne porte déjà son propre changement ; superposer un second écart y
-		// sèmerait la confusion sans rien ajouter.
+		// The name matches: no migration pending on this line, so there is room
+		// to compare color and group. On a migration, the line already carries
+		// its own change; stacking a second mismatch on it would sow confusion
+		// without adding anything.
 		out = append(out, optionAttrLines(propName, have.Type, w, current)...)
 	}
 
-	// Passe 2 : les options sans key, ou dont la key n'a pas résolu.
+	// Pass 2: the options without a key, or whose key did not resolve.
 	for wi, w := range want.Options {
 		if p.ViaKey[wi] {
 			continue
@@ -533,13 +527,14 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 			out = append(out, optionAttrLines(propName, have.Type, w, have.Options[i])...)
 			continue
 		}
-		// Une option sans appariement part neuve, avec sa couleur et son groupe :
-		// la même ligne qu'à la création, depuis la même fonction.
+		// An option with no pairing goes out new, with its color and group: the
+		// same line as at creation, from the same function.
 		out = append(out, newOptionLines(propName, []state.Option{w})...)
 	}
 
-	// Passe 3 : ce que le YAML ne réclame pas SERA détruit dès qu'on écrit cette
-	// propriété — l'API remplace la liste entière au lieu de la fusionner.
+	// Pass 3: what the YAML does not claim WILL be destroyed as soon as this
+	// property is written — the API replaces the whole list instead of merging
+	// it.
 	for i, o := range have.Options {
 		if p.Claimed[i] {
 			continue
@@ -549,17 +544,17 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 	return out
 }
 
-// retypedRemovalLines annonce les options qu'un changement de type fait
-// disparaître. Mesuré le 2026-09-25 sur select → multi_select : l'API recrée
-// les options, et une ligne ne garde sa valeur que si une option de MÊME NOM
-// part dans le payload. Les autres disparaissent du schéma, et leurs lignes
-// passent à vide. L'appariement se fait donc par nom seul : ni key ni id ne
-// survivent à la recréation.
+// retypedRemovalLines announces the options a type change makes disappear.
+// Measured on 2026-09-25 on select → multi_select: the API re-creates the
+// options, and a row keeps its value only if an option with the SAME NAME goes
+// in the payload. The others disappear from the schema, and their rows are
+// emptied. The pairing is therefore by name alone: neither key nor id
+// survives the re-creation.
 //
-// La même règle vaut pour tout couple entre types à options (status ↔ select,
-// status ↔ multi_select, multi_select → select), sans y avoir été mesurée. Vers
-// un type sans options, il n'y a aucun nom à retrouver : le compte des non vides
-// de la ligne de propriété dit seul ce qui est en jeu.
+// The same rule holds for every pair between option types (status ↔ select,
+// status ↔ multi_select, multi_select → select), without having been measured
+// there. Towards a type without options, there is no name to find: the count
+// of non-empty values on the property line alone says what is at stake.
 func retypedRemovalLines(propName string, want, have state.Property) []resources.Detail {
 	if !hasOptions(want.Type) {
 		return nil
@@ -578,23 +573,23 @@ func retypedRemovalLines(propName string, want, have state.Property) []resources
 	return out
 }
 
-// removalLine annonce une option que l'écriture détruira. propType est le type
-// ACTUEL de la propriété : c'est lui qui filtre les lignes à compter.
+// removalLine announces an option the write will destroy. propType is the
+// property's CURRENT type: it is what filters the rows to count.
 func removalLine(propName, propType, option string, retyped bool) resources.Detail {
-	// Classe et compte viennent de la mesure. Avant elle, on ne sait pas : -1
-	// dit « non mesuré », et la classification le traduit en impact inconnu
-	// plutôt qu'en « sûr ».
+	// Class and count come from the measurement. Before it, we don't know: -1
+	// says "not measured", and the classification turns it into an unknown
+	// impact rather than "safe".
 	class := change.ClassifyOptionRemoval(propType, -1)
-	note := "absente du YAML : l'API remplace la liste entière des options"
+	note := "absent from the YAML: the API replaces the whole list of options"
 	if retyped {
 		class = change.ClassifyRetypedOptionRemoval(-1)
-		// Une key conservée sous un autre nom ne sauve rien ici : « absente du
-		// YAML » serait faux, c'est le nom qui manque.
-		note = "non redéclarée sous ce nom : le changement de type recrée les options"
+		// A key kept under another name saves nothing here: "absent from the
+		// YAML" would be wrong, it is the name that is missing.
+		note = "not redeclared under this name: the type change re-creates the options"
 	}
 	return resources.Detail{
 		Op:       "-",
-		Target:   fmt.Sprintf("option %q (propriété %q)", option, propName),
+		Target:   fmt.Sprintf("option %q (property %q)", option, propName),
 		Property: propName,
 		Note:     note,
 		Class:    class,
@@ -605,34 +600,34 @@ func removalLine(propName, propType, option string, retyped bool) resources.Deta
 	}
 }
 
-// hasOptions dit si un type de propriété porte une liste d'options.
+// hasOptions says whether a property type holds a list of options.
 func hasOptions(t string) bool {
 	return t == "select" || t == "status" || t == "multi_select"
 }
 
-// optionAttrLines compare color et group d'une option appariée dont le nom
-// coïncide déjà. Les deux attributs ne se comportent PAS pareil, et c'est
-// mesuré :
+// optionAttrLines compares color and group of a paired option whose name
+// already matches. The two attributes do NOT behave the same, and it is
+// measured:
 //
-//   - color est IMMUABLE. L'API répond 400 — « Cannot update color of select
-//     with id » — par id comme par nom, et l'échec porte sur tout le PATCH de la
-//     propriété. Le changement est donc inexprimable : il faut créer une option,
-//     migrer les lignes, retirer l'ancienne. D'où ClassMigration, et une mesure,
-//     puisque ce remède coûte autant de lignes que l'option en porte.
-//   - group est MUTABLE par id, et survit même quand on l'omet. Classe sûre,
-//     comme le format de number.
+//   - color is IMMUTABLE. The API returns 400 — "Cannot update color of select
+//     with id" — by id as by name, and the failure covers the property's whole
+//     PATCH. The change is therefore not expressible: an option must be
+//     created, the rows migrated, the old one removed. Hence ClassMigration,
+//     and a measurement, since this fix costs as many rows as the option holds.
+//   - group is MUTABLE by id, and survives even when omitted. Safe class, like
+//     the number format.
 //
-// Ne compare que ce que le YAML déclare : une couleur ou un group absent du
-// YAML ne doit jamais produire de changement fantôme.
+// Compares only what the YAML declares: a color or group absent from the YAML
+// must never produce a phantom change.
 func optionAttrLines(propName, propType string, want, have state.Option) []resources.Detail {
 	var out []resources.Detail
-	target := fmt.Sprintf("option %q (propriété %q)", want.Name, propName)
+	target := fmt.Sprintf("option %q (property %q)", want.Name, propName)
 	if want.Color != "" && want.Color != have.Color {
 		d := resources.NewDetail("~", target, change.ClassMigration)
 		d.Property = propName
 		d.Note = fmt.Sprintf(
-			"color %s → %s : la couleur d'une option est immuable, l'API répond 400. "+
-				"Créer une option, migrer les lignes, puis retirer l'ancienne",
+			"color %s → %s: an option's color is immutable, the API returns 400. "+
+				"Create an option, migrate the rows, then remove the old one",
 			have.Color, want.Color)
 		d.Measure = &resources.Measurement{
 			Property:     propName,
@@ -650,47 +645,47 @@ func optionAttrLines(propName, propType string, want, have state.Option) []resou
 	return out
 }
 
-// driftLines dit ce qui a bougé dans Notion depuis la dernière application.
-// C'est un constat, jamais une action : la réconciliation vers le YAML est
-// calculée séparément par planLines.
+// driftLines says what moved in Notion since the last apply. It is an
+// observation, never an action: the reconciliation towards the YAML is
+// computed separately by planLines.
 func driftLines(applied, actual *state.Database) []string {
 	var out []string
 	if applied.Name != "" && applied.Name != actual.Name {
-		out = append(out, fmt.Sprintf("~ nom %q → %q", applied.Name, actual.Name))
+		out = append(out, fmt.Sprintf("~ name %q → %q", applied.Name, actual.Name))
 	}
-	// Même garde de non-vacuité que pour le nom : un state qui n'a jamais
-	// capturé la description ne doit pas faire passer sa valeur réelle pour une
-	// dérive à chaque run.
+	// Same non-emptiness guard as for the name: a state that never captured
+	// the description must not pass its actual value off as drift on every
+	// run.
 	if applied.Description != "" && applied.Description != actual.Description {
 		out = append(out, fmt.Sprintf(
-			"~ description %q → %q hors de notion-seed", applied.Description, actual.Description))
+			"~ description %q → %q outside notion-seed", applied.Description, actual.Description))
 	}
-	// Même garde de non-vacuité : un state qui n'a jamais capturé l'icône ne
-	// doit pas faire passer sa valeur réelle pour une dérive à chaque run.
+	// Same non-emptiness guard: a state that never captured the icon must not
+	// pass its actual value off as drift on every run.
 	if applied.Icon != "" && applied.Icon != actual.Icon {
 		out = append(out, fmt.Sprintf(
-			"~ icône %q → %q hors de notion-seed", applied.Icon, actual.Icon))
+			"~ icon %q → %q outside notion-seed", applied.Icon, actual.Icon))
 	}
 
 	for _, name := range sortedPropNames(applied.Properties) {
 		was := applied.Properties[name]
 		is, exists := actual.Properties[name]
 		if !exists {
-			out = append(out, fmt.Sprintf("- propriété %q supprimée hors de notion-seed", name))
+			out = append(out, fmt.Sprintf("- property %q deleted outside notion-seed", name))
 			continue
 		}
 		if was.Type != is.Type {
 			out = append(out, fmt.Sprintf(
-				"~ propriété %q : type %s → %s hors de notion-seed", name, was.Type, is.Type))
+				"~ property %q: type %s → %s outside notion-seed", name, was.Type, is.Type))
 		}
 		if was.Type == "number" && was.Format != "" && was.Format != is.Format {
 			out = append(out, fmt.Sprintf(
-				"~ propriété %q : format %s → %s hors de notion-seed", name, was.Format, is.Format))
+				"~ property %q: format %s → %s outside notion-seed", name, was.Format, is.Format))
 		}
 
-		// Une option sans id ne peut pas être suivie par id : ni retrait, ni
-		// renommage, ni changement d'attribut ne peuvent être affirmés pour elle,
-		// donc on ne rend aucune ligne de dérive la concernant.
+		// An option without an id cannot be tracked by id: neither removal, nor
+		// rename, nor attribute change can be asserted for it, so no drift line
+		// is returned about it.
 		byID := map[string]state.Option{}
 		for _, o := range is.Options {
 			if o.ID == "" {
@@ -707,55 +702,54 @@ func driftLines(applied, actual *state.Database) []string {
 			current, ok := byID[o.ID]
 			if !ok {
 				out = append(out, fmt.Sprintf(
-					"- option %q de la propriété %q retirée hors de notion-seed", o.Name, name))
+					"- option %q of property %q removed outside notion-seed", o.Name, name))
 				continue
 			}
 			if current.Name != o.Name {
 				out = append(out, fmt.Sprintf(
-					"~ option %q de la propriété %q renommée en %q hors de notion-seed",
+					"~ option %q of property %q renamed to %q outside notion-seed",
 					o.Name, name, current.Name))
 			}
-			// Même garde de non-vacuité qu'ailleurs : une couleur ou un group que le
-			// state n'a jamais capturé ne doit pas faire passer sa valeur réelle
-			// pour une dérive.
+			// Same non-emptiness guard as elsewhere: a color or group the state
+			// never captured must not pass its actual value off as drift.
 			if o.Color != "" && current.Color != o.Color {
 				out = append(out, fmt.Sprintf(
-					"~ option %q de la propriété %q : couleur %s → %s hors de notion-seed",
+					"~ option %q of property %q: color %s → %s outside notion-seed",
 					o.Name, name, o.Color, current.Color))
 			}
 			if o.Group != "" && current.Group != o.Group {
 				out = append(out, fmt.Sprintf(
-					"~ option %q de la propriété %q : groupe %s → %s hors de notion-seed",
+					"~ option %q of property %q: group %s → %s outside notion-seed",
 					o.Name, name, o.Group, current.Group))
 			}
 		}
 
-		// Parcours inverse : ce qui a été ajouté à la main n'apparaît dans
-		// aucune option de `applied`.
+		// Reverse walk: what was added by hand appears in no option of
+		// `applied`.
 		for _, o := range is.Options {
 			if o.ID == "" || wasIDs[o.ID] {
 				continue
 			}
 			out = append(out, fmt.Sprintf(
-				"+ option %q de la propriété %q ajoutée hors de notion-seed", o.Name, name))
+				"+ option %q of property %q added outside notion-seed", o.Name, name))
 		}
 	}
 
-	// Parcours inverse au niveau des propriétés : ce qui a été ajouté à la
-	// main n'apparaît pas dans `applied`.
+	// Reverse walk at the property level: what was added by hand does not
+	// appear in `applied`.
 	for _, name := range sortedPropNames(actual.Properties) {
 		if _, declared := applied.Properties[name]; declared {
 			continue
 		}
-		out = append(out, fmt.Sprintf("+ propriété %q ajoutée hors de notion-seed", name))
+		out = append(out, fmt.Sprintf("+ property %q added outside notion-seed", name))
 	}
 
 	return out
 }
 
-// unmanagedLines liste ce qui existe dans Notion sans être déclaré. Non touché :
-// l'API modifie les propriétés une par une, donc ne pas les déclarer suffit à
-// ne pas y toucher. (Ce raisonnement ne vaut PAS pour les options : voir
+// unmanagedLines lists what exists in Notion without being declared. Left
+// untouched: the API updates properties one by one, so not declaring them is
+// enough not to touch them. (This reasoning does NOT hold for options: see
 // optionLines.)
 func unmanagedLines(desired, actual *state.Database) []string {
 	var out []string
@@ -769,11 +763,11 @@ func unmanagedLines(desired, actual *state.Database) []string {
 	return out
 }
 
-// renamedFrom cherche la propriété du state, de même type, que le YAML ne
-// déclare plus mais qui existe toujours dans le réel : le signe d'un
-// renommage. Heuristique d'AFFICHAGE, jamais de décision d'écriture. Si
-// plusieurs candidates existent, elle ne désigne personne : une heuristique
-// qui se trompe de colonne est pire que pas d'heuristique.
+// renamedFrom looks for the state's property, of the same type, that the YAML
+// no longer declares but that still exists in the actual state: the sign of a
+// rename. A DISPLAY heuristic, never a write decision. If several candidates
+// exist, it names none: a heuristic that picks the wrong column is worse than
+// no heuristic.
 func renamedFrom(newName string, want state.Property, desired, applied, actual *state.Database) string {
 	found := ""
 	for _, old := range sortedPropNames(applied.Properties) {
@@ -806,12 +800,12 @@ func sortedPropNames(m map[string]state.Property) []string {
 	return out
 }
 
-// WorstClass rend la classe la plus grave d'un jeu de détails. L'ordre de
-// l'énumération va du plus sûr au plus grave, donc le maximum suffit.
+// WorstClass returns the most severe class of a set of details. The
+// enumeration goes from safest to most severe, so the maximum is enough.
 //
-// Exportée parce que la passe de mesure, qui reclasse les détails APRÈS Compute,
-// doit recalculer la classe d'en-tête d'une ressource depuis un autre paquet.
-// Un seul exemplaire : la dupliquer laisserait deux règles de gravité diverger.
+// Exported because the measurement pass, which reclassifies the details AFTER
+// Compute, must recompute a resource's header class from another package. A
+// single copy: duplicating it would let two severity rules diverge.
 func WorstClass(ds []resources.Detail) change.Class {
 	worst := change.ClassSafe
 	for _, d := range ds {

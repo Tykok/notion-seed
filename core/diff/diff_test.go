@@ -11,16 +11,16 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Un changement retenu par CompareDatabase (migration inexprimable) doit
-// porter son motif jusqu'au Change du plan : c'est lui que cli/apply lit pour
-// dire pourquoi il saute la ressource, sans redescendre dans Details.
+// A change withheld by CompareDatabase (migration not expressible) must carry
+// its reason up to the plan's Change: it is what cli/apply reads to say why it
+// skips the resource, without going down into Details.
 func TestPlanCarriesWithheldOnTheChange(t *testing.T) {
 	cfg := &config.Config{
 		Databases: []config.Database{{
 			Key: "tasks", Name: "Tasks",
 			Properties: map[string]config.Property{
 				"Statut": {Type: "status", Options: []config.Option{
-					// Même key, nom changé : l'API ne sait pas renommer.
+					// Same key, changed name: the API cannot rename.
 					{Key: "done", Name: "Terminé", Group: "Complete"},
 				}},
 			},
@@ -52,52 +52,51 @@ func TestPlanCarriesWithheldOnTheChange(t *testing.T) {
 			continue
 		}
 		if c.Withheld == "" {
-			t.Fatal("Change.Withheld vide : cli/apply ne peut pas dire pourquoi il saute la ressource")
+			t.Fatal("Change.Withheld empty: cli/apply cannot say why it skips the resource")
 		}
 		if c.Target != nil {
-			t.Error("Change.Target non nulle sur une ressource retenue")
+			t.Error("Change.Target non-nil on a withheld resource")
 		}
 		return
 	}
-	t.Fatal("aucun changement pour database.tasks")
+	t.Fatal("no change for database.tasks")
 }
 
-// Une database retirée du YAML et déjà supprimée à la main dans Notion ne doit
-// plus être annoncée « à détruire » : il n'y a plus rien à détruire. Ce qui
-// reste est une entrée de state obsolète, dont le nettoyage n'écrit rien dans
-// Notion.
+// A database removed from the YAML and already deleted by hand in Notion must
+// no longer be announced "to destroy": there is nothing left to destroy. What
+// remains is a stale state entry, whose cleanup writes nothing to Notion.
 func TestComputeReportsStaleStateForOrphanAlreadyDeleted(t *testing.T) {
 	cfg := &config.Config{}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
 	}
-	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "not found (404)"}}
 
 	p, err := Compute(cfg, applied, actual)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.ToDestroy != 0 {
-		t.Errorf("ToDestroy = %d, want 0 : la destruction a déjà eu lieu", p.ToDestroy)
+		t.Errorf("ToDestroy = %d, want 0: the destruction already happened", p.ToDestroy)
 	}
 	if got := p.StaleState; len(got) != 1 || got[0] != "database.tasks" {
 		t.Errorf("StaleState = %v, want [database.tasks]", got)
 	}
 	if p.Blocked {
-		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
+		t.Errorf("Blocked = true, want false: %v", p.BlockedReasons)
 	}
 }
 
-// Une database archivée compte comme détruite : dans Notion, détruire une
-// database, c'est l'archiver.
+// An archived database counts as destroyed: in Notion, destroying a database
+// means archiving it.
 func TestComputeReportsStaleStateForArchivedOrphan(t *testing.T) {
 	cfg := &config.Config{}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
 	}
-	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "archivée ou en corbeille"}}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "archived or in the trash"}}
 
 	p, err := Compute(cfg, applied, actual)
 	if err != nil {
@@ -108,7 +107,7 @@ func TestComputeReportsStaleStateForArchivedOrphan(t *testing.T) {
 	}
 }
 
-// Une orpheline toujours présente dans Notion reste une destruction planifiée.
+// An orphan still present in Notion stays a planned destruction.
 func TestComputeStillPlansDestroyWhenOrphanExists(t *testing.T) {
 	cfg := &config.Config{}
 	applied := &state.Snapshot{
@@ -125,12 +124,12 @@ func TestComputeStillPlansDestroyWhenOrphanExists(t *testing.T) {
 		t.Errorf("ToDestroy = %d, want 1", p.ToDestroy)
 	}
 	if len(p.StaleState) != 0 {
-		t.Errorf("StaleState = %v, want vide", p.StaleState)
+		t.Errorf("StaleState = %v, want empty", p.StaleState)
 	}
 }
 
-// Une database à deux data sources part à la corbeille avec les deux, mais le
-// comptage n'en interroge qu'un : la destruction doit le savoir.
+// A database with two data sources goes to the trash with both, but the count
+// queries only one: the destruction must know it.
 func TestComputeMarksTheUncountedDataSourcesOfADestroy(t *testing.T) {
 	cfg := &config.Config{}
 	applied := &state.Snapshot{
@@ -148,13 +147,14 @@ func TestComputeMarksTheUncountedDataSourcesOfADestroy(t *testing.T) {
 		}
 		m := p.Changes[0].Details[0].Measure
 		if m == nil || !m.AllRows || m.UncountedDataSources != tt.want {
-			t.Errorf("%d data sources : Measure = %+v, want %d non compté(s)", tt.sources, m, tt.want)
+			t.Errorf("%d data sources: Measure = %+v, want %d not counted", tt.sources, m, tt.want)
 		}
 	}
 }
 
-// Sans refresh (--skip-preflight), on ne sait rien de l'orpheline : ni la
-// détruire, ni conclure qu'elle a disparu. Elle tombe sous « Non comparé ».
+// Without a refresh (--skip-preflight), nothing is known about the orphan:
+// neither destroy it, nor conclude it has vanished. It falls under "Not
+// compared".
 func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
 	cfg := &config.Config{}
 	applied := &state.Snapshot{
@@ -167,38 +167,38 @@ func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.ToDestroy != 0 {
-		t.Errorf("ToDestroy = %d, want 0 : rien n'a été lu", p.ToDestroy)
+		t.Errorf("ToDestroy = %d, want 0: nothing was read", p.ToDestroy)
 	}
 	if got := p.NotCompared; len(got) != 1 || got[0] != "database.tasks" {
 		t.Errorf("NotCompared = %v, want [database.tasks]", got)
 	}
 }
 
-// prevent_destroy ne bloque plus le nettoyage d'une orpheline disparue hors de
-// notion-seed : l'entrée de state obsolète est nettoyée dans tous les cas, et
-// c'est le rendu de StaleState qui porte la mention, pas un blocage.
+// prevent_destroy no longer blocks the cleanup of an orphan that vanished
+// outside notion-seed: the stale state entry is cleaned in every case, and the
+// rendering of StaleState carries the notice, not a block.
 func TestComputeMovesProtectedOrphanToStaleState(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
 	}
-	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "not found (404)"}}
 
 	p, err := Compute(cfg, applied, actual)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.Blocked {
-		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
+		t.Errorf("Blocked = true, want false: %v", p.BlockedReasons)
 	}
 	if got := p.StaleState; len(got) != 1 || got[0] != "database.tasks" {
 		t.Errorf("StaleState = %v, want [database.tasks]", got)
 	}
 }
 
-// prevent_destroy ne bloque plus : il est noté sur la ressource, et c'est au
-// rendu de le dire fort.
+// prevent_destroy no longer blocks: it is recorded on the resource, and it is
+// up to the rendering to say it loudly.
 func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
@@ -212,7 +212,7 @@ func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.Blocked {
-		t.Errorf("Blocked = true, want false : plus rien ne bloque sur une classe : %v", p.BlockedReasons)
+		t.Errorf("Blocked = true, want false: nothing blocks on a class any more: %v", p.BlockedReasons)
 	}
 	if p.ToDestroy != 1 {
 		t.Errorf("ToDestroy = %d, want 1", p.ToDestroy)
@@ -222,8 +222,8 @@ func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
 	}
 }
 
-// allow_data_loss devient un accusé de lecture : sa présence est notée, son
-// absence ne bloque plus rien.
+// allow_data_loss becomes an acknowledgement: its presence is recorded, its
+// absence no longer blocks anything.
 func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{AllowDataLoss: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
@@ -244,13 +244,13 @@ func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
 	}
 }
 
-// Une ressource couverte par les DEUX clés doit les accuser dans un ordre
-// stable, et dans cet ordre-là : le rendu les imprime telles quelles, et la
-// sortie de `plan` doit rester identique entre deux exécutions.
+// A resource covered by BOTH keys must acknowledge them in a stable order, and
+// in that order: the rendering prints them as they are, and the output of
+// `plan` must stay identical between two runs.
 //
-// Sans ce test, l'ordre ne tient qu'à la suite des deux `if` dans absorb :
-// les permuter, ou verser les clés depuis une map, changerait la sortie sans
-// qu'aucun test ne le remarque.
+// Without this test, the order only depends on the sequence of the two `if`s
+// in absorb: swapping them, or pouring the keys from a map, would change the
+// output without any test noticing.
 func TestComputeAcknowledgesPreventDestroyBeforeAllowDataLoss(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{
 		PreventDestroy: []string{"database.tasks"},
@@ -276,15 +276,15 @@ func TestComputeAcknowledgesPreventDestroyBeforeAllowDataLoss(t *testing.T) {
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("Acknowledged = %v, want %v (l'ordre fait partie du contrat)", got, want)
+			t.Errorf("Acknowledged = %v, want %v (the order is part of the contract)", got, want)
 			break
 		}
 	}
 }
 
-// Blocked survit pour ce qui n'est PAS une classification de risque : une
-// ressource que le state ancre et que Notion ne connaît plus rend le plan
-// incalculable, ce qui reste une erreur.
+// Blocked survives for what is NOT a risk classification: a resource the
+// state anchors and that Notion no longer knows makes the plan impossible to
+// compute, which stays an error.
 func TestComputeStillBlocksWhenAManagedResourceVanished(t *testing.T) {
 	cfg := &config.Config{Databases: []config.Database{
 		{Key: "tasks", Name: "Tasks", Properties: map[string]config.Property{"Name": {Type: "title"}}},
@@ -293,14 +293,14 @@ func TestComputeStillBlocksWhenAManagedResourceVanished(t *testing.T) {
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
 	}
-	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "not found (404)"}}
 
 	p, err := Compute(cfg, applied, actual)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !p.Blocked {
-		t.Error("Blocked = false : une ressource gérée disparue reste une erreur")
+		t.Error("Blocked = false: a vanished managed resource stays an error")
 	}
 }
 
@@ -330,7 +330,7 @@ func TestComputeAllCreatesWhenRemoteIsEmpty(t *testing.T) {
 		t.Errorf("ToChange = %d, ToDestroy = %d, want 0 / 0", p.ToChange, p.ToDestroy)
 	}
 	if p.Blocked {
-		t.Error("Blocked = true, want false — des créations sont sûres")
+		t.Error("Blocked = true, want false — creations are safe")
 	}
 	if len(p.Changes) != 2 {
 		t.Fatalf("changes = %d, want 2", len(p.Changes))
@@ -351,7 +351,7 @@ func TestComputeKeepsConfigOrder(t *testing.T) {
 	}
 	p, _ := Compute(cfg, nil, nil)
 	if p.Changes[0].Resource != "database.alpha" || p.Changes[1].Resource != "database.beta" {
-		t.Errorf("ordre = %q, %q", p.Changes[0].Resource, p.Changes[1].Resource)
+		t.Errorf("order = %q, %q", p.Changes[0].Resource, p.Changes[1].Resource)
 	}
 }
 
@@ -365,8 +365,8 @@ func TestComputeListsPropertiesOfCreatedDatabase(t *testing.T) {
 		},
 	}
 	p, _ := Compute(cfg, nil, nil)
-	// Le nom de la database est annoncé lui aussi : il part dans le payload de
-	// création, donc il doit figurer au plan.
+	// The database name is announced too: it goes in the creation payload, so
+	// it must appear in the plan.
 	want := []string{
 		`+ name "Tasks"`,
 		`+ property "Estimate" (number)`,
@@ -379,15 +379,15 @@ func TestComputeListsPropertiesOfCreatedDatabase(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("lines = %v, want %v", got, want)
 	}
-	// Une création ne coûte rien : elle ne demande aucune mesure, donc aucun
-	// appel ne sera payé pour elle. Et aucun détail ne doit affirmer « 0 ligne
-	// concernée » sans que personne n'ait mesuré.
+	// A creation costs nothing: it requires no measurement, so no call will be
+	// paid for it. And no detail must assert "0 rows affected" without anyone
+	// having measured.
 	for _, d := range p.Changes[0].Details {
 		if d.Measure != nil {
-			t.Errorf("la ligne %q demande une mesure alors qu'elle ne coûte rien", d.Target)
+			t.Errorf("line %q requests a measurement while it costs nothing", d.Target)
 		}
 		if d.Count != -1 {
-			t.Errorf("Count = %d pour %q, want -1 tant que rien n'a été mesuré", d.Count, d.Target)
+			t.Errorf("Count = %d for %q, want -1 as long as nothing was measured", d.Count, d.Target)
 		}
 	}
 }
@@ -398,7 +398,7 @@ func TestComputeEmptyConfigProducesEmptyPlan(t *testing.T) {
 		t.Fatalf("Compute() error = %v", err)
 	}
 	if p.ToAdd != 0 || len(p.Changes) != 0 {
-		t.Errorf("plan non vide: %+v", p)
+		t.Errorf("non-empty plan: %+v", p)
 	}
 }
 
@@ -415,7 +415,7 @@ func TestComputeReportsDriftAndUnmanaged(t *testing.T) {
 		}},
 	}}
 	actual := map[string]Refreshed{"tasks": {Database: state.Database{
-		ID: "db1", Name: "Renommée à la main", Properties: map[string]state.Property{
+		ID: "db1", Name: "Renamed by hand", Properties: map[string]state.Property{
 			"Name":    {ID: "p1", Type: "title"},
 			"Créé le": {ID: "p9", Type: "created_time"},
 		},
@@ -426,13 +426,13 @@ func TestComputeReportsDriftAndUnmanaged(t *testing.T) {
 		t.Fatalf("Compute() error = %v", err)
 	}
 	if len(p.Drifts) != 1 {
-		t.Fatalf("Drifts = %v, want 1 entrée", p.Drifts)
+		t.Fatalf("Drifts = %v, want 1 entry", p.Drifts)
 	}
 	if len(p.Unmanaged) != 1 {
-		t.Fatalf("Unmanaged = %v, want 1 entrée", p.Unmanaged)
+		t.Fatalf("Unmanaged = %v, want 1 entry", p.Unmanaged)
 	}
 	if p.ToChange != 1 {
-		t.Errorf("ToChange = %d, want 1 — le nom revient au YAML", p.ToChange)
+		t.Errorf("ToChange = %d, want 1 — the name goes back to the YAML", p.ToChange)
 	}
 }
 
@@ -444,25 +444,24 @@ func TestComputeBlocksWhenManagedResourceVanished(t *testing.T) {
 	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
 		"tasks": {ID: "db1", Name: "Tasks"},
 	}}
-	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "introuvable (404)"}}
+	actual := map[string]Refreshed{"tasks": {Missing: true, Reason: "not found (404)"}}
 
 	p, err := Compute(cfg, applied, actual)
 	if err != nil {
 		t.Fatalf("Compute() error = %v", err)
 	}
 	if !p.Blocked {
-		t.Error("Blocked = false, want true — l'identité gérée a disparu")
+		t.Error("Blocked = false, want true — the managed identity vanished")
 	}
-	if !strings.Contains(strings.Join(p.BlockedReasons, " "), "introuvable") {
-		t.Errorf("BlockedReasons = %v, doit nommer la raison", p.BlockedReasons)
+	if !strings.Contains(strings.Join(p.BlockedReasons, " "), "not found") {
+		t.Errorf("BlockedReasons = %v, must name the reason", p.BlockedReasons)
 	}
 }
 
-// C2 : --skip-preflight passe un `actual` nil — refreshManaged n'a jamais
-// tourné. CompareDatabase rend alors un résultat vide pour database.tasks
-// (« on ne sait rien, donc on ne dit rien »), mais Compute doit quand même
-// nommer la ressource : un Plan vide de partout ne doit jamais être confondu
-// avec une conformité constatée.
+// C2: --skip-preflight passes a nil `actual` — refreshManaged never ran.
+// CompareDatabase then returns an empty result for database.tasks ("we know
+// nothing, so we say nothing"), but Compute must still name the resource: a
+// Plan empty everywhere must never be mistaken for an observed match.
 func TestComputeReportsNotComparedWhenActualWasNotRead(t *testing.T) {
 	cfg := &config.Config{Databases: []config.Database{{
 		Key: "tasks", Name: "Tasks",
@@ -477,23 +476,23 @@ func TestComputeReportsNotComparedWhenActualWasNotRead(t *testing.T) {
 		t.Fatalf("Compute() error = %v", err)
 	}
 	if p.Blocked {
-		t.Error("Blocked = true, want false — --skip-preflight n'est pas une erreur")
+		t.Error("Blocked = true, want false — --skip-preflight is not an error")
 	}
 	if len(p.Changes) != 0 || len(p.Unmanaged) != 0 {
-		t.Errorf("Changes = %v, Unmanaged = %v, want les deux vides", p.Changes, p.Unmanaged)
+		t.Errorf("Changes = %v, Unmanaged = %v, want both empty", p.Changes, p.Unmanaged)
 	}
 	if len(p.NotCompared) != 1 || p.NotCompared[0] != "database.tasks" {
 		t.Errorf("NotCompared = %v, want [database.tasks]", p.NotCompared)
 	}
 }
 
-// Avant ce commit, allow_data_loss ne débloquait que le destructif ordinaire :
-// une réécriture silencieuse restait bloquée quoi qu'il arrive, quand bien
-// même elle figurait dans allow_data_loss. Depuis ce commit, aucune classe ne
-// bloque plus le plan par elle-même — notion-seed mesure le coût d'un
-// changement et le dit, il ne le refuse plus sur la foi de sa classe. tasks
-// perd une option de select, flows perd une option de status : les deux
-// passent désormais, qu'allow_data_loss les couvre ou non.
+// Before this commit, allow_data_loss only cleared the ordinary destructive
+// block: a silent rewrite stayed blocked no matter what, even when it was
+// listed in allow_data_loss. Since this commit, no class blocks the plan by
+// itself any more — notion-seed measures the cost of a change and says it, it
+// no longer refuses it on the strength of its class. tasks loses a select
+// option, flows loses a status option: both now go through, whether
+// allow_data_loss covers them or not.
 func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 	cfg := &config.Config{
 		Databases: []config.Database{
@@ -540,9 +539,9 @@ func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 		t.Fatalf("Compute() error = %v", err)
 	}
 	if p.Blocked {
-		t.Errorf("Blocked = true, want false : %v", p.BlockedReasons)
+		t.Errorf("Blocked = true, want false: %v", p.BlockedReasons)
 	}
 	if p.ToChange != 2 {
-		t.Errorf("ToChange = %d, want 2 : les deux retraits d'option sont mesurés, pas refusés", p.ToChange)
+		t.Errorf("ToChange = %d, want 2: both option removals are measured, not rejected", p.ToChange)
 	}
 }

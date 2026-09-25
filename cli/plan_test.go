@@ -188,7 +188,7 @@ func TestPlanRefusesATrashedParentPage(t *testing.T) {
 			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
 	}
-	if strings.Contains(out, "Plan:") || strings.Contains(out, "Aucun changement") {
+	if strings.Contains(out, "Plan:") || strings.Contains(out, "No changes") {
 		t.Errorf("un plan a été rendu malgré une page parente à la corbeille:\n%s", out)
 	}
 }
@@ -552,7 +552,7 @@ databases:
 	if err != nil {
 		t.Fatalf("plan error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Aucun changement") {
+	if !strings.Contains(out, "No changes") {
 		t.Errorf("le state doit faire reconnaître la database:\n%s", out)
 	}
 }
@@ -630,7 +630,7 @@ func TestPlanWithPopulatedStateWritesNothingToDisk(t *testing.T) {
 	// La preuve que le refresh a réellement tourné, et pas seulement traversé
 	// le garde « state vide » : la comparaison à trois voies ne peut rendre
 	// « Aucun changement » que si `actual` a été lu avec succès depuis l'API.
-	if !strings.Contains(out, "Aucun changement") {
+	if !strings.Contains(out, "No changes") {
 		t.Fatalf("le refresh n'a pas produit la comparaison attendue:\n%s", out)
 	}
 
@@ -702,10 +702,10 @@ func TestPlanBlocksAndSaysSoWhenStateDatabaseIs404(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Execute() error = nil, want un blocage sur une database introuvable\n%s", out)
 	}
-	if strings.Contains(out, "Aucun changement") {
+	if strings.Contains(out, "No changes") {
 		t.Errorf("stdout affirme la conformité alors que la database a disparu:\n%s", out)
 	}
-	for _, want := range []string{"Plan bloqué", "introuvable", "database.tasks"} {
+	for _, want := range []string{"Plan blocked", "introuvable", "database.tasks"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
 		}
@@ -726,10 +726,10 @@ func TestPlanBlocksAndSaysSoWhenStateDatabaseIsArchived(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Execute() error = nil, want un blocage sur une database archivée\n%s", out)
 	}
-	if strings.Contains(out, "Aucun changement") {
+	if strings.Contains(out, "No changes") {
 		t.Errorf("stdout affirme la conformité alors que la database est archivée:\n%s", out)
 	}
-	for _, want := range []string{"Plan bloqué", "archiv", "database.tasks"} {
+	for _, want := range []string{"Plan blocked", "archiv", "database.tasks"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
 		}
@@ -753,10 +753,10 @@ func TestPlanSkipPreflightNamesResourceItDidNotCompare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan error = %v\n%s", err, out)
 	}
-	if strings.Contains(out, "correspond à l'état réel") {
+	if strings.Contains(out, "matches the actual state") {
 		t.Errorf("--skip-preflight ne doit jamais affirmer la conformité:\n%s", out)
 	}
-	if !strings.Contains(out, "Non comparé") || !strings.Contains(out, "database.tasks") {
+	if !strings.Contains(out, "Not compared") || !strings.Contains(out, "database.tasks") {
 		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", out)
 	}
 }
@@ -827,7 +827,7 @@ databases:
 	if strings.Contains(out, "unknown impact") {
 		t.Errorf("la ligne est restée non mesurée:\n%s", out)
 	}
-	if strings.Contains(out, "Plan bloqué") {
+	if strings.Contains(out, "Plan blocked") {
 		t.Errorf("le plan bloque encore:\n%s", out)
 	}
 	// Le chiffre lui-même, pas seulement la classe : c'est lui le produit.
@@ -835,10 +835,10 @@ databases:
 	// La phrase ENTIÈRE, pas « 2 lignes » : ce fragment est déjà satisfait par la
 	// seule ligne d'agrégat, donc il ne prouverait pas que la ligne de détail
 	// porte son compte — ce qui est pourtant tout l'objet de cette passe.
-	if !strings.Contains(out, "2 lignes seront réassignées à une autre option, sans trace") {
+	if !strings.Contains(out, "2 rows will be reassigned to another option, without a trace") {
 		t.Errorf("la ligne de détail ne porte pas son compte mesuré:\n%s", out)
 	}
-	if !strings.Contains(out, "Impact : 2 valeurs réassignées sans trace.") {
+	if !strings.Contains(out, "Impact: 2 values reassigned without a trace.") {
 		t.Errorf("la ligne d'agrégat manque ou ne dit pas ce qui a été mesuré:\n%s", out)
 	}
 }
@@ -1139,9 +1139,9 @@ databases:
 		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
 	}
 	for _, want := range []string{
-		`- option "Basse" (propriété "Prio")`,
-		"2 lignes passeront à vide",
-		"Impact : 2 valeurs perdues.",
+		`- option "Basse" (property "Prio")`,
+		"2 rows will be emptied",
+		"Impact: 2 values lost.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("il manque %q:\n%s", want, out)

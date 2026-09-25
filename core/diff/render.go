@@ -10,32 +10,32 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
 
-// Render écrit le plan en texte brut. notion-seed est un outil de terminal :
-// pas d'interface, pas de couleur inconditionnelle, une sortie qui reste
-// lisible dans un pipe et en CI.
+// Render writes the plan as plain text. notion-seed is a terminal tool: no
+// interface, no unconditional color, an output that stays readable in a pipe
+// and in CI.
 //
-// L'ordre est délibéré : la dérive d'abord (ce que quelqu'un a fait), le plan
-// ensuite (ce qu'on ferait), le hors config après (ce qu'on ne touchera pas),
-// le non comparé ensuite (ce qu'on n'a pas vérifié), le blocage en dernier
-// avec son issue. Chaque section disparaît si elle est vide : sans state, la
-// sortie est exactement celle d'avant.
+// The order is deliberate: drift first (what someone did), the plan next (what
+// would be done), unmanaged after (what will not be touched), not compared
+// next (what was not checked), the block last with its way out. Each section
+// disappears when empty: without a state, the output is exactly what it used
+// to be.
 func Render(w io.Writer, p *Plan) error { return render(w, p, Impact(p)) }
 
-// RenderForApply écrit le plan comme Render, à une ligne près : l'agrégat
-// d'impact ne porte que sur ce qu'apply VA écrire.
+// RenderForApply writes the plan like Render, except for one line: the
+// aggregate impact line only covers what apply WILL write.
 //
-// Une ressource retenue garde un impact qu'apply ne causera pas. Reprendre le
-// total de plan ferait mentir la ligne la plus lue du produit au seul moment où
-// l'utilisateur décide, juste avant la confirmation. Sans ressource retenue, les
-// deux rendus coïncident — c'est le cas courant.
+// A withheld resource keeps an impact apply will not cause. Reusing the plan
+// total would make the product's most-read line lie at the one moment the user
+// decides, just before the confirmation. Without a withheld resource, both
+// renderings match — the common case.
 func RenderForApply(w io.Writer, p *Plan) error { return render(w, p, WritableImpact(p)) }
 
-// render écrit le plan. impact est la ligne d'agrégat déjà calculée, "" pour
-// n'en afficher aucune : son périmètre est le choix de l'appelant — tout le plan
-// pour plan, ce qui sera écrit pour apply.
+// render writes the plan. impact is the aggregate line already computed, "" to
+// show none: its scope is the caller's choice — the whole plan for plan, what
+// will be written for apply.
 func render(w io.Writer, p *Plan, impact string) error {
 	if len(p.Drifts) > 0 {
-		if _, err := fmt.Fprintln(w, "Dérive détectée hors de notion-seed"); err != nil {
+		if _, err := fmt.Fprintln(w, "Drift detected outside notion-seed"); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
@@ -56,17 +56,15 @@ func render(w io.Writer, p *Plan, impact string) error {
 		}
 	}
 
-	// Un plan bloqué n'est jamais « aucun changement » : une ressource gérée
-	// introuvable ou archivée ne produit ni Change ni Unmanaged, seulement une
-	// raison de blocage. Sortir ici afficherait la conformité tout en rendant
-	// un code d'erreur.
+	// A blocked plan is never "no changes": a managed resource that is not
+	// found or archived produces neither Change nor Unmanaged, only a block
+	// reason. Returning here would show a match while returning an error code.
 	//
-	// Une ressource non comparée (--skip-preflight) n'est pas non plus « aucun
-	// changement » : on ne sait rien d'elle, donc on ne peut pas affirmer
-	// qu'elle est conforme.
+	// A resource not compared (--skip-preflight) is not "no changes" either:
+	// nothing is known about it, so it cannot be asserted to match.
 	if len(p.Changes) == 0 && len(p.Unmanaged) == 0 && len(p.NotCompared) == 0 &&
 		len(p.StaleState) == 0 && !p.Blocked {
-		_, err := fmt.Fprintln(w, "Aucun changement. La configuration correspond à l'état réel.")
+		_, err := fmt.Fprintln(w, "No changes. The configuration matches the actual state.")
 		return err
 	}
 
@@ -78,11 +76,11 @@ func render(w io.Writer, p *Plan, impact string) error {
 	}
 
 	for _, c := range p.Changes {
-		// Le marqueur suit le Kind de la ressource — ce que l'opération FAIT
-		// (créer, détruire, modifier) — pas sa Class : notion-seed ne bloque plus
-		// sur la foi d'une classe, donc la classe n'a plus à décider d'un
-		// marqueur d'alerte. Le coût, lui, reste visible juste après : l'étiquette
-		// [classe] sur l'en-tête et sur chaque ligne concernée.
+		// The marker follows the resource's Kind — what the operation DOES
+		// (create, destroy, update) — not its Class: notion-seed no longer
+		// blocks on the strength of a class, so the class no longer has to
+		// decide on a warning marker. The cost stays visible right after: the
+		// [class] label on the header and on each affected line.
 		marker := "~"
 		switch c.Kind {
 		case resources.KindCreate:
@@ -104,36 +102,36 @@ func render(w io.Writer, p *Plan, impact string) error {
 		for _, d := range c.Details {
 			line := d.Op + " " + d.Target
 			if d.Note != "" {
-				// PAS de %q ici : Note porte déjà ses propres guillemets là où il en
-				// faut (un renommage rend `"Ancien" → "Nouveau"`). Un %q supplémentaire
-				// ré-échappe ces guillemets et l'ensemble de la note, jusqu'à rendre
-				// illisible la seule ligne censée éviter qu'on croie avoir renommé une
-				// propriété alors qu'elle reste hors config.
+				// NO %q here: Note already carries its own quotes where they are
+				// needed (a rename renders `"Old" → "New"`). An extra %q
+				// re-escapes those quotes and the whole note, to the point of
+				// making unreadable the one line meant to keep the user from
+				// thinking a property was renamed while it stays unmanaged.
 				line += " — " + d.Note
 			}
 			suffix := ""
-			// Une ligne sûre dans une ressource par ailleurs dangereuse ne doit pas
-			// hériter de l'étiquette : c'est la ligne qui porte sa classe.
+			// A safe line in an otherwise dangerous resource must not inherit
+			// the label: the line carries its own class.
 			if d.Class != ClassSafe {
 				suffix = fmt.Sprintf("  [%s]", d.Class)
 			}
 			if _, err := fmt.Fprintf(w, "      %s%s\n", line, suffix); err != nil {
 				return err
 			}
-			// Le chiffre, juste sous la ligne qu'il concerne : c'est lui qu'on lit
-			// pour décider, et il ne veut rien dire détaché de sa cible.
+			// The figure, right under the line it concerns: it is what gets read
+			// to decide, and it means nothing detached from its target.
 			if cq := consequence(d); cq != "" {
 				if _, err := fmt.Fprintf(w, "          → %s.\n", cq); err != nil {
 					return err
 				}
 			}
 		}
-		// lifecycle ne bloque plus rien : ces clés ne sont que des accusés de
-		// lecture. Les taire les rendrait invisibles, et l'utilisateur ne saurait
-		// plus ce qu'il a déjà reconnu.
+		// lifecycle no longer blocks anything: these keys are only
+		// acknowledgements. Hiding them would make them invisible, and the user
+		// would no longer know what they have already acknowledged.
 		for _, a := range c.Acknowledged {
 			if _, err := fmt.Fprintf(w,
-				"      → déclarée dans lifecycle.%s.\n", a); err != nil {
+				"      → declared in lifecycle.%s.\n", a); err != nil {
 				return err
 			}
 		}
@@ -142,9 +140,9 @@ func render(w io.Writer, p *Plan, impact string) error {
 		}
 	}
 
-	// La ligne d'agrégat vient après la liste : on lit le détail, puis le total
-	// par famille. Elle disparaît quand rien de mesuré n'est en jeu — annoncer
-	// un impact vide serait une affirmation de plus que ce qui a été mesuré.
+	// The aggregate line comes after the list: the detail is read first, then
+	// the total per family. It disappears when nothing measured is at stake —
+	// announcing an empty impact would assert more than what was measured.
 	if impact != "" {
 		if _, err := fmt.Fprintf(w, "%s\n\n", impact); err != nil {
 			return err
@@ -152,7 +150,7 @@ func render(w io.Writer, p *Plan, impact string) error {
 	}
 
 	if len(p.Unmanaged) > 0 {
-		if _, err := fmt.Fprintln(w, "Hors config — présent dans Notion, non touché"); err != nil {
+		if _, err := fmt.Fprintln(w, "Unmanaged — present in Notion, left untouched"); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
@@ -175,7 +173,7 @@ func render(w io.Writer, p *Plan, impact string) error {
 
 	if len(p.StaleState) > 0 {
 		if _, err := fmt.Fprintln(w,
-			"Entrée de state obsolète — la ressource n'existe plus dans Notion"); err != nil {
+			"Stale state entry — the resource no longer exists in Notion"); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
@@ -183,7 +181,7 @@ func render(w io.Writer, p *Plan, impact string) error {
 		}
 		for _, r := range p.StaleState {
 			if _, err := fmt.Fprintf(w,
-				"  - %s — son identité sera retirée du state, rien ne sera écrit dans Notion\n",
+				"  - %s — its identity will be removed from the state, nothing will be written to Notion\n",
 				r); err != nil {
 				return err
 			}
@@ -194,7 +192,7 @@ func render(w io.Writer, p *Plan, impact string) error {
 	}
 
 	if len(p.NotCompared) > 0 {
-		if _, err := fmt.Fprintln(w, "Non comparé — --skip-preflight ne lit pas l'état réel"); err != nil {
+		if _, err := fmt.Fprintln(w, "Not compared — --skip-preflight does not read the actual state"); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
@@ -211,7 +209,7 @@ func render(w io.Writer, p *Plan, impact string) error {
 	}
 
 	if p.Blocked {
-		if _, err := fmt.Fprintln(w, "Plan bloqué. Rien n'a été appliqué."); err != nil {
+		if _, err := fmt.Fprintln(w, "Plan blocked. Nothing was applied."); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w); err != nil {
@@ -226,144 +224,146 @@ func render(w io.Writer, p *Plan, impact string) error {
 	return nil
 }
 
-// bound écrit un compte, en le marquant comme minorant s'il est plafonné.
-// « 300 » et « plus de 300 » ne se décident pas pareil.
+// bound writes a count, marking it as a lower bound when it is capped. "300"
+// and "more than 300" are not decided the same way.
 func bound(n int, capped bool) string {
 	if capped {
-		return fmt.Sprintf("plus de %d", n)
+		return fmt.Sprintf("more than %d", n)
 	}
 	return fmt.Sprintf("%d", n)
 }
 
-// consequence rend, en clair, ce que ce détail va coûter. C'est la phrase que
-// l'utilisateur lit pour décider, donc elle ne doit jamais affirmer plus que ce
-// qui a été mesuré.
+// consequence says, in plain words, what this detail will cost. It is the
+// sentence the user reads to decide, so it must never assert more than what
+// was measured.
 func consequence(d resources.Detail) string {
-	// Aucune demande de mesure : la ligne ne coûte rien à personne, et il n'y a
-	// rien à annoncer. C'est le SEUL cas qui autorise le silence.
+	// No measurement request: the line costs nobody anything, and there is
+	// nothing to announce. It is the ONLY case that allows silence.
 	if d.Measure == nil {
 		return ""
 	}
 	if d.Measure.AllRows {
 		return destroyedRows(d)
 	}
-	// Pas de compte. Se taire ici rendrait la ligne indiscernable d'une ligne
-	// sans coût, à côté de voisines qui portent leur chiffre — et une réécriture
-	// silencieuse qu'on croit anodine est le pire malentendu que ce rendu puisse
-	// produire. Reste à dire LAQUELLE des deux raisons s'applique, parce qu'elles
-	// ne se réparent pas pareil.
+	// No count. Staying silent here would make the line indistinguishable
+	// from a line with no cost, next to neighbours that carry their figure —
+	// and a silent rewrite believed harmless is the worst misunderstanding this
+	// rendering can produce. It remains to say WHICH of the two reasons
+	// applies, because they are not fixed the same way.
 	if d.Count < 0 {
-		// Question impossible à poser : aucun remède à proposer, donc aucun
-		// promis. Annoncer « relancez » ici annoncerait une action corrective qui
-		// n'arrivera jamais.
+		// A question that cannot be asked: no fix to offer, so none promised.
+		// Announcing "rerun" here would announce a corrective action that will
+		// never come.
 		if d.Unmeasurable {
 			return fmt.Sprintf(
-				"impact réel inconnu : notion-seed ne sait pas compter les lignes "+
-					"d'une propriété %s", d.Measure.PropertyType)
+				"actual impact unknown: notion-seed cannot count the rows "+
+					"of a %s property", d.Measure.PropertyType)
 		}
-		// Question posable, réponse pas obtenue (--skip-preflight, 403, 429) :
-		// relancer marche vraiment.
-		return "impact non mesuré ; relancez en ligne pour l'obtenir"
+		// A question that can be asked, answer not obtained (--skip-preflight,
+		// 403, 429): rerunning really works.
+		return "impact not measured; rerun online to get it"
 	}
 	if d.Count == 0 {
-		return "0 ligne concernée"
+		return "0 rows affected"
 	}
-	// Sur UNE mesure, le compte est bien un nombre de lignes distinctes : un
-	// filtre, une propriété. C'est en sommant plusieurs mesures que Impact perd
-	// cette propriété, et c'est pour ça qu'il parle de valeurs, pas de lignes.
-	count := bound(d.Count, d.Capped) + " lignes"
+	// On ONE measurement, the count really is a number of distinct rows: one
+	// filter, one property. It is by summing several measurements that Impact
+	// loses this property, and that is why it talks about values, not rows.
+	count := bound(d.Count, d.Capped) + " rows"
 
-	// Migration : la ressource est retenue, rien ne sera écrit. Le compte porte
-	// sur l'option ACTUELLE parce que c'est le coût du remède — les lignes à
-	// déplacer à la main —, pas une perte. Laisser la ligne tomber dans le cas
-	// du retrait ci-dessous annoncerait une réassignation ou un vidage qui
-	// n'aura pas lieu : un chiffre faux sur la donnée de l'utilisateur.
+	// Migration: the resource is withheld, nothing will be written. The count
+	// is on the CURRENT option because it is the cost of the fix — the rows to
+	// move by hand —, not a loss. Letting the line fall into the removal case
+	// below would announce a reassignment or an emptying that will not happen:
+	// a false figure about the user's data.
 	if d.Class == ClassMigration && d.Measure.Option != "" {
-		return fmt.Sprintf("%s portent %q : à migrer à la main avant d'appliquer",
+		return fmt.Sprintf("%s hold %q: migrate them by hand before applying",
 			count, d.Measure.Option)
 	}
 
-	// Retrait d'option : le sort des lignes dépend du type, et les TROIS cas
-	// mesurés le 2026-09-24 diffèrent. Les confondre affirmerait plus que ce qui
-	// a été mesuré, ce qui est le seul défaut que ce produit ne peut pas se
-	// permettre.
+	// Option removal: the fate of the rows depends on the type, and the THREE
+	// cases measured on 2026-09-24 differ. Mixing them up would assert more
+	// than what was measured, which is the one flaw this product cannot
+	// afford.
 	if d.Measure.Option != "" {
 		switch removalFate(*d.Measure) {
 		case "status":
-			return count + " seront réassignées à une autre option, sans trace"
+			return count + " will be reassigned to another option, without a trace"
 		case "multi_select":
-			// Sous un changement de type depuis multi_select, rien n'a été
-			// mesuré : on dit la perte, pas ce qu'il reste de la cellule.
+			// Under a type change from multi_select, nothing was measured: we
+			// state the loss, not what remains of the cell.
 			if d.Measure.Retyped {
-				return count + " perdront cette valeur (sort exact non mesuré)"
+				return count + " will lose this value (exact outcome not measured)"
 			}
-			// Mesuré : ['Un','Deux'] moins 'Un' donne ['Deux'] ; ['Un'] moins 'Un'
-			// donne []. La ligne perd CETTE valeur, pas forcément toute sa cellule.
+			// Measured: ['Un','Deux'] minus 'Un' gives ['Deux']; ['Un'] minus
+			// 'Un' gives []. The row loses THIS value, not necessarily its
+			// whole cell.
 			//
-			// On ne dit pas combien de lignes se videront : le filtre `contains`
-			// compte les lignes portant l'option, pas celles qui n'en portent
-			// qu'elle. Le savoir coûterait de relire chaque ligne, ce que la passe
-			// de mesure ne fait pas — alors on nomme ce qu'on a.
-			return count + " perdront cette valeur ; elles ne passeront à vide que si " +
-				"elles n'en portaient pas d'autre"
+			// We don't say how many rows will be emptied: the `contains` filter
+			// counts the rows holding the option, not those holding only it.
+			// Knowing it would cost reading every row back, which the
+			// measurement pass does not do — so we name what we have.
+			return count + " will lose this value; they will be emptied only if " +
+				"they held no other"
 		default:
-			// select : mesuré, la cellule est vidée. La ligne n'en portait qu'une.
-			return count + " passeront à vide"
+			// select: measured, the cell is emptied. The row held only one.
+			return count + " will be emptied"
 		}
 	}
-	// Changement de type : le compte est celui des valeurs NON VIDES, donc un
-	// majorant de ce qui sera réellement perdu.
+	// Type change: the count is that of NON-EMPTY values, hence an upper bound
+	// of what will actually be lost.
 	if d.Class == ClassSilentRewrite {
-		// Plafonné, ce majorant devient lui-même un minorant : « jusqu'à plus de
-		// 300 » borne par le haut ce qu'on ne sait justement plus borner. On dit
-		// alors le plancher mesuré, et on assume de ne pas savoir le plafond.
+		// Capped, this upper bound itself becomes a lower bound: "up to more
+		// than 300" bounds from above what precisely can no longer be bounded.
+		// We then state the measured floor, and own not knowing the ceiling.
 		if d.Capped {
-			return count + " non vides, dont un nombre non mesuré sera appauvri, sans trace"
+			return count + " non-empty, an unmeasured number of which will be degraded, without a trace"
 		}
-		return "jusqu'à " + count + " appauvries, sans trace"
+		return "up to " + count + " degraded, without a trace"
 	}
-	return count + " non vides dans cette colonne"
+	return count + " non-empty in this column"
 }
 
-// destroyedRows dit combien de lignes une database mise à la corbeille emporte.
-// Non mesuré — comptage refusé, épuisé ou incompris —, il le dit : se taire
-// rendrait la ligne indiscernable d'une database vide.
+// destroyedRows says how many rows a database moved to the trash takes with
+// it. Not measured — count rejected, exhausted or not understood —, it says
+// so: staying silent would make the line indistinguishable from an empty
+// database.
 //
-// Un compte qui ne couvre qu'un des data sources de la database est un
-// minorant : la ligne le dit, et nomme combien n'ont pas été comptés.
+// A count that covers only one of the database's data sources is a lower
+// bound: the line says so, and names how many were not counted.
 func destroyedRows(d resources.Detail) string {
 	if d.Count < 0 {
-		return "nombre de lignes qui partent à la corbeille avec elle non mesuré ; " +
-			"relancez pour l'obtenir"
+		return "number of rows going to the trash with it not measured; " +
+			"rerun to get it"
 	}
 	other := d.Measure.UncountedDataSources
 	if other == 0 {
 		if d.Count == 0 {
-			return "aucune ligne ne part à la corbeille avec elle"
+			return "no rows go to the trash with it"
 		}
-		return bound(d.Count, d.Capped) + " ligne(s) partent à la corbeille avec elle"
+		return bound(d.Count, d.Capped) + " row(s) go to the trash with it"
 	}
-	missing := fmt.Sprintf("%d de ses %d data sources n'a pas été compté", other, other+1)
+	missing := fmt.Sprintf("%d of its %d data sources was not counted", other, other+1)
 	if other > 1 {
-		missing = fmt.Sprintf("%d de ses %d data sources n'ont pas été comptés", other, other+1)
+		missing = fmt.Sprintf("%d of its %d data sources were not counted", other, other+1)
 	}
 	if d.Count == 0 {
-		return "aucune ligne sur le data source compté : " + missing
+		return "no rows on the counted data source: " + missing
 	}
-	// Plafonné, le compte est déjà un minorant et le dit (« plus de ») ;
-	// « au moins plus de » n'ajouterait rien.
-	count := "au moins " + bound(d.Count, false)
+	// Capped, the count is already a lower bound and says so ("more than");
+	// "at least more than" would add nothing.
+	count := "at least " + bound(d.Count, false)
 	if d.Capped {
 		count = bound(d.Count, true)
 	}
-	return count + " ligne(s) partent à la corbeille avec elle : " + missing
+	return count + " row(s) go to the trash with it: " + missing
 }
 
-// removalFate dit de quel type le sort des lignes suit, pour une option qui
-// part. C'est l'ancien type, sauf quand l'option disparaît avec un changement de
-// type depuis status : il est alors traité comme un select, une perte.
-// Seul select → multi_select a été mesuré (2026-09-25) ; les autres couples sont
-// traités par prudence comme destructifs, sans que leur sort ait été observé.
+// removalFate says which type the fate of the rows follows, for an option
+// that goes away. It is the old type, except when the option disappears with
+// a type change from status: it is then treated as a select, a loss.
+// Only select → multi_select was measured (2026-09-25); the other pairs are
+// treated as destructive out of caution, without their fate being observed.
 func removalFate(m resources.Measurement) string {
 	if m.Retyped && m.PropertyType == "status" {
 		return "select"
@@ -371,35 +371,35 @@ func removalFate(m resources.Measurement) string {
 	return m.PropertyType
 }
 
-// Impact agrège les comptes mesurés en une phrase. C'est le produit en une
-// ligne : le seul chiffre que personne d'autre ne peut donner.
+// Impact aggregates the measured counts into one sentence. It is the product
+// in one line: the one figure nobody else can give.
 //
-// Il n'additionne JAMAIS deux familles différentes. Le comptage dit combien de
-// lignes sont non vides sur une colonne qui change de type ; il ne dit pas
-// combien portent plusieurs valeurs, donc combien perdront vraiment quelque
-// chose. D'où « jusqu'à N » d'un côté et un compte ferme de l'autre : un
-// chiffre faux ici ruinerait le seul argument du produit.
+// It NEVER adds up two different families. The count says how many rows are
+// non-empty on a column that changes type; it does not say how many hold
+// several values, hence how many will really lose something. Hence "up to N"
+// on one side and a firm count on the other: a false figure here would ruin
+// the product's one argument.
 //
-// Un compte plafonné contamine sa famille, et elle seule : une somme dont un
-// terme est un minorant est un minorant, mais le plafond de l'une ne rend pas
-// l'autre plus floue qu'elle n'est.
+// A capped count contaminates its family, and only it: a sum with one term
+// that is a lower bound is a lower bound, but the cap of one does not make the
+// other vaguer than it is.
 //
-// Ces totaux comptent des VALEURS, pas des lignes distinctes, et le disent.
-// Chaque compte est un nombre de lignes pour SA mesure, mais deux mesures d'une
-// même database peuvent tomber sur les mêmes lignes : deux options retirées
-// d'un même multi_select se filtrent par `contains`, et une ligne portant les
-// deux est comptée deux fois. Écrire « 18 lignes » là où 10 lignes distinctes
-// sont touchées serait un chiffre faux dans la ligne qui EST l'argument du
-// produit. Le dédoublonnage exigerait de collecter les identifiants de lignes,
-// ce que la passe de mesure ne fait pas — alors on nomme ce qu'on a.
+// These totals count VALUES, not distinct rows, and say so. Each count is a
+// number of rows for ITS measurement, but two measurements of the same
+// database can land on the same rows: two options removed from the same
+// multi_select are filtered with `contains`, and a row holding both is counted
+// twice. Writing "18 rows" where 10 distinct rows are affected would be a
+// false figure in the line that IS the product's argument. Deduplicating would
+// require collecting row identifiers, which the measurement pass does not do —
+// so we name what we have.
 func Impact(p *Plan) string { return impactOf(p.Changes) }
 
-// WritableImpact agrège le même impact que Impact, sur les SEULES ressources
-// qu'apply va écrire : celles dont Withheld est vide.
+// WritableImpact aggregates the same impact as Impact, over ONLY the resources
+// apply will write: those whose Withheld is empty.
 //
-// plan continue d'agréger tout, parce qu'il décrit l'écart, pas une exécution.
-// apply, lui, annonce ce qu'il va causer : une ressource retenue n'est pas
-// écrite, donc son coût n'est pas le sien.
+// plan keeps aggregating everything, because it describes the gap, not an
+// execution. apply announces what it will cause: a withheld resource is not
+// written, so its cost is not apply's.
 func WritableImpact(p *Plan) string {
 	writable := make([]Change, 0, len(p.Changes))
 	for _, c := range p.Changes {
@@ -410,9 +410,9 @@ func WritableImpact(p *Plan) string {
 	return impactOf(writable)
 }
 
-// impactOf est le calcul lui-même, partagé par Impact et WritableImpact : une
-// seule règle d'agrégat, deux périmètres. Deux règles finiraient par diverger,
-// et plan et apply par annoncer deux coûts différents pour la même écriture.
+// impactOf is the computation itself, shared by Impact and WritableImpact: one
+// aggregation rule, two scopes. Two rules would end up diverging, and plan and
+// apply would end up announcing two different costs for the same write.
 func impactOf(changes []Change) string {
 	reassigned, lost, weakened := 0, 0, 0
 	var reassignedCapped, lostCapped, weakenedCapped bool
@@ -422,14 +422,14 @@ func impactOf(changes []Change) string {
 			trash.add(c)
 		}
 		for _, d := range c.Details {
-			// Le compte d'une destruction est agrégé par trash, à part : ce sont
-			// des lignes, pas des valeurs, et elles ne se mêlent à aucune famille.
+			// A destruction's count is aggregated by trash, separately: they are
+			// rows, not values, and they mix with no family.
 			if d.Measure == nil || d.Measure.AllRows || d.Count <= 0 {
 				continue
 			}
-			// Une ligne de migration retient sa ressource : rien n'est écrit, donc
-			// rien n'est perdu. Son compte est le coût d'un remède manuel, que la
-			// ligne elle-même affiche ; l'additionner ici en ferait une perte.
+			// A migration line withholds its resource: nothing is written, so
+			// nothing is lost. Its count is the cost of a manual fix, which the
+			// line itself shows; adding it here would turn it into a loss.
 			if d.Class == ClassMigration {
 				continue
 			}
@@ -449,21 +449,22 @@ func impactOf(changes []Change) string {
 
 	var parts []string
 	if reassigned > 0 {
-		parts = append(parts, fmt.Sprintf("%s valeurs réassignées sans trace",
+		parts = append(parts, fmt.Sprintf("%s values reassigned without a trace",
 			bound(reassigned, reassignedCapped)))
 	}
 	if lost > 0 {
-		parts = append(parts, fmt.Sprintf("%s valeurs perdues",
+		parts = append(parts, fmt.Sprintf("%s values lost",
 			bound(lost, lostCapped)))
 	}
 	if weakened > 0 {
-		// Non plafonné, le compte des non vides borne par le haut ce qui sera
-		// perdu. Plafonné, il ne borne plus rien par le haut : on ne peut plus
-		// dire « jusqu'à », et le plancher mesuré vit sur la ligne du détail.
+		// Not capped, the count of non-empty values bounds from above what
+		// will be lost. Capped, it no longer bounds anything from above: "up
+		// to" can no longer be said, and the measured floor lives on the detail
+		// line.
 		if weakenedCapped {
-			parts = append(parts, "un nombre non mesuré de valeurs appauvries sans trace")
+			parts = append(parts, "an unmeasured number of values degraded without a trace")
 		} else {
-			parts = append(parts, fmt.Sprintf("jusqu'à %d valeurs appauvries sans trace", weakened))
+			parts = append(parts, fmt.Sprintf("up to %d values degraded without a trace", weakened))
 		}
 	}
 	if trash.databases > 0 {
@@ -472,20 +473,20 @@ func impactOf(changes []Change) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "Impact : " + strings.Join(parts, ", ") + "."
+	return "Impact: " + strings.Join(parts, ", ") + "."
 }
 
-// trashedRows agrège les databases mises à la corbeille et les lignes qu'elles
-// emportent.
+// trashedRows aggregates the databases moved to the trash and the rows they
+// take with them.
 //
-// Ici, et ici seulement, le total parle de LIGNES : chaque ligne appartient à
-// un seul data source, donc deux databases détruites ne comptent jamais deux
-// fois la même. Un compte inconnu n'est jamais pris pour 0 : il est nommé, et le
-// total connu devient un minorant.
+// Here, and only here, the total talks about ROWS: each row belongs to a
+// single data source, so two destroyed databases never count the same one
+// twice. An unknown count is never taken for 0: it is named, and the known
+// total becomes a lower bound.
 type trashedRows struct {
 	databases, rows, unknown int
-	// capped : un terme est plafonné. partial : un terme ne couvre pas tous
-	// les data sources de sa database. Les deux font du total un minorant.
+	// capped: a term is capped. partial: a term does not cover all the data
+	// sources of its database. Both make the total a lower bound.
 	capped, partial bool
 }
 
@@ -499,21 +500,21 @@ func (t *trashedRows) add(c Change) {
 			return
 		}
 	}
-	// Aucun compte obtenu pour cette database : ni 0, ni rien.
+	// No count obtained for this database: neither 0, nor anything.
 	t.unknown++
 }
 
 func (t trashedRows) String() string {
-	head := fmt.Sprintf("%d database(s) à la corbeille", t.databases)
+	head := fmt.Sprintf("%d database(s) in the trash", t.databases)
 	switch {
 	case t.unknown == t.databases:
-		return head + ", lignes non comptées"
+		return head + ", rows not counted"
 	case t.unknown > 0:
-		return fmt.Sprintf("%s avec au moins %d ligne(s), lignes non comptées pour %d d'entre elles",
+		return fmt.Sprintf("%s with at least %d row(s), rows not counted for %d of them",
 			head, t.rows, t.unknown)
 	}
 	if t.partial && !t.capped {
-		return fmt.Sprintf("%s avec au moins %d ligne(s)", head, t.rows)
+		return fmt.Sprintf("%s with at least %d row(s)", head, t.rows)
 	}
-	return head + " avec " + bound(t.rows, t.capped) + " ligne(s)"
+	return head + " with " + bound(t.rows, t.capped) + " row(s)"
 }

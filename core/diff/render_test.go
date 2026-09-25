@@ -18,22 +18,21 @@ func TestRenderEmptyPlan(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "Aucun changement") {
-		t.Errorf("sortie = %q, want une mention explicite d'absence de changement", got)
+	if !strings.Contains(got, "No changes") {
+		t.Errorf("output = %q, want an explicit mention that nothing changes", got)
 	}
 }
 
-// C1 : une database gérée introuvable ou archivée empile une BlockedReason
-// sans jamais toucher Changes ni Unmanaged. Avant correction, Render sortait
-// ici « Aucun changement. La configuration correspond à l'état réel. » sur
-// stdout, en même temps qu'un code d'erreur — stdout affirmait l'inverse de
-// stderr.
+// C1: a managed database that is not found or archived stacks a BlockedReason
+// without ever touching Changes or Unmanaged. Before the fix, Render printed
+// "No changes. The configuration matches the actual state." here on stdout,
+// together with an error code — stdout asserted the opposite of stderr.
 func TestRenderBlockedPlanNeverSaysNoChange(t *testing.T) {
 	p := &Plan{
 		Blocked: true,
 		BlockedReasons: []string{
-			"database.tasks est dans le state mais introuvable (404) dans Notion.\n" +
-				"  → restaurez-la dans Notion, ou retirez son entrée de notion-seed.state.json",
+			"database.tasks is in the state but not found (404) in Notion.\n" +
+				"  → restore it in Notion, or remove its entry from notion-seed.state.json",
 		},
 	}
 	var buf bytes.Buffer
@@ -41,20 +40,20 @@ func TestRenderBlockedPlanNeverSaysNoChange(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	got := buf.String()
-	if strings.Contains(got, "Aucun changement") {
-		t.Errorf("un plan bloqué ne doit jamais afficher « Aucun changement »:\n%s", got)
+	if strings.Contains(got, "No changes") {
+		t.Errorf("a blocked plan must never show \"No changes\":\n%s", got)
 	}
-	if !strings.Contains(got, "Plan bloqué") {
-		t.Errorf("sortie = %q, elle doit afficher la section de blocage", got)
+	if !strings.Contains(got, "Plan blocked") {
+		t.Errorf("output = %q, it must show the block section", got)
 	}
-	if !strings.Contains(got, "introuvable (404)") {
-		t.Errorf("sortie = %q, elle doit nommer la raison du blocage", got)
+	if !strings.Contains(got, "not found (404)") {
+		t.Errorf("output = %q, it must name the reason of the block", got)
 	}
 }
 
-// C2 : --skip-preflight ne lit jamais le réel pour une ressource que le state
-// ancre. Compute alimente alors NotCompared au lieu de laisser un Plan
-// entièrement vide passer pour une conformité constatée.
+// C2: --skip-preflight never reads the actual state of a resource the state
+// anchors. Compute then fills NotCompared instead of letting an entirely empty
+// Plan pass for an observed match.
 func TestRenderNotComparedBlocksNoChangeMessage(t *testing.T) {
 	p := &Plan{NotCompared: []string{"database.tasks"}}
 	var buf bytes.Buffer
@@ -62,25 +61,24 @@ func TestRenderNotComparedBlocksNoChangeMessage(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	got := buf.String()
-	if strings.Contains(got, "correspond à l'état réel") {
-		t.Errorf("une ressource non comparée ne doit jamais afficher la conformité:\n%s", got)
+	if strings.Contains(got, "matches the actual state") {
+		t.Errorf("a resource not compared must never show a match:\n%s", got)
 	}
-	if !strings.Contains(got, "Non comparé") || !strings.Contains(got, "--skip-preflight") {
-		t.Errorf("sortie = %q, elle doit nommer le mode qui a empêché la comparaison", got)
+	if !strings.Contains(got, "Not compared") || !strings.Contains(got, "--skip-preflight") {
+		t.Errorf("output = %q, it must name the mode that prevented the comparison", got)
 	}
 	if !strings.Contains(got, "database.tasks") {
-		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", got)
+		t.Errorf("output = %q, it must name the resource not compared", got)
 	}
 }
 
-// I3 : Note porte déjà ses propres guillemets là où il en faut (un
-// renommage de propriété avertit avec `"Ancien" n'est pas renommée...`).
-// Avant correction, l'aplatissement ré-échappait toute la note avec %q,
-// produisant des antislashs illisibles — précisément sur la ligne censée éviter
-// à l'utilisateur de croire qu'il a renommé une propriété. La concaténation vit
-// désormais dans Render, et les autres tests de rendu fabriquent des Details
-// sans Note : celui-ci seul, en passant par Compute puis par Render, l'exerce
-// réellement.
+// I3: Note already carries its own quotes where they are needed (a property
+// rename warns with `"Old" is not renamed...`). Before the fix, flattening
+// re-escaped the whole note with %q, producing unreadable backslashes —
+// precisely on the line meant to keep the user from thinking they renamed a
+// property. The concatenation now lives in Render, and the other rendering
+// tests build Details without a Note: this one alone, going through Compute
+// then Render, really exercises it.
 func TestRenderNoteWithQuotesIsNotReEscaped(t *testing.T) {
 	cfg := &config.Config{Databases: []config.Database{{
 		Key: "tasks", Name: "Tasks",
@@ -107,13 +105,13 @@ func TestRenderNoteWithQuotesIsNotReEscaped(t *testing.T) {
 	}
 	got := buf.String()
 	if strings.Contains(got, `\"`) {
-		t.Errorf("la note a été ré-échappée (antislashs) : %q", got)
+		t.Errorf("the note was re-escaped (backslashes): %q", got)
 	}
-	if !strings.Contains(got, `"Estimate" n'est pas renommée`) {
-		t.Errorf("la note doit rester lisible avec ses guillemets d'origine:\n%s", got)
+	if !strings.Contains(got, `"Estimate" is not renamed`) {
+		t.Errorf("the note must stay readable with its original quotes:\n%s", got)
 	}
 	if !strings.Contains(got, " — ") {
-		t.Errorf("le séparateur doit être « — », pas « : »:\n%s", got)
+		t.Errorf("the separator must be \" — \", not \": \":\n%s", got)
 	}
 }
 
@@ -142,17 +140,17 @@ func TestRenderCreatePlan(t *testing.T) {
 		`property "Estimate" (number)`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("sortie ne contient pas %q\n--- sortie ---\n%s", want, got)
+			t.Errorf("output does not contain %q\n--- output ---\n%s", want, got)
 		}
 	}
 }
 
-// Depuis que notion-seed ne bloque plus sur la foi d'une Class (voir
-// core/change), le marqueur d'en-tête suit le Kind de la ressource — ce que
-// l'opération FAIT, pas ce qu'elle coûte. Sans ce test, permuter les deux
-// `case` du switch de Render, ou mapper KindDestroy sur "+" par erreur de
-// copier-coller, resterait invisible : go test ./... passerait quand même,
-// puisque seul le cas création était couvert par TestRenderCreatePlan.
+// Since notion-seed no longer blocks on the strength of a Class (see
+// core/change), the header marker follows the resource's Kind — what the
+// operation DOES, not what it costs. Without this test, swapping the two
+// `case`s of Render's switch, or mapping KindDestroy to "+" by a copy-paste
+// mistake, would stay invisible: go test ./... would pass anyway, since only
+// the creation case was covered by TestRenderCreatePlan.
 func TestRenderDestroyMarksResourceWithMinus(t *testing.T) {
 	p := &Plan{
 		ToDestroy: 1,
@@ -167,13 +165,13 @@ func TestRenderDestroyMarksResourceWithMinus(t *testing.T) {
 	}
 	header := findLineContaining(t, buf.String(), "database.tasks")
 	if !strings.HasPrefix(header, "  - ") {
-		t.Errorf("en-tête = %q, want un marqueur « - » (destruction)", header)
+		t.Errorf("header = %q, want a \"-\" marker (destruction)", header)
 	}
 }
 
-// Symétrique du test ci-dessus, côté modification : sans lui, un Kind autre
-// que création ou destruction pourrait glisser sur n'importe quel marqueur
-// sans qu'aucun test ne le remarque.
+// Mirror of the test above, on the update side: without it, a Kind other than
+// creation or destruction could slide onto any marker without any test
+// noticing.
 func TestRenderUpdateMarksResourceWithTilde(t *testing.T) {
 	p := &Plan{
 		ToChange: 1,
@@ -188,13 +186,13 @@ func TestRenderUpdateMarksResourceWithTilde(t *testing.T) {
 	}
 	header := findLineContaining(t, buf.String(), "database.tasks")
 	if !strings.HasPrefix(header, "  ~ ") {
-		t.Errorf("en-tête = %q, want un marqueur « ~ » (modification)", header)
+		t.Errorf("header = %q, want a \"~\" marker (update)", header)
 	}
 }
 
-// findLineContaining rend la première ligne de out qui contient sub, pour
-// isoler l'en-tête d'une ressource du reste du rendu sans dépendre de son
-// contenu exact au-delà du marqueur.
+// findLineContaining returns the first line of out that contains sub, to
+// isolate a resource's header from the rest of the rendering without depending
+// on its exact content beyond the marker.
 func findLineContaining(t *testing.T, out, sub string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
@@ -202,7 +200,7 @@ func findLineContaining(t *testing.T, out, sub string) string {
 			return line
 		}
 	}
-	t.Fatalf("aucune ligne ne contient %q dans:\n%s", sub, out)
+	t.Fatalf("no line contains %q in:\n%s", sub, out)
 	return ""
 }
 
@@ -214,7 +212,7 @@ func TestRenderMarksBlockingChanges(t *testing.T) {
 			Class:    ClassSilentRewrite,
 			Resource: "database.tasks",
 			Details: []resources.Detail{
-				{Op: "-", Target: `option "Shipped" du status "Status"`,
+				{Op: "-", Target: `option "Shipped" of status "Status"`,
 					Class: ClassSilentRewrite, Count: -1},
 			},
 		}},
@@ -225,16 +223,15 @@ func TestRenderMarksBlockingChanges(t *testing.T) {
 	}
 	got := buf.String()
 	if !strings.Contains(got, "silent rewrite") {
-		t.Errorf("sortie = %q, elle doit nommer la classe du changement", got)
+		t.Errorf("output = %q, it must name the class of the change", got)
 	}
-	if !strings.Contains(got, "bloqué") {
-		t.Errorf("sortie = %q, elle doit dire que le plan est bloqué", got)
+	if !strings.Contains(got, "blocked") {
+		t.Errorf("output = %q, it must say the plan is blocked", got)
 	}
 }
 
-// Le rendu part sur stdout en texte brut : pas de couleur inconditionnelle,
-// pas de séquence d'échappement, la sortie doit rester utilisable en CI et
-// dans un pipe.
+// The rendering goes to stdout as plain text: no unconditional color, no
+// escape sequence, the output must stay usable in CI and in a pipe.
 func TestRenderIsPlainText(t *testing.T) {
 	p := &Plan{ToAdd: 1, Changes: []Change{{
 		Class: ClassSafe, Resource: "database.tasks", Detail: "(new)",
@@ -244,7 +241,7 @@ func TestRenderIsPlainText(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	if strings.Contains(buf.String(), "\x1b[") {
-		t.Error("la sortie contient une séquence d'échappement ANSI")
+		t.Error("the output contains an ANSI escape sequence")
 	}
 }
 
@@ -252,14 +249,14 @@ func TestRenderShowsDriftBeforePlan(t *testing.T) {
 	p := &Plan{
 		ToChange: 1,
 		Drifts: []Drift{{Resource: "database.tasks", Lines: []string{
-			`~ option "Fait" de la propriété "Statut" renommée en "Terminé" hors de notion-seed`,
+			`~ option "Fait" of property "Statut" renamed to "Terminé" outside notion-seed`,
 		}}},
 		Changes: []Change{{
 			Resource: "database.tasks",
 			Class:    ClassMigration,
 			Details: []resources.Detail{{
 				Op:     "~",
-				Target: `option "Terminé" → "Fait" (propriété "Statut")`,
+				Target: `option "Terminé" → "Fait" (property "Statut")`,
 				Class:  ClassMigration,
 				Count:  -1,
 			}},
@@ -271,13 +268,13 @@ func TestRenderShowsDriftBeforePlan(t *testing.T) {
 	}
 	out := b.String()
 
-	iDrift := strings.Index(out, "Dérive détectée hors de notion-seed")
+	iDrift := strings.Index(out, "Drift detected outside notion-seed")
 	iPlan := strings.Index(out, "Plan:")
 	if iDrift < 0 || iPlan < 0 || iDrift > iPlan {
-		t.Errorf("la dérive doit précéder le plan:\n%s", out)
+		t.Errorf("drift must come before the plan:\n%s", out)
 	}
 	if !strings.Contains(out, "[migration required]") {
-		t.Errorf("la classe de la ligne doit apparaître:\n%s", out)
+		t.Errorf("the line's class must appear:\n%s", out)
 	}
 }
 
@@ -293,8 +290,8 @@ func TestRenderOmitsEmptySections(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if strings.Contains(out, "Dérive") || strings.Contains(out, "Hors config") {
-		t.Errorf("sans state, la sortie doit être celle d'avant:\n%s", out)
+	if strings.Contains(out, "Drift") || strings.Contains(out, "Unmanaged") {
+		t.Errorf("without a state, the output must be what it used to be:\n%s", out)
 	}
 }
 
@@ -302,7 +299,7 @@ func TestRenderBlockedMessageNamesReasonAndRemedy(t *testing.T) {
 	p := &Plan{
 		Blocked: true,
 		BlockedReasons: []string{
-			"database.flows : réécriture silencieuse (option \"Annulé\").\n  → migrez les lignes",
+			"database.flows: silent rewrite (option \"Annulé\").\n  → migrate the rows",
 		},
 		ToChange: 1,
 		Changes: []Change{{
@@ -317,8 +314,8 @@ func TestRenderBlockedMessageNamesReasonAndRemedy(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if !strings.Contains(out, "Plan bloqué") || !strings.Contains(out, "→ migrez les lignes") {
-		t.Errorf("le blocage doit nommer sa raison et son issue:\n%s", out)
+	if !strings.Contains(out, "Plan blocked") || !strings.Contains(out, "→ migrate the rows") {
+		t.Errorf("the block must name its reason and its way out:\n%s", out)
 	}
 }
 
@@ -331,24 +328,23 @@ func TestRenderListsUnmanaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if !strings.Contains(out, "Hors config") || !strings.Contains(out, "Créé le") {
-		t.Errorf("hors config manquant:\n%s", out)
+	if !strings.Contains(out, "Unmanaged") || !strings.Contains(out, "Créé le") {
+		t.Errorf("unmanaged missing:\n%s", out)
 	}
-	// Du hors config sans aucun changement n'est pas une absence de changement :
-	// il y a bien quelque chose à montrer. Verrouille ce choix, sinon un futur
-	// correctif pourrait faire réapparaître le message par effet de bord.
-	if strings.Contains(out, "Aucun changement") {
-		t.Errorf("le hors config est un changement à montrer, pas une absence de changement:\n%s", out)
+	// Unmanaged content with no change at all is not an absence of change:
+	// there is something to show. Locks this choice in, otherwise a future fix
+	// could make the message come back as a side effect.
+	if strings.Contains(out, "No changes") {
+		t.Errorf("unmanaged content is something to show, not an absence of change:\n%s", out)
 	}
 }
 
-// La classe d'une ligne est indépendante de la classe de la ressource : une
-// database qui reçoit un ajout sûr en même temps qu'un retrait d'option de
-// status ne doit pas faire porter l'étiquette dangereuse à la ligne sûre.
-// Sans ce test, une régression qui dériverait le suffixe de chaque ligne
-// depuis c.Class au lieu de d.Class passerait inaperçue : dans tous les autres
-// tests, la classe de la ressource et celle de ses détails portent la même
-// valeur.
+// A line's class is independent of the resource's class: a database that
+// receives a safe addition together with a status option removal must not put
+// the dangerous label on the safe line. Without this test, a regression that
+// derived each line's suffix from c.Class instead of d.Class would go
+// unnoticed: in every other test, the resource's class and its details' carry
+// the same value.
 func TestRenderLineClassIsIndependentOfResourceClass(t *testing.T) {
 	p := &Plan{
 		ToChange: 1,
@@ -378,24 +374,24 @@ func TestRenderLineClassIsIndependentOfResourceClass(t *testing.T) {
 		}
 	}
 	if safeLine == "" || rewriteLine == "" {
-		t.Fatalf("lignes attendues absentes de la sortie:\n%s", out)
+		t.Fatalf("expected lines missing from the output:\n%s", out)
 	}
 	if strings.Contains(safeLine, "[") {
-		t.Errorf("une ligne sûre ne doit pas hériter de l'étiquette de la ressource: %q", safeLine)
+		t.Errorf("a safe line must not inherit the resource's label: %q", safeLine)
 	}
 	if !strings.Contains(rewriteLine, "[silent rewrite]") {
-		t.Errorf("la ligne dangereuse doit porter sa classe: %q", rewriteLine)
+		t.Errorf("the dangerous line must carry its class: %q", rewriteLine)
 	}
 }
 
-// L'ordre des sections est délibéré (voir le commentaire de Render) : le hors
-// config précède le blocage, sur le même modèle que TestRenderShowsDriftBeforePlan
-// pour dérive/plan.
+// The order of the sections is deliberate (see Render's comment): unmanaged
+// comes before the block, on the same model as TestRenderShowsDriftBeforePlan
+// for drift/plan.
 func TestRenderOrdersUnmanagedBeforeBlocked(t *testing.T) {
 	p := &Plan{
 		Blocked: true,
 		BlockedReasons: []string{
-			"database.flows : réécriture silencieuse (option \"Annulé\").\n  → migrez les lignes",
+			"database.flows: silent rewrite (option \"Annulé\").\n  → migrate the rows",
 		},
 		Unmanaged: []Unmanaged{{
 			Resource: "database.tasks", Lines: []string{`property "Créé le" (created_time)`},
@@ -414,20 +410,20 @@ func TestRenderOrdersUnmanagedBeforeBlocked(t *testing.T) {
 	}
 	out := b.String()
 
-	iUnmanaged := strings.Index(out, "Hors config")
-	iBlocked := strings.Index(out, "Plan bloqué")
+	iUnmanaged := strings.Index(out, "Unmanaged")
+	iBlocked := strings.Index(out, "Plan blocked")
 	if iUnmanaged < 0 || iBlocked < 0 || iUnmanaged > iBlocked {
-		t.Errorf("le hors config doit précéder le blocage:\n%s", out)
+		t.Errorf("unmanaged must come before the block:\n%s", out)
 	}
 }
 
-// Chaque ligne mesurée porte son chiffre : c'est ce qui fait décider.
+// Each measured line carries its figure: it is what the decision rests on.
 func TestRenderShowsTheMeasuredCount(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Class: ClassSilentRewrite,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Annulé" (propriété "Statut")`,
+			Op: "-", Target: `option "Annulé" (property "Statut")`,
 			Class: ClassSilentRewrite, Count: 47,
 			Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", Option: "Annulé"},
 		}},
@@ -437,21 +433,21 @@ func TestRenderShowsTheMeasuredCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	for _, want := range []string{"47 lignes", "réassignées", "sans trace"} {
+	for _, want := range []string{"47 rows", "reassigned", "without a trace"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("sortie:\n%s\nil manque %q", got, want)
+			t.Errorf("output:\n%s\nmissing %q", got, want)
 		}
 	}
 }
 
-// Mesuré le 2026-09-24 contre l'API : retirer une option de `select` VIDE la
-// cellule. La phrase peut donc parler de LEUR valeur, au singulier — la ligne
-// n'en portait qu'une.
+// Measured on 2026-09-24 against the API: removing a `select` option EMPTIES
+// the cell. The sentence can therefore talk about THEIR value, in the singular
+// — the row held only one.
 func TestRenderSaysASelectRemovalEmptiesTheCell(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Basse" (propriété "Priorité")`,
+			Op: "-", Target: `option "Basse" (property "Priorité")`,
 			Class: ClassDestructive, Count: 3,
 			Measure: &resources.Measurement{Property: "Priorité", PropertyType: "select", Option: "Basse"},
 		}},
@@ -460,25 +456,25 @@ func TestRenderSaysASelectRemovalEmptiesTheCell(t *testing.T) {
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "3 lignes passeront à vide") {
-		t.Errorf("sortie:\n%s\nun retrait sur select vide bien la cellule", b.String())
+	if !strings.Contains(b.String(), "3 rows will be emptied") {
+		t.Errorf("output:\n%s\na removal on select does empty the cell", b.String())
 	}
 }
 
-// Mesuré le 2026-09-24 contre l'API, sur une page jetable : une ligne portant
-// ['Un','Deux'] dont on retire 'Un' garde ['Deux'] ; une ligne ne portant que
-// ['Un'] passe à []. Un multi_select perd donc CETTE valeur, et ne se vide que
-// s'il n'en portait pas d'autre.
+// Measured on 2026-09-24 against the API, on a throwaway page: a row holding
+// ['Un','Deux'] from which 'Un' is removed keeps ['Deux']; a row holding only
+// ['Un'] goes to []. A multi_select therefore loses THIS value, and is emptied
+// only if it held no other.
 //
-// « perdront leur valeur » se lit « la cellule sera vidée » : c'est vrai pour
-// select, faux pour multi_select. Et on ne dit PAS combien de lignes se
-// videront vraiment — la mesure compte les lignes portant l'option, pas celles
-// qui n'en portent qu'elle.
+// "will lose their value" reads as "the cell will be emptied": true for
+// select, false for multi_select. And we do NOT say how many rows will really
+// be emptied — the measurement counts the rows holding the option, not those
+// holding only it.
 func TestRenderDoesNotClaimAMultiSelectRemovalEmptiesTheCell(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Un" (propriété "Tags")`,
+			Op: "-", Target: `option "Un" (property "Tags")`,
 			Class: ClassDestructive, Count: 3,
 			Measure: &resources.Measurement{Property: "Tags", PropertyType: "multi_select", Option: "Un"},
 		}},
@@ -488,24 +484,24 @@ func TestRenderDoesNotClaimAMultiSelectRemovalEmptiesTheCell(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	if strings.Contains(got, "perdront leur valeur") {
-		t.Errorf("sortie:\n%s\n« leur valeur » affirme que la cellule sera vidée, "+
-			"ce qui est faux sur multi_select", got)
+	if strings.Contains(got, "will lose their value") {
+		t.Errorf("output:\n%s\n\"their value\" asserts the cell will be emptied, "+
+			"which is false on multi_select", got)
 	}
-	for _, want := range []string{"3 lignes perdront cette valeur", "n'en portaient pas d'autre"} {
+	for _, want := range []string{"3 rows will lose this value", "they held no other"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("sortie:\n%s\nil manque %q", got, want)
+			t.Errorf("output:\n%s\nmissing %q", got, want)
 		}
 	}
 }
 
-// 0 ligne : la ligne doit le dire, et être sûre. Sans ça, l'utilisateur ne sait
-// pas que notion-seed a vérifié.
+// 0 rows: the line must say so, and be safe. Without it, the user does not
+// know notion-seed checked.
 func TestRenderSaysWhenNoRowIsAffected(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Legacy" (propriété "Priorité")`,
+			Op: "-", Target: `option "Legacy" (property "Priorité")`,
 			Class: ClassSafe, Count: 0,
 			Measure: &resources.Measurement{Property: "Priorité", PropertyType: "select", Option: "Legacy"},
 		}},
@@ -514,17 +510,17 @@ func TestRenderSaysWhenNoRowIsAffected(t *testing.T) {
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "0 ligne concernée") {
-		t.Errorf("sortie:\n%s", b.String())
+	if !strings.Contains(b.String(), "0 rows affected") {
+		t.Errorf("output:\n%s", b.String())
 	}
 }
 
-// Un compte plafonné ne doit jamais s'afficher comme un compte exact.
+// A capped count must never be shown as an exact count.
 func TestRenderMarksACappedCountAsALowerBound(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "X" (propriété "Statut")`,
+			Op: "-", Target: `option "X" (property "Statut")`,
 			Class: ClassSilentRewrite, Count: 300, Capped: true,
 			Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", Option: "X"},
 		}},
@@ -533,13 +529,13 @@ func TestRenderMarksACappedCountAsALowerBound(t *testing.T) {
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "plus de 300") {
-		t.Errorf("sortie:\n%s\nun compte plafonné doit se lire comme un minorant", b.String())
+	if !strings.Contains(b.String(), "more than 300") {
+		t.Errorf("output:\n%s\na capped count must read as a lower bound", b.String())
 	}
 }
 
-// La ligne Impact n'additionne JAMAIS deux familles différentes, et ne
-// revendique jamais plus que ce qui a été mesuré.
+// The Impact line NEVER adds up two different families, and never claims more
+// than what was measured.
 func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -551,29 +547,29 @@ func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
 		},
 	}}}
 	got := Impact(p)
-	if !strings.Contains(got, "47") || !strings.Contains(got, "jusqu'à 230") {
-		t.Errorf("Impact = %q : le compte de valeurs non vides est un MAJORANT, "+
-			"il ne dit pas combien de lignes perdront vraiment quelque chose", got)
+	if !strings.Contains(got, "47") || !strings.Contains(got, "up to 230") {
+		t.Errorf("Impact = %q: the count of non-empty values is an UPPER BOUND, "+
+			"it does not say how many rows will really lose something", got)
 	}
 }
 
-// Une ligne de migration retient sa ressource : rien n'est écrit. Son compte
-// est le coût du remède — les lignes à déplacer à la main —, jamais une perte.
-// La rendre comme un retrait annoncerait une réassignation qui n'aura pas lieu.
+// A migration line withholds its resource: nothing is written. Its count is
+// the cost of the fix — the rows to move by hand —, never a loss. Rendering it
+// as a removal would announce a reassignment that will not happen.
 func TestRenderStatesAMigrationCountAsTheRemedyCost(t *testing.T) {
 	for _, tc := range []struct {
 		name, propType string
 	}{
-		{"renommage de status", "status"},
-		{"couleur de select", "select"},
-		{"couleur de multi_select", "multi_select"},
+		{"status rename", "status"},
+		{"select color", "select"},
+		{"multi_select color", "multi_select"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &Plan{ToChange: 1, Changes: []Change{{
 				Resource: "database.tasks", Kind: resources.KindUpdate,
 				Class: ClassMigration,
 				Details: []resources.Detail{{
-					Op: "~", Target: `option "Fait" → "Terminé" (propriété "Statut")`,
+					Op: "~", Target: `option "Fait" → "Terminé" (property "Statut")`,
 					Class: ClassMigration, Count: 2,
 					Measure: &resources.Measurement{
 						Property: "Statut", PropertyType: tc.propType, Option: "Fait",
@@ -585,13 +581,13 @@ func TestRenderStatesAMigrationCountAsTheRemedyCost(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := b.String()
-			want := `→ 2 lignes portent "Fait" : à migrer à la main avant d'appliquer.`
+			want := `→ 2 rows hold "Fait": migrate them by hand before applying.`
 			if !strings.Contains(got, want) {
-				t.Errorf("sortie:\n%s\nil manque %q", got, want)
+				t.Errorf("output:\n%s\nmissing %q", got, want)
 			}
-			for _, lie := range []string{"réassignées", "passeront à vide", "perdront", "Impact :"} {
+			for _, lie := range []string{"reassigned", "will be emptied", "will lose", "Impact:"} {
 				if strings.Contains(got, lie) {
-					t.Errorf("sortie:\n%s\n%q annonce une perte qu'une ressource retenue ne cause pas",
+					t.Errorf("output:\n%s\n%q announces a loss a withheld resource does not cause",
 						got, lie)
 				}
 			}
@@ -599,8 +595,8 @@ func TestRenderStatesAMigrationCountAsTheRemedyCost(t *testing.T) {
 	}
 }
 
-// L'agrégat ne compte que ce qui sera écrit : une migration retenue n'y entre
-// pas, même à côté d'un retrait réel qu'elle ne doit pas gonfler.
+// The aggregate counts only what will be written: a withheld migration does
+// not enter it, even next to a real removal it must not inflate.
 func TestImpactExcludesMigrationLines(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -613,7 +609,7 @@ func TestImpactExcludesMigrationLines(t *testing.T) {
 				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
 		},
 	}}}
-	if got, want := Impact(p), "Impact : 3 valeurs réassignées sans trace."; got != want {
+	if got, want := Impact(p), "Impact: 3 values reassigned without a trace."; got != want {
 		t.Errorf("Impact = %q, want %q", got, want)
 	}
 	only := &Plan{Changes: []Change{{
@@ -621,7 +617,7 @@ func TestImpactExcludesMigrationLines(t *testing.T) {
 		Details:  p.Changes[0].Details[:2],
 	}}}
 	if got := Impact(only); got != "" {
-		t.Errorf("Impact = %q, want vide : une migration retenue ne perd rien", got)
+		t.Errorf("Impact = %q, want empty: a withheld migration loses nothing", got)
 	}
 }
 
@@ -631,15 +627,15 @@ func TestImpactIsEmptyWhenNothingIsAtStake(t *testing.T) {
 		Details:  []resources.Detail{{Op: "+", Class: ClassSafe, Count: -1}},
 	}}}
 	if got := Impact(p); got != "" {
-		t.Errorf("Impact = %q, want vide", got)
+		t.Errorf("Impact = %q, want empty", got)
 	}
 }
 
-// Spec §5 : apply agrège l'impact des SEULES ressources qu'il va écrire ; plan,
-// qui décrit l'écart et non une exécution, agrège tout. Les deux configurations
-// sont verrouillées : sans ressource retenue les deux totaux coïncident, avec
-// une ressource retenue celui d'apply est strictement inférieur — il en exclut
-// ce que la ressource retenue aurait coûté.
+// Spec §5: apply aggregates the impact of ONLY the resources it will write;
+// plan, which describes the gap and not an execution, aggregates everything.
+// Both setups are locked in: without a withheld resource both totals match,
+// with a withheld resource apply's is strictly lower — it excludes what the
+// withheld resource would have cost.
 func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 	written := Change{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
@@ -657,7 +653,7 @@ func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 	}
 	withheld := Change{
 		Resource: "database.projects", Kind: resources.KindUpdate,
-		Withheld: "une option doit être migrée à la main",
+		Withheld: "an option must be migrated by hand",
 		Details: []resources.Detail{
 			{Op: "~", Class: ClassMigration, Count: 2,
 				Measure: &resources.Measurement{PropertyType: "status", Option: "Fait"}},
@@ -666,44 +662,45 @@ func TestWritableImpactCountsOnlyWhatApplyWillWrite(t *testing.T) {
 		},
 	}
 
-	const writtenOnly = "Impact : 3 valeurs perdues, 1 database(s) à la corbeille avec 5 ligne(s)."
+	const writtenOnly = "Impact: 3 values lost, 1 database(s) in the trash with 5 row(s)."
 
 	clean := &Plan{Changes: []Change{written, destroyed}}
 	if got := Impact(clean); got != writtenOnly {
-		t.Fatalf("montage du test faux : Impact = %q, want %q", got, writtenOnly)
+		t.Fatalf("test setup is wrong: Impact = %q, want %q", got, writtenOnly)
 	}
 	if got := WritableImpact(clean); got != writtenOnly {
-		t.Errorf("WritableImpact = %q, want %q : sans ressource retenue, apply et plan "+
-			"annoncent le même total", got, writtenOnly)
+		t.Errorf("WritableImpact = %q, want %q: without a withheld resource, apply and plan "+
+			"announce the same total", got, writtenOnly)
 	}
 
 	mixed := &Plan{Changes: []Change{written, destroyed, withheld}}
-	if got, want := Impact(mixed), "Impact : 7 valeurs perdues, 1 database(s) à la corbeille avec 5 ligne(s)."; got != want {
-		t.Errorf("Impact = %q, want %q : plan agrège tout, retenu compris", got, want)
+	if got, want := Impact(mixed), "Impact: 7 values lost, 1 database(s) in the trash with 5 row(s)."; got != want {
+		t.Errorf("Impact = %q, want %q: plan aggregates everything, withheld included", got, want)
 	}
 	if got := WritableImpact(mixed); got != writtenOnly {
-		t.Errorf("WritableImpact = %q, want %q : apply n'agrège pas ce qu'il ne causera pas",
+		t.Errorf("WritableImpact = %q, want %q: apply does not aggregate what it will not cause",
 			got, writtenOnly)
 	}
 }
 
-// RenderForApply ne diffère de Render que par la ligne d'agrégat : tout le
-// détail du plan — ressource retenue comprise — reste rendu à l'identique.
+// RenderForApply differs from Render only by the aggregate line: the whole
+// detail of the plan — withheld resource included — stays rendered
+// identically.
 func TestRenderForApplyDiffersFromRenderOnlyByTheImpactLine(t *testing.T) {
 	p := &Plan{ToChange: 2, Changes: []Change{
 		{
 			Resource: "database.tasks", Kind: resources.KindUpdate, Class: ClassDestructive,
 			Details: []resources.Detail{{
-				Op: "-", Target: `option "Basse" (propriété "Prio")`,
+				Op: "-", Target: `option "Basse" (property "Prio")`,
 				Class: ClassDestructive, Count: 3, Property: "Prio",
 				Measure: &resources.Measurement{Property: "Prio", PropertyType: "select", Option: "Basse"},
 			}},
 		},
 		{
 			Resource: "database.projects", Kind: resources.KindUpdate, Class: ClassDestructive,
-			Withheld: "une option doit être migrée à la main",
+			Withheld: "an option must be migrated by hand",
 			Details: []resources.Detail{{
-				Op: "-", Target: `option "Legacy" (propriété "Type")`,
+				Op: "-", Target: `option "Legacy" (property "Type")`,
 				Class: ClassDestructive, Count: 4, Property: "Type",
 				Measure: &resources.Measurement{Property: "Type", PropertyType: "select", Option: "Legacy"},
 			}},
@@ -721,12 +718,12 @@ func TestRenderForApplyDiffersFromRenderOnlyByTheImpactLine(t *testing.T) {
 	if forApply.String() != want {
 		t.Errorf("RenderForApply:\n%s\nwant:\n%s", forApply.String(), want)
 	}
-	if !strings.Contains(forApply.String(), "Impact : 3 valeurs perdues.") {
-		t.Errorf("sortie:\n%s\nl'agrégat d'apply doit exclure la ressource retenue", forApply.String())
+	if !strings.Contains(forApply.String(), "Impact: 3 values lost.") {
+		t.Errorf("output:\n%s\napply's aggregate must exclude the withheld resource", forApply.String())
 	}
 }
 
-// lifecycle ne bloque plus mais doit s'entendre.
+// lifecycle no longer blocks but must be heard.
 func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 	p := &Plan{ToDestroy: 1, Changes: []Change{{
 		Resource: "database.archive", Kind: resources.KindDestroy,
@@ -738,19 +735,19 @@ func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b.String(), "prevent_destroy") {
-		t.Errorf("sortie:\n%s", b.String())
+		t.Errorf("output:\n%s", b.String())
 	}
 }
 
-// Une ligne MESURABLE dont la mesure n'a pas eu lieu ne doit pas se taire.
+// A MEASURABLE line whose measurement did not happen must not stay silent.
 //
-// Le cas est atteignable sans panne ni --skip-preflight : rich_text → number
-// est classé « réécriture silencieuse » par la table mesurée, donc le détail
-// porte une demande de mesure ; mais core/measure ne sait pas construire de
-// filtre pour rich_text, écarte la demande sans la compter pour un incident, et
-// le compte reste à -1. Sans conséquence affichée, la ligne se lit « rien à
-// signaler » — juste à côté d'une voisine qui porte son chiffre, et sur une
-// réécriture silencieuse.
+// The case is reachable without an outage or --skip-preflight: rich_text →
+// number is classified "silent rewrite" by the measured table, so the detail
+// carries a measurement request; but core/measure cannot build a filter for
+// rich_text, drops the request without counting it as an incident, and the
+// count stays at -1. With no consequence shown, the line reads "nothing to
+// report" — right next to a neighbour that carries its figure, and on a
+// silent rewrite.
 func TestRenderSaysWhenAMeasurableLineWasNotMeasured(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
@@ -765,16 +762,16 @@ func TestRenderSaysWhenAMeasurableLineWasNotMeasured(t *testing.T) {
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "impact non mesuré") {
-		t.Errorf("sortie:\n%s\nune ligne mesurable non mesurée doit le DIRE, pas se taire", b.String())
+	if !strings.Contains(b.String(), "impact not measured") {
+		t.Errorf("output:\n%s\na measurable line that was not measured must SAY so, not stay silent", b.String())
 	}
 }
 
-// « Non mesurable » et « non mesuré » ne se réparent pas pareil, donc ne se
-// disent pas pareil. Un type que notion-seed ne sait pas filtrer ne se comptera
-// pas davantage au dixième run : promettre « relancez » serait annoncer une
-// action corrective qui n'arrivera jamais — exactement la faute que ce produit
-// existe pour supprimer.
+// "Not measurable" and "not measured" are not fixed the same way, so they are
+// not said the same way. A type notion-seed cannot filter will not be counted
+// any better on the tenth run: promising "rerun" would announce a corrective
+// action that will never come — exactly the fault this product exists to
+// remove.
 func TestRenderNeverPromisesARetryOnAnUnmeasurableLine(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
@@ -790,27 +787,27 @@ func TestRenderNeverPromisesARetryOnAnUnmeasurableLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	if strings.Contains(got, "relancez") {
-		t.Errorf("sortie:\n%s\nune ligne non mesurable ne se répare pas en relançant", got)
+	if strings.Contains(got, "rerun") {
+		t.Errorf("output:\n%s\nan unmeasurable line is not fixed by rerunning", got)
 	}
-	// Elle doit malgré tout parler, et nommer ce qui bloque.
+	// It must still speak, and name what blocks.
 	if !strings.Contains(got, "rich_text") {
-		t.Errorf("sortie:\n%s\nla phrase doit nommer le type qu'on ne sait pas compter", got)
+		t.Errorf("output:\n%s\nthe sentence must name the type that cannot be counted", got)
 	}
-	if !strings.Contains(got, "inconnu") {
-		t.Errorf("sortie:\n%s\nl'impact réel reste inconnu et doit se dire", got)
+	if !strings.Contains(got, "unknown") {
+		t.Errorf("output:\n%s\nthe actual impact stays unknown and must be said", got)
 	}
 }
 
-// Le pendant exact : une mesure simplement PAS FAITE (--skip-preflight, 403,
-// 429) se répare bien en relançant, et doit garder sa promesse. Sans ce test,
-// la correction ci-dessus pourrait supprimer le remède partout.
+// The exact counterpart: a measurement simply NOT MADE (--skip-preflight, 403,
+// 429) is fixed by rerunning, and must keep its promise. Without this test,
+// the fix above could remove the remedy everywhere.
 func TestRenderStillPromisesARetryOnAMerelyUnmeasuredLine(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Class: ClassSilentRewrite,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Annulé" (propriété "Statut")`,
+			Op: "-", Target: `option "Annulé" (property "Statut")`,
 			Class: ClassSilentRewrite, Count: -1,
 			Measure: &resources.Measurement{
 				Property: "Statut", PropertyType: "status", Option: "Annulé"},
@@ -820,15 +817,15 @@ func TestRenderStillPromisesARetryOnAMerelyUnmeasuredLine(t *testing.T) {
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "relancez en ligne pour l'obtenir") {
-		t.Errorf("sortie:\n%s\nune mesure non faite se répare en relançant : dites-le", b.String())
+	if !strings.Contains(b.String(), "rerun online to get it") {
+		t.Errorf("output:\n%s\na measurement not made is fixed by rerunning: say so", b.String())
 	}
 }
 
-// Le pendant du test précédent : une ligne sans demande de mesure ne coûte
-// rien, et n'a donc aucune conséquence à annoncer. Sans cette borne, la
-// correction ci-dessus ferait déborder « impact non mesuré » sur chaque ajout
-// de propriété d'une création.
+// The counterpart of the previous test: a line with no measurement request
+// costs nothing, and so has no consequence to announce. Without this bound,
+// the fix above would spill "impact not measured" onto every property
+// addition of a creation.
 func TestRenderStaysSilentOnALineThatCostsNothing(t *testing.T) {
 	p := &Plan{ToAdd: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindCreate, Detail: "(new)",
@@ -841,16 +838,15 @@ func TestRenderStaysSilentOnALineThatCostsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(b.String(), "→") {
-		t.Errorf("sortie:\n%s\nune ligne qui ne coûte rien n'annonce rien", b.String())
+		t.Errorf("output:\n%s\na line that costs nothing announces nothing", b.String())
 	}
 }
 
-// Impact somme des comptes pris sur des mesures DIFFÉRENTES, qui peuvent
-// porter sur les mêmes lignes : deux options retirées d'une même propriété
-// multi_select se filtrent par `contains`, donc une ligne portant les deux est
-// comptée deux fois. 10 + 8 ne fait pas 18 lignes distinctes. Le total qu'on
-// détient est un nombre de valeurs — de couples (ligne, option) — et c'est
-// ainsi qu'il doit se lire.
+// Impact sums counts taken on DIFFERENT measurements, which can cover the
+// same rows: two options removed from the same multi_select property are
+// filtered with `contains`, so a row holding both is counted twice. 10 + 8
+// does not make 18 distinct rows. The total at hand is a number of values —
+// of (row, option) pairs — and that is how it must read.
 func TestImpactDoesNotPresentValuesAsDistinctRows(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -864,20 +860,20 @@ func TestImpactDoesNotPresentValuesAsDistinctRows(t *testing.T) {
 		},
 	}}}
 	got := Impact(p)
-	if strings.Contains(got, "18 lignes") {
-		t.Errorf("Impact = %q : 18 est un nombre de valeurs, pas de lignes distinctes "+
-			"(les mêmes lignes peuvent porter les deux options)", got)
+	if strings.Contains(got, "18 rows") {
+		t.Errorf("Impact = %q: 18 is a number of values, not of distinct rows "+
+			"(the same rows can hold both options)", got)
 	}
-	if !strings.Contains(got, "18 valeurs") {
-		t.Errorf("Impact = %q : le total mesuré doit rester visible, nommé pour ce qu'il est", got)
+	if !strings.Contains(got, "18 values") {
+		t.Errorf("Impact = %q: the measured total must stay visible, named for what it is", got)
 	}
 }
 
-// Un changement de type PLAFONNÉ ne se borne pas par le haut. Le compte est
-// celui des lignes non vides, donc un majorant de ce qui sera perdu — d'où
-// « jusqu'à » — mais plafonné il devient un MINORANT de ce majorant. Les deux
-// à la fois donneraient « jusqu'à plus de 300 », qui ne veut rien dire et
-// laisse croire à une borne supérieure qui n'existe pas.
+// A CAPPED type change is not bounded from above. The count is that of the
+// non-empty rows, hence an upper bound of what will be lost — hence "up to" —
+// but capped it becomes a LOWER BOUND of that upper bound. Both at once would
+// give "up to more than 300", which means nothing and suggests an upper bound
+// that does not exist.
 func TestRenderNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
@@ -893,17 +889,17 @@ func TestRenderNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	if strings.Contains(got, "jusqu'à") {
-		t.Errorf("sortie:\n%s\nun compte plafonné ne borne rien par le haut", got)
+	if strings.Contains(got, "up to") {
+		t.Errorf("output:\n%s\na capped count bounds nothing from above", got)
 	}
-	if !strings.Contains(got, "plus de 300") {
-		t.Errorf("sortie:\n%s\nle minorant mesuré doit rester visible", got)
+	if !strings.Contains(got, "more than 300") {
+		t.Errorf("output:\n%s\nthe measured lower bound must stay visible", got)
 	}
 }
 
-// La ligne Impact somme des comptes ; si l'un d'eux est plafonné, la somme est
-// un minorant et doit se lire comme tel. L'afficher en compte ferme serait
-// exactement l'affirmation invérifiée que notion-seed existe pour empêcher.
+// The Impact line sums counts; if one of them is capped, the sum is a lower
+// bound and must read as such. Showing it as a firm count would be exactly the
+// unverified claim notion-seed exists to prevent.
 func TestImpactKeepsACappedSumALowerBound(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -915,18 +911,18 @@ func TestImpactKeepsACappedSumALowerBound(t *testing.T) {
 		},
 	}}}
 	got := Impact(p)
-	if !strings.Contains(got, "plus de 300 valeurs réassignées") {
-		t.Errorf("Impact = %q : une somme qui contient un compte plafonné est un minorant", got)
+	if !strings.Contains(got, "more than 300 values reassigned") {
+		t.Errorf("Impact = %q: a sum that contains a capped count is a lower bound", got)
 	}
-	// La famille non plafonnée garde son compte ferme : le plafond de l'une ne
-	// doit pas rendre l'autre plus floue qu'elle ne l'est.
-	if !strings.Contains(got, "12 valeurs perdues") {
-		t.Errorf("Impact = %q : la famille non plafonnée garde son compte exact", got)
+	// The uncapped family keeps its firm count: the cap of one must not make
+	// the other vaguer than it is.
+	if !strings.Contains(got, "12 values lost") {
+		t.Errorf("Impact = %q: the uncapped family keeps its exact count", got)
 	}
 }
 
-// Même raisonnement sur la famille « appauvries » : plafonnée, elle perd sa
-// borne supérieure, donc son « jusqu'à ».
+// Same reasoning on the "degraded" family: capped, it loses its upper bound,
+// hence its "up to".
 func TestImpactNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -936,24 +932,24 @@ func TestImpactNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 		}},
 	}}}
 	got := Impact(p)
-	if strings.Contains(got, "jusqu'à") {
-		t.Errorf("Impact = %q : un compte plafonné ne borne rien par le haut", got)
+	if strings.Contains(got, "up to") {
+		t.Errorf("Impact = %q: a capped count bounds nothing from above", got)
 	}
 	if got == "" {
-		t.Error("Impact ne doit pas se taire : des lignes seront appauvries")
+		t.Error("Impact must not stay silent: rows will be degraded")
 	}
 }
 
-// Une option de status qui disparaît dans un CHANGEMENT DE TYPE n'est pas un
-// retrait d'option de status : rien ne reste où réassigner la ligne. Mesuré sur
-// select → multi_select le 2026-09-25, la ligne perd la valeur dont le nom ne
-// revient pas ; l'annoncer « réassignée » affirmerait un sort qui n'est pas le
-// sien, et la rangerait dans le mauvais total.
+// A status option that disappears in a TYPE CHANGE is not a status option
+// removal: nothing remains to reassign the row to. Measured on select →
+// multi_select on 2026-09-25, the row loses the value whose name does not come
+// back; announcing it "reassigned" would assert a fate that is not its own,
+// and file it under the wrong total.
 func TestRenderSaysARetypedStatusOptionEmptiesTheCell(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Fait" (propriété "Statut")`,
+			Op: "-", Target: `option "Fait" (property "Statut")`,
 			Class: ClassDestructive, Count: 2,
 			Measure: &resources.Measurement{
 				Property: "Statut", PropertyType: "status", Option: "Fait", Retyped: true,
@@ -965,24 +961,24 @@ func TestRenderSaysARetypedStatusOptionEmptiesTheCell(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	if !strings.Contains(got, "2 lignes passeront à vide") {
-		t.Errorf("sortie:\n%s\nil manque « 2 lignes passeront à vide »", got)
+	if !strings.Contains(got, "2 rows will be emptied") {
+		t.Errorf("output:\n%s\nmissing \"2 rows will be emptied\"", got)
 	}
-	if strings.Contains(got, "réassignées") {
-		t.Errorf("sortie:\n%s\nune option qui disparaît avec son type ne réassigne rien", got)
+	if strings.Contains(got, "reassigned") {
+		t.Errorf("output:\n%s\nan option that disappears with its type reassigns nothing", got)
 	}
-	if !strings.Contains(got, "Impact : 2 valeurs perdues.") {
-		t.Errorf("sortie:\n%s\nle total doit compter une perte, pas une réassignation", got)
+	if !strings.Contains(got, "Impact: 2 values lost.") {
+		t.Errorf("output:\n%s\nthe total must count a loss, not a reassignment", got)
 	}
 }
 
-// Depuis multi_select, le sort d'une option perdue dans un changement de type
-// n'a pas été mesuré : la phrase dit la perte, sans décrire ce qu'il reste.
+// From multi_select, the fate of an option lost in a type change was not
+// measured: the sentence states the loss, without describing what remains.
 func TestRenderStaysCautiousOnARetypedMultiSelectOption(t *testing.T) {
 	p := &Plan{ToChange: 1, Changes: []Change{{
 		Resource: "database.tasks", Kind: resources.KindUpdate,
 		Details: []resources.Detail{{
-			Op: "-", Target: `option "Un" (propriété "Tags")`,
+			Op: "-", Target: `option "Un" (property "Tags")`,
 			Class: ClassDestructive, Count: 3,
 			Measure: &resources.Measurement{
 				Property: "Tags", PropertyType: "multi_select", Option: "Un", Retyped: true,
@@ -994,11 +990,11 @@ func TestRenderStaysCautiousOnARetypedMultiSelectOption(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.String()
-	if !strings.Contains(got, "3 lignes perdront cette valeur (sort exact non mesuré)") {
-		t.Errorf("sortie:\n%s\nil manque la perte prudente", got)
+	if !strings.Contains(got, "3 rows will lose this value (exact outcome not measured)") {
+		t.Errorf("output:\n%s\nmissing the cautious loss", got)
 	}
-	if strings.Contains(got, "n'en portaient pas d'autre") {
-		t.Errorf("sortie:\n%s\nun sort non mesuré est décrit", got)
+	if strings.Contains(got, "they held no other") {
+		t.Errorf("output:\n%s\nan unmeasured fate is described", got)
 	}
 }
 
@@ -1013,20 +1009,20 @@ func destroyOf(key string, count int, capped bool) Change {
 	}
 }
 
-// La ligne d'une destruction dit combien de lignes partent avec la database —
-// ou qu'on ne le sait pas. Se taire la rendrait indiscernable d'une database
-// vide.
+// A destruction's line says how many rows go with the database — or that it
+// is not known. Staying silent would make it indistinguishable from an empty
+// database.
 func TestRenderSaysHowManyRowsADestroyTakesWithIt(t *testing.T) {
 	tests := []struct {
 		count  int
 		capped bool
 		want   string
 	}{
-		{1, false, "→ 1 ligne(s) partent à la corbeille avec elle."},
-		{0, false, "→ aucune ligne ne part à la corbeille avec elle."},
-		{300, true, "→ plus de 300 ligne(s) partent à la corbeille avec elle."},
-		{-1, false, "→ nombre de lignes qui partent à la corbeille avec elle non mesuré ; " +
-			"relancez pour l'obtenir."},
+		{1, false, "→ 1 row(s) go to the trash with it."},
+		{0, false, "→ no rows go to the trash with it."},
+		{300, true, "→ more than 300 row(s) go to the trash with it."},
+		{-1, false, "→ number of rows going to the trash with it not measured; " +
+			"rerun to get it."},
 	}
 	for _, tt := range tests {
 		p := &Plan{ToDestroy: 1, Changes: []Change{destroyOf("b", tt.count, tt.capped)}}
@@ -1038,40 +1034,40 @@ func TestRenderSaysHowManyRowsADestroyTakesWithIt(t *testing.T) {
 			t.Errorf("count=%d:\n%s\nwant %q", tt.count, b.String(), tt.want)
 		}
 		if !strings.Contains(b.String(), "[destructive]") {
-			t.Errorf("count=%d : la destruction a perdu sa classe:\n%s", tt.count, b.String())
+			t.Errorf("count=%d: the destruction lost its class:\n%s", tt.count, b.String())
 		}
 	}
 }
 
-// L'agrégat compte les lignes des databases détruites. Un compte inconnu ne
-// devient jamais 0 : il est dit, et le total connu devient un minorant.
+// The aggregate counts the rows of the destroyed databases. An unknown count
+// never becomes 0: it is stated, and the known total becomes a lower bound.
 func TestImpactCountsTheRowsOfDestroyedDatabases(t *testing.T) {
 	tests := []struct {
 		name    string
 		changes []Change
 		want    string
 	}{
-		{"une", []Change{destroyOf("b", 1, false)},
-			"Impact : 1 database(s) à la corbeille avec 1 ligne(s)."},
-		{"somme", []Change{destroyOf("a", 2, false), destroyOf("b", 3, false)},
-			"Impact : 2 database(s) à la corbeille avec 5 ligne(s)."},
-		{"plafond", []Change{destroyOf("a", 300, true), destroyOf("b", 3, false)},
-			"Impact : 2 database(s) à la corbeille avec plus de 303 ligne(s)."},
-		{"inconnu", []Change{destroyOf("b", -1, false)},
-			"Impact : 1 database(s) à la corbeille, lignes non comptées."},
-		{"partiel", []Change{destroyOf("a", 2, false), destroyOf("b", -1, false)},
-			"Impact : 2 database(s) à la corbeille avec au moins 2 ligne(s), " +
-				"lignes non comptées pour 1 d'entre elles."},
+		{"one", []Change{destroyOf("b", 1, false)},
+			"Impact: 1 database(s) in the trash with 1 row(s)."},
+		{"sum", []Change{destroyOf("a", 2, false), destroyOf("b", 3, false)},
+			"Impact: 2 database(s) in the trash with 5 row(s)."},
+		{"capped", []Change{destroyOf("a", 300, true), destroyOf("b", 3, false)},
+			"Impact: 2 database(s) in the trash with more than 303 row(s)."},
+		{"unknown", []Change{destroyOf("b", -1, false)},
+			"Impact: 1 database(s) in the trash, rows not counted."},
+		{"partial", []Change{destroyOf("a", 2, false), destroyOf("b", -1, false)},
+			"Impact: 2 database(s) in the trash with at least 2 row(s), " +
+				"rows not counted for 1 of them."},
 	}
 	for _, tt := range tests {
 		if got := Impact(&Plan{Changes: tt.changes}); got != tt.want {
-			t.Errorf("%s : Impact = %q, want %q", tt.name, got, tt.want)
+			t.Errorf("%s: Impact = %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }
 
-// Un compte qui ne couvre qu'un des data sources d'une database est un minorant,
-// et la ligne comme l'agrégat le disent.
+// A count that covers only one of a database's data sources is a lower bound,
+// and both the line and the aggregate say so.
 func TestRenderSaysAtLeastWhenSomeDataSourcesWereNotCounted(t *testing.T) {
 	partial := destroyOf("b", 3, false)
 	partial.Details[0].Measure.UncountedDataSources = 1
@@ -1081,22 +1077,22 @@ func TestRenderSaysAtLeastWhenSomeDataSourcesWereNotCounted(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"→ au moins 3 ligne(s) partent à la corbeille avec elle : 1 de ses 2 data sources n'a pas été compté.",
-		"Impact : 1 database(s) à la corbeille avec au moins 3 ligne(s).",
+		"→ at least 3 row(s) go to the trash with it: 1 of its 2 data sources was not counted.",
+		"Impact: 1 database(s) in the trash with at least 3 row(s).",
 	} {
 		if !strings.Contains(b.String(), want) {
-			t.Errorf("sortie:\n%s\nwant %q", b.String(), want)
+			t.Errorf("output:\n%s\nwant %q", b.String(), want)
 		}
 	}
 
 	capped := destroyOf("b", 300, true)
 	capped.Details[0].Measure.UncountedDataSources = 2
 	if got, want := consequence(capped.Details[0]),
-		"plus de 300 ligne(s) partent à la corbeille avec elle : 2 de ses 3 data sources n'ont pas été comptés"; got != want {
+		"more than 300 row(s) go to the trash with it: 2 of its 3 data sources were not counted"; got != want {
 		t.Errorf("consequence = %q, want %q", got, want)
 	}
 	if got, want := Impact(&Plan{Changes: []Change{capped, destroyOf("a", 2, false)}}),
-		"Impact : 2 database(s) à la corbeille avec plus de 302 ligne(s)."; got != want {
+		"Impact: 2 database(s) in the trash with more than 302 row(s)."; got != want {
 		t.Errorf("Impact = %q, want %q", got, want)
 	}
 }
