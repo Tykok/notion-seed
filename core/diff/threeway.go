@@ -365,7 +365,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			d.Property = name
 			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
 			// A pair the table says is SAFE (select→multi_select,
-			// number→rich_text, status→select, date→rich_text) requires no
+			// number→rich_text, date→rich_text) requires no
 			// measurement: the count would change neither its class nor the
 			// decision, and notion-seed would pay an API call for a number that
 			// says nothing. Not paying for calls for nothing is a property of the

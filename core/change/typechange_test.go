@@ -14,7 +14,9 @@ func TestClassifyTypeChangeUsesMeasuredCouples(t *testing.T) {
 	}{
 		{"select", "multi_select", ClassSafe},
 		{"number", "rich_text", ClassSafe},
-		{"status", "select", ClassSafe},
+		// Re-measured on 2026-09-25: every row is emptied, including a row
+		// that never had a status and reads "Not started".
+		{"status", "select", ClassDestructive},
 		{"date", "rich_text", ClassSafe},
 		{"multi_select", "select", ClassSilentRewrite},
 		{"rich_text", "number", ClassSilentRewrite},
