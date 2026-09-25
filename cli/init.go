@@ -13,32 +13,32 @@ import (
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Vérifie la connexion de notion-seed au workspace Notion",
-		Long: "init ne gère pas l'authentification lui-même : `ntn login` est interactif\n" +
-			"et stocke le jeton dans le keychain de l'OS. init vérifie que ntn est\n" +
-			"présent, assez récent et authentifié, et indique quoi faire sinon.",
+		Short: "Check notion-seed's connection to the Notion workspace",
+		Long: "init does not handle authentication itself: `ntn login` is interactive\n" +
+			"and stores the token in the OS keychain. init checks that ntn is\n" +
+			"present, recent enough and authenticated, and says what to do otherwise.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info, err := preflight.Check(cmd.Context(), "ntn")
 			var notAuth *preflight.NotAuthenticatedError
 			switch {
 			case errors.As(err, &notAuth):
-				// Le message de preflight n'est PAS enveloppé : il conseille de
-				// lancer `notion-seed init`, ce que l'utilisateur vient de faire.
-				// init émet donc son propre conseil — mais annexe la cause, sans
-				// quoi une panne réseau ou un plantage de ntn s'afficheraient comme
-				// « pas authentifié », sur la commande dont le seul rôle est de
-				// diagnostiquer l'environnement.
+				// The preflight message is NOT wrapped: it advises running
+				// `notion-seed init`, which the user just did. init therefore
+				// emits its own advice — but appends the cause, without which a
+				// network outage or an ntn crash would show as "not
+				// authenticated", on the command whose only job is to diagnose
+				// the environment.
 				return fmt.Errorf(
-					"ntn n'est pas authentifié.\n\n  Lancez d'abord :\n\n    ntn login\n\n"+
-						"  Puis relancez `notion-seed init`.\n\n  Cause : %v\n",
+					"ntn is not authenticated.\n\n  First run:\n\n    ntn login\n\n"+
+						"  Then rerun `notion-seed init`.\n\n  Cause: %v\n",
 					notAuth.Cause)
 			case err != nil:
 				return err
 			}
 			cmd.Printf("ntn %s\n", info.NtnVersion)
-			cmd.Printf("workspace : %s (%s)\n", info.WorkspaceName, info.WorkspaceID)
-			cmd.Printf("connecté en tant que : %s\n", info.BotEmail)
+			cmd.Printf("workspace: %s (%s)\n", info.WorkspaceName, info.WorkspaceID)
+			cmd.Printf("signed in as: %s\n", info.BotEmail)
 			return nil
 		},
 	}

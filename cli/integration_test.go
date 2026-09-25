@@ -9,15 +9,15 @@ import (
 	"testing"
 )
 
-// TestIntegrationPlanAgainstRealWorkspace tourne contre le vrai ntn et le vrai
-// workspace. Jamais dans la boucle par défaut : il exige une authentification
-// et une page parente réelle.
+// TestIntegrationPlanAgainstRealWorkspace runs against the real ntn and the
+// real workspace. Never in the default loop: it requires authentication and a
+// real parent page.
 //
 //	NOTION_SEED_IT_PARENT_PAGE_ID=<id> go test ./cli/ -run TestIntegration -v
 func TestIntegrationPlanAgainstRealWorkspace(t *testing.T) {
 	pageID := os.Getenv("NOTION_SEED_IT_PARENT_PAGE_ID")
 	if pageID == "" {
-		t.Skip("NOTION_SEED_IT_PARENT_PAGE_ID non défini")
+		t.Skip("NOTION_SEED_IT_PARENT_PAGE_ID not set")
 	}
 
 	dir := writeConfigDir(t, map[string]string{
@@ -36,11 +36,11 @@ func TestIntegrationPlanAgainstRealWorkspace(t *testing.T) {
 	}
 	got := out.String()
 	if !strings.Contains(got, "Plan: 2 to add") {
-		t.Errorf("sortie inattendue:\n%s", got)
+		t.Errorf("unexpected output:\n%s", got)
 	}
-	// La sortie doit nommer le workspace : c'est le garde-fou qui évite
-	// d'opérer sur le mauvais.
+	// The output must name the workspace: it is the safeguard against
+	// operating on the wrong one.
 	if !strings.Contains(got, "workspace ") {
-		t.Errorf("la sortie ne nomme pas le workspace:\n%s", got)
+		t.Errorf("the output does not name the workspace:\n%s", got)
 	}
 }

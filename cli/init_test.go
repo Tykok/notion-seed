@@ -34,10 +34,10 @@ func TestInitReportsMissingNtnWithInstallCommand(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("Execute() error = nil, want une erreur quand ntn est absent")
+		t.Fatal("Execute() error = nil, want an error when ntn is missing")
 	}
 	if !strings.Contains(err.Error(), "npm i -g ntn") {
-		t.Errorf("message = %q, il doit donner la commande d'installation", err.Error())
+		t.Errorf("message = %q, it must give the install command", err.Error())
 	}
 }
 
@@ -52,21 +52,21 @@ func TestInitTellsUserToRunNtnLoginWhenNotAuthenticated(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("Execute() error = nil, want une erreur quand ntn n'est pas authentifié")
+		t.Fatal("Execute() error = nil, want an error when ntn is not authenticated")
 	}
 	if !strings.Contains(err.Error(), "ntn login") {
-		t.Errorf("message = %q, il doit dire de lancer `ntn login`", err.Error())
+		t.Errorf("message = %q, it must say to run `ntn login`", err.Error())
 	}
-	// init ne doit pas conseiller de relancer `notion-seed init` avant d'avoir
-	// dit de lancer `ntn login` : l'utilisateur vient de taper init.
+	// init must not advise rerunning `notion-seed init` before saying to run
+	// `ntn login`: the user just typed init.
 	if strings.Index(err.Error(), "ntn login") > strings.Index(err.Error(), "notion-seed init") {
-		t.Errorf("message = %q : `ntn login` doit venir avant la relance de `notion-seed init`", err.Error())
+		t.Errorf("message = %q: `ntn login` must come before rerunning `notion-seed init`", err.Error())
 	}
-	// La cause est annexée : sans elle, une panne réseau ou un plantage interne
-	// de ntn s'affichent comme « pas authentifié », sur la commande dont le seul
-	// rôle est de diagnostiquer l'environnement.
+	// The cause is appended: without it, a network outage or an internal ntn
+	// crash shows as "not authenticated", on the command whose only job is to
+	// diagnose the environment.
 	if !strings.Contains(err.Error(), "not logged in") {
-		t.Errorf("message = %q, il doit annexer la cause rapportée par ntn", err.Error())
+		t.Errorf("message = %q, it must append the cause reported by ntn", err.Error())
 	}
 }
 
@@ -85,7 +85,7 @@ func TestInitReportsWorkspaceWhenAuthenticated(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{"0.22.11", "Example Space", "bot@example.com"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("sortie = %q, elle doit contenir %q", got, want)
+			t.Errorf("output = %q, it must contain %q", got, want)
 		}
 	}
 }

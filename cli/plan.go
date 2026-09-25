@@ -21,7 +21,7 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// planOptions porte les flags partagés par plan et diff.
+// planOptions holds the flags shared by plan and diff.
 type planOptions struct {
 	dir           string
 	skipPreflight bool
@@ -32,47 +32,46 @@ type planOptions struct {
 
 func (o *planOptions) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&o.dir, "dir", ".",
-		"dossier de configuration (contient workspace.yaml et databases/)")
+		"configuration directory (contains workspace.yaml and databases/)")
 	cmd.Flags().BoolVar(&o.skipPreflight, "skip-preflight", false,
-		"mode entièrement hors ligne : ne vérifie ni ntn (présence, version, auth) "+
-			"ni l'existence de la page parente. Valide la configuration et rend le "+
-			"plan sans aucun appel réseau.")
+		"fully offline mode: checks neither ntn (presence, version, auth) "+
+			"nor the existence of the parent page. Validates the configuration and renders the "+
+			"plan without any network call.")
 	cmd.Flags().Float64Var(&o.ratePerSec, "rate", transport.DefaultRatePerSec,
-		"plafond d'appels API par seconde")
+		"cap on API calls per second")
 	cmd.Flags().IntVar(&o.burst, "burst", transport.DefaultBurst,
-		"nombre d'appels tolérés en rafale")
+		"number of calls tolerated in a burst")
 	cmd.Flags().StringSliceVar(&o.failOn, "fail-on", nil,
-		"classes de changement qui font sortir en code non nul : destructive, "+
-			"silent-rewrite, unknown, migration. Vide = rien ne fait échouer.")
+		"change classes that cause a non-zero exit code: destructive, "+
+			"silent-rewrite, unknown, migration. Empty = nothing fails.")
 }
 
-// validate rejette les valeurs de flags que le rate limiter refuse. Sans ça,
-// `--rate 0` remonterait en panic depuis NewTokenBucket, ce qui est un message
-// inutilisable pour l'utilisateur.
+// validate rejects the flag values the rate limiter refuses. Without it,
+// `--rate 0` would surface as a panic from NewTokenBucket, which is a useless
+// message for the user.
 func (o *planOptions) validate() error {
 	if o.ratePerSec <= 0 {
-		return fmt.Errorf("--rate doit être strictement positif, reçu %v", o.ratePerSec)
+		return fmt.Errorf("--rate must be strictly positive, got %v", o.ratePerSec)
 	}
 	if o.burst <= 0 {
-		return fmt.Errorf("--burst doit être strictement positif, reçu %d", o.burst)
+		return fmt.Errorf("--burst must be strictly positive, got %d", o.burst)
 	}
-	// La valeur de --fail-on est résolue ICI, donc avant config.Load et avant le
-	// moindre appel réseau. Un nom mal tapé qui ne serait refusé qu'après le
-	// plan laisserait une CI passer au vert en croyant se protéger : le flag ne
-	// protégerait pas, et personne ne le saurait.
+	// The --fail-on value is resolved HERE, hence before config.Load and before
+	// any network call. A mistyped name rejected only after the plan would let a
+	// CI go green believing it is protected: the flag would not protect, and
+	// nobody would know.
 	if _, err := failOnClasses(o.failOn); err != nil {
 		return err
 	}
 	return nil
 }
 
-// failOnClasses traduit les valeurs de --fail-on en classes.
+// failOnClasses translates the --fail-on values into classes.
 //
-// La liste est ÉNUMÉRÉE, pas un seuil : `sûr`, `destructif` et `réécriture
-// silencieuse` forment bien une échelle, mais un impact inconnu n'y a pas de
-// place — un couple de types non mesuré peut se révéler anodin comme
-// catastrophique. Le traiter comme « pire que destructif » serait aussi faux
-// que l'inverse.
+// The list is ENUMERATED, not a threshold: `safe`, `destructive` and `silent
+// rewrite` do form a scale, but an unknown impact has no place on it — an
+// unmeasured type pair can turn out harmless or catastrophic. Treating it as
+// "worse than destructive" would be as wrong as the opposite.
 func failOnClasses(values []string) ([]change.Class, error) {
 	byName := map[string]change.Class{
 		"destructive":    change.ClassDestructive,
@@ -85,22 +84,21 @@ func failOnClasses(values []string) ([]change.Class, error) {
 		c, ok := byName[v]
 		if !ok {
 			return nil, fmt.Errorf(
-				"--fail-on ne connaît pas %q\n"+
-					"  → valeurs acceptées : destructive, silent-rewrite, unknown, "+
-					"migration ; séparez-les par des virgules", v)
+				"--fail-on does not know %q\n"+
+					"  → accepted values: destructive, silent-rewrite, unknown, "+
+					"migration; separate them with commas", v)
 		}
 		out = append(out, c)
 	}
 	return out, nil
 }
 
-// firstMatchingClass rend la première classe du plan qui figure dans la liste,
-// ou ClassSafe si aucune ne correspond.
+// firstMatchingClass returns the first class of the plan that is in the list,
+// or ClassSafe if none matches.
 //
-// La recherche porte sur les DÉTAILS, pas sur la classe agrégée de la
-// ressource : c'est le détail qui porte le coût mesuré, et l'agrégat d'une
-// ressource par ailleurs dangereuse ferait échouer sur une ligne qui ne coûte
-// rien.
+// The search looks at the DETAILS, not at the resource's aggregate class: the
+// detail is what carries the measured cost, and the aggregate of an otherwise
+// dangerous resource would fail on a line that costs nothing.
 func firstMatchingClass(p *diff.Plan, classes []change.Class) change.Class {
 	for _, c := range p.Changes {
 		for _, d := range c.Details {
@@ -114,13 +112,13 @@ func firstMatchingClass(p *diff.Plan, classes []change.Class) change.Class {
 	return change.ClassSafe
 }
 
-// checkFailOn fait sortir en code non nul si le plan porte une des classes
-// énumérées par --fail-on.
+// checkFailOn exits with a non-zero code if the plan carries one of the
+// classes enumerated by --fail-on.
 //
-// plan, diff ET apply passent par ici : les trois commandes partagent
-// planOptions, donc les trois exposent le flag. Un flag affiché dans l'aide
-// d'apply mais ignoré par apply serait pire que pas de flag du tout — la CI
-// qui écrit est justement celle qui croit se protéger.
+// plan, diff AND apply go through here: the three commands share planOptions,
+// so all three expose the flag. A flag shown in apply's help but ignored by
+// apply would be worse than no flag at all — the CI that writes is precisely
+// the one that believes it is protected.
 func checkFailOn(p *diff.Plan, failOn []string) error {
 	classes, err := failOnClasses(failOn)
 	if err != nil {
@@ -128,9 +126,9 @@ func checkFailOn(p *diff.Plan, failOn []string) error {
 	}
 	if hit := firstMatchingClass(p, classes); hit != change.ClassSafe {
 		return fmt.Errorf(
-			"le plan porte un changement de classe %q, refusé par --fail-on\n"+
-				"  → relisez le plan ci-dessus ; retirez cette classe de --fail-on "+
-				"si le changement est voulu", hit)
+			"the plan carries a change of class %q, rejected by --fail-on\n"+
+				"  → review the plan above; remove this class from --fail-on "+
+				"if the change is intended", hit)
 	}
 	return nil
 }
@@ -139,7 +137,7 @@ func newPlanCmd() *cobra.Command {
 	opts := &planOptions{}
 	cmd := &cobra.Command{
 		Use:   "plan",
-		Short: "Calcule et affiche les changements, sans rien appliquer",
+		Short: "Compute and show the changes, without applying anything",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPlan(cmd, opts)
@@ -149,51 +147,51 @@ func newPlanCmd() *cobra.Command {
 	return cmd
 }
 
-// prepared porte tout ce que plan et apply calculent de la même façon.
+// prepared holds everything plan and apply compute the same way.
 //
-// Les deux commandes DOIVENT passer par ici : si apply recalculait autrement,
-// le plan affiché et ce qui est écrit pourraient diverger — le défaut même que
-// la cible résolue existe pour rendre impossible.
+// Both commands MUST go through here: if apply recomputed differently, the
+// plan shown and what is written could diverge — the very defect the resolved
+// target exists to make impossible.
 type prepared struct {
 	cfg  *config.Config
 	snap *state.Snapshot
 	plan *diff.Plan
-	// tr est nil sous --skip-preflight : aucun appel n'a été émis.
+	// tr is nil under --skip-preflight: no call was made.
 	tr transport.Transport
-	// workspaceID est celui sur lequel ntn est authentifié. Vide sous
-	// --skip-preflight, où aucun whoami n'a été fait. apply l'inscrit dans le
-	// state qu'il crée : sans lui, checkWorkspaceMatch reste désarmé à vie pour
-	// un projet amorcé par apply plutôt que par import.
+	// workspaceID is the one ntn is authenticated on. Empty under
+	// --skip-preflight, where no whoami was made. apply records it in the state
+	// it creates: without it, checkWorkspaceMatch stays disarmed forever for a
+	// project bootstrapped by apply rather than by import.
 	workspaceID string
-	// measureFailures porte les comptages qui n'ont pas abouti. Ce sont des
-	// incidents, pas du plan : ils s'affichent sur stderr, et ne font échouer
-	// ni plan ni apply — la ligne concernée reste simplement en « impact
-	// inconnu », ce qui est la vérité.
+	// measureFailures holds the counts that did not succeed. They are
+	// incidents, not plan: they are printed on stderr, and fail neither plan
+	// nor apply — the affected line simply stays "unknown impact", which is the
+	// truth.
 	measureFailures []string
 }
 
 func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
-	// Pas de fallback sur un contexte nil : cobra le peuple toujours avant RunE
-	// (vérifié dans les sources de v1.10.2), et un fallback silencieux
-	// masquerait une erreur de programmation au lieu de la révéler.
+	// No fallback on a nil context: cobra always populates it before RunE
+	// (checked in the v1.10.2 sources), and a silent fallback would hide a
+	// programming error instead of revealing it.
 	ctx := cmd.Context()
 
-	// 0. Valider les flags AVANT tout. NewTokenBucket panique sur un rate non
-	// positif, et une panic est un message inutilisable pour qui a tapé
+	// 0. Validate the flags BEFORE anything. NewTokenBucket panics on a
+	// non-positive rate, and a panic is a useless message for someone who typed
 	// `--rate 0`.
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
 
-	// 1. Load — valider chaque fichier, fusionner, PUIS vérifier l'unicité
-	// globale des key. config.Load garantit cet ordre.
+	// 1. Load — validate each file, merge, THEN check the global uniqueness of
+	// keys. config.Load guarantees this order.
 	cfg, err := config.Load(opts.dir)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. State — le dernier état appliqué. Absent = premier run, tout ressort
-	// en création, exactement comme avant l'existence du state.
+	// 2. State — the last applied state. Absent = first run, everything comes
+	// out as a creation, exactly as before the state existed.
 	snap, err := state.Load(opts.dir)
 	if err != nil {
 		return nil, err
@@ -219,24 +217,24 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 			return nil, err
 		}
 
-		// 3. Refresh — lire l'état réel des seules ressources que le state ancre.
-		// Sans id, aucune mise en correspondance n'est possible : une database
-		// non importée ressort en création, ce qui est exact.
+		// 3. Refresh — read the actual state of only the resources the state
+		// anchors. Without an id, no matching is possible: a database that was
+		// not imported comes out as a creation, which is accurate.
 		refreshed, err = refreshManaged(ctx, out.tr, snap)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// 4. Diff — config, state et réel.
+	// 4. Diff — config, state and actual state.
 	out.plan, err = diff.Compute(cfg, snap, refreshed)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. Mesure — remplir les comptes et reclasser. Hors ligne, rien n'est
-	// mesuré et chaque ligne concernée reste en « impact inconnu », ce qui est
-	// la vérité : on n'a rien lu.
+	// 5. Measurement — fill in the counts and reclassify. Offline, nothing is
+	// measured and each affected line stays "unknown impact", which is the
+	// truth: nothing was read.
 	if out.tr != nil {
 		out.measureFailures = measure.Enrich(ctx, measure.NewCounter(out.tr),
 			measuredDataSourceIDs(snap, refreshed), out.plan)
@@ -244,17 +242,18 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 	return out, nil
 }
 
-// measuredDataSourceIDs associe chaque key au data source à INTERROGER.
+// measuredDataSourceIDs maps each key to the data source to QUERY.
 //
-// L'id frais, celui que le refresh vient de lire, l'emporte sur celui du
-// state : le plan est calculé contre le réel relu, et mesurer ailleurs
-// compterait les lignes d'un autre objet. Un data source qui a changé d'id
-// laisse derrière lui un ancien id qui peut être encore vivant — il appartient
-// alors à une autre database, répond 200, et le 0 qui en sortirait ferait
-// annoncer « rien à perdre » sur un retrait qui coûte.
+// The fresh id, the one the refresh just read, wins over the state's: the plan
+// is computed against the actual state read back, and measuring elsewhere
+// would count the rows of another object. A data source whose id changed
+// leaves behind an old id that may still be alive — it then belongs to another
+// database, answers 200, and the 0 coming out of it would announce "nothing
+// to lose" on a removal that costs.
 //
-// Le state reste le repli : sous --skip-preflight rien n'est relu, et une
-// ressource relue sans data source id n'a rien de mieux à proposer.
+// The state remains the fallback: under --skip-preflight nothing is read back,
+// and a resource read back without a data source id has nothing better to
+// offer.
 func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refreshed) map[string]string {
 	out := make(map[string]string, len(refreshed))
 	if snap != nil {
@@ -263,8 +262,8 @@ func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refre
 		}
 	}
 	for key, r := range refreshed {
-		// Une ressource introuvable ou archivée n'a pas été lue : son
-		// Database est vide, et l'écraser avec du vide effacerait le repli.
+		// A resource that is not found or archived was not read: its Database
+		// is empty, and overwriting with empty would erase the fallback.
 		if r.Missing || r.Database.DataSourceID == "" {
 			continue
 		}
@@ -273,12 +272,12 @@ func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refre
 	return out
 }
 
-// reportMeasureFailures dit ce qui n'a pas pu être compté, sur stderr : ce sont
-// des incidents, pas du plan. stdout ne porte que le plan, qui doit rester
-// exploitable dans un pipe.
+// reportMeasureFailures says what could not be counted, on stderr: these are
+// incidents, not plan. stdout carries only the plan, which must stay usable in
+// a pipe.
 func reportMeasureFailures(cmd *cobra.Command, prep *prepared) {
 	for _, f := range prep.measureFailures {
-		fmt.Fprintln(cmd.ErrOrStderr(), "comptage impossible — "+f)
+		fmt.Fprintln(cmd.ErrOrStderr(), "count failed — "+f)
 	}
 }
 
@@ -290,47 +289,47 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 	p := prep.plan
 	reportMeasureFailures(cmd, prep)
 
-	// 6. Render — texte brut sur stdout.
+	// 6. Render — plain text on stdout.
 	if err := diff.Render(cmd.OutOrStdout(), p); err != nil {
 		return err
 	}
 	if p.Blocked {
-		// Le rendu ci-dessus détaille déjà chaque raison de blocage avec son
-		// action corrective (section « Plan bloqué »). Cette erreur ne les
-		// répète pas, mais porte quand même sa propre flèche : elle atteint
-		// l'utilisateur telle quelle sur stderr (cli/root.go l'imprime), et la
-		// contrainte du projet sur les messages d'erreur est inconditionnelle.
-		return fmt.Errorf("plan bloqué\n" +
-			"  → chaque blocage est détaillé ci-dessus, avec ce qui le lève")
+		// The render above already details each block reason with its
+		// corrective action ("Plan blocked" section). This error does not
+		// repeat them, but still carries its own arrow: it reaches the user as
+		// is on stderr (cli/root.go prints it), and the project's constraint on
+		// error messages is unconditional.
+		return fmt.Errorf("plan blocked\n" +
+			"  → each block is detailed above, with what clears it")
 	}
-	// APRÈS le rendu : --fail-on fait sortir en code non nul, il ne prive pas
-	// l'utilisateur du plan qui explique pourquoi. Le message d'erreur renvoie
-	// à ce qui vient d'être écrit.
+	// AFTER the render: --fail-on exits with a non-zero code, it does not
+	// deprive the user of the plan that explains why. The error message points
+	// to what was just printed.
 	return checkFailOn(p, opts.failOn)
 }
 
-// checkWorkspaceMatch refuse un state venu d'un autre workspace.
+// checkWorkspaceMatch rejects a state coming from another workspace.
 //
-// Un workspace_id vide n'est PAS un désaccord : c'est un state écrit avant que
-// le champ existe, ou à la main. On ne peut pas vérifier, donc on ne prétend
-// pas savoir.
+// An empty workspace_id is NOT a disagreement: it is a state written before the
+// field existed, or by hand. It cannot be checked, so notion-seed does not
+// pretend to know.
 func checkWorkspaceMatch(snap *state.Snapshot, workspaceID string) error {
 	if snap == nil || snap.WorkspaceID == "" || snap.WorkspaceID == workspaceID {
 		return nil
 	}
 	return fmt.Errorf(
-		"%s décrit le workspace %s, mais ntn est authentifié sur %s\n"+
-			"  → les identités du state n'existent pas dans ce workspace. Authentifiez "+
-			"ntn sur le bon workspace (`ntn login`), ou travaillez dans le dossier de "+
-			"configuration correspondant",
+		"%s describes workspace %s, but ntn is authenticated on %s\n"+
+			"  → the state's identities do not exist in this workspace. Authenticate "+
+			"ntn on the right workspace (`ntn login`), or work in the matching "+
+			"configuration directory",
 		state.FileName, snap.WorkspaceID, workspaceID)
 }
 
-// refreshManaged lit l'état réel de chaque ressource ancrée par le state.
+// refreshManaged reads the actual state of each resource anchored by the state.
 //
-// Une ressource introuvable ou archivée n'est pas une erreur de la commande :
-// c'est un fait que le plan doit rapporter et sur lequel il bloquera. La faire
-// remonter en erreur priverait l'utilisateur du reste du plan.
+// A resource that is not found or archived is not a command error: it is a
+// fact the plan must report and will block on. Surfacing it as an error would
+// deprive the user of the rest of the plan.
 func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Snapshot) (map[string]diff.Refreshed, error) {
 	if snap == nil || len(snap.Databases) == 0 {
 		return nil, nil
@@ -347,30 +346,30 @@ func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Sna
 	for _, key := range keys {
 		if snap.Databases[key].ID == "" {
 			return nil, fmt.Errorf(
-				"database.%s n'a pas d'identifiant dans %s\n"+
-					"  → l'entrée est incomplète : restaurez le fichier depuis git, ou "+
-					"retirez cette entrée et ré-importez la database",
+				"database.%s has no identifier in %s\n"+
+					"  → the entry is incomplete: restore the file from git, or "+
+					"remove this entry and re-import the database",
 				key, state.FileName)
 		}
 		remote, err := res.Read(ctx, snap.Databases[key].ID)
 		if err != nil {
 			var apiErr *transport.APIError
 			if errors.As(err, &apiErr) && apiErr.Status == 404 {
-				out[key] = diff.Refreshed{Missing: true, Reason: "introuvable (404)"}
+				out[key] = diff.Refreshed{Missing: true, Reason: "not found (404)"}
 				continue
 			}
 			return nil, fmt.Errorf(
-				"lecture de database.%s (id %s) impossible: %w\n"+
-					"  → réessayez ; si la database a été supprimée, retirez son entrée de %s",
+				"failed to read database.%s (id %s): %w\n"+
+					"  → retry; if the database was deleted, remove its entry from %s",
 				key, snap.Databases[key].ID, err, state.FileName)
 		}
 		rd, ok := remote.(resources.RemoteDatabase)
 		if !ok || !rd.Found {
-			out[key] = diff.Refreshed{Missing: true, Reason: "introuvable"}
+			out[key] = diff.Refreshed{Missing: true, Reason: "not found"}
 			continue
 		}
 		if rd.Archived {
-			out[key] = diff.Refreshed{Missing: true, Reason: "archivée ou en corbeille"}
+			out[key] = diff.Refreshed{Missing: true, Reason: "archived or in the trash"}
 			continue
 		}
 		out[key] = diff.Refreshed{Database: state.FromRemote(rd), DataSources: rd.DataSourceCount}
@@ -378,11 +377,11 @@ func refreshManaged(ctx context.Context, tr transport.Transport, snap *state.Sna
 	return out, nil
 }
 
-// newTransport assemble la pile : shell-out vers ntn, entouré du rate limiter
-// partagé et de la politique de retry.
+// newTransport assembles the stack: shell-out to ntn, wrapped in the shared
+// rate limiter and the retry policy.
 //
-// Les attentes de retry partent sur stderr, pas sur stdout : stdout ne porte que
-// le plan, qui doit rester identique entre deux runs et exploitable dans un pipe.
+// Retry waits go to stderr, not stdout: stdout carries only the plan, which
+// must stay identical between two runs and usable in a pipe.
 func newTransport(cmd *cobra.Command, opts *planOptions) transport.Transport {
 	clock := transport.RealClock{}
 	return transport.NewRetrying(
@@ -394,17 +393,16 @@ func newTransport(cmd *cobra.Command, opts *planOptions) transport.Transport {
 	)
 }
 
-// checkParentPage vérifie que la page parente est lisible. Le token de ntn
-// étant scopé utilisateur, il voit tout le workspace : un 404 ici signifie
-// que la page n'existe pas, pas qu'elle n'a pas été partagée.
+// checkParentPage checks that the parent page is readable. Since ntn's token
+// is user-scoped, it sees the whole workspace: a 404 here means the page does
+// not exist, not that it was not shared.
 func checkParentPage(ctx context.Context, tr transport.Transport, pageID string, ratePerSec float64) error {
-	// Le schéma exige aujourd'hui parent_page_id non vide et conforme à un UUID
-	// (pattern) : cette branche est donc inatteignable en pratique tant que le
-	// champ reste obligatoire. Le garde-fou reste utile pour le jour où
-	// parent_page_id deviendra optionnel, quand les pages seront des ressources
-	// (post-MVP).
+	// The schema currently requires a non-empty parent_page_id matching a UUID
+	// (pattern): this branch is therefore unreachable in practice as long as
+	// the field stays required. The safeguard stays useful for the day
+	// parent_page_id becomes optional, when pages become resources (post-MVP).
 	if pageID == "" {
-		return fmt.Errorf("workspace.parent_page_id est vide dans workspace.yaml")
+		return fmt.Errorf("workspace.parent_page_id is empty in workspace.yaml")
 	}
 	resp, err := tr.Execute(ctx, transport.APIRequest{
 		Method: "GET",
@@ -414,79 +412,78 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 		return checkParentPageAlive(pageID, resp.Body)
 	}
 
-	// Une issue inconnue n'est pas un échec : le type le dit lui-même. La
-	// rapporter comme « page illisible » serait affirmer ce qu'on ne sait pas.
+	// An unknown outcome is not a failure: the type says so itself. Reporting
+	// it as "unreadable page" would assert what is not known.
 	var unknown *transport.OutcomeUnknownError
 	if errors.As(err, &unknown) {
 		return fmt.Errorf(
-			"impossible de savoir si la page parente %s est lisible: %w\n"+
-				"  → relancez la commande ; si ça persiste, augmentez le timeout",
+			"cannot tell whether parent page %s is readable: %w\n"+
+				"  → rerun the command; if it persists, increase the timeout",
 			pageID, err)
 	}
 
-	// Le raisonnement « la page n'existe pas » ne vaut QUE pour un 404. Le jeton
-	// de ntn est scopé utilisateur et voit tout le workspace sans partage
-	// préalable, donc un 404 ne peut pas venir d'un défaut de partage —
-	// mais attacher ce raisonnement à un 400 (le schéma valide déjà le format de
-	// parent_page_id ; un 400 signifie donc autre chose) ou à un 403 enverrait
-	// l'utilisateur sur une fausse piste.
+	// The "the page does not exist" reasoning holds ONLY for a 404. ntn's
+	// token is user-scoped and sees the whole workspace without prior sharing,
+	// so a 404 cannot come from a sharing defect — but attaching this reasoning
+	// to a 400 (the schema already validates the format of parent_page_id; a
+	// 400 therefore means something else) or to a 403 would send the user down
+	// a false trail.
 	var apiErr *transport.APIError
 	errors.As(err, &apiErr)
 	if apiErr != nil && apiErr.Status == 404 {
 		return fmt.Errorf(
-			"page parente %s introuvable: %w\n"+
-				"  → cette page n'existe pas. Le jeton de ntn voit tout le workspace "+
-				"sans partage préalable, donc ce n'est pas un problème de permissions — "+
-				"vérifiez workspace.parent_page_id",
+			"parent page %s not found: %w\n"+
+				"  → this page does not exist. ntn's token sees the whole workspace "+
+				"without prior sharing, so this is not a permissions problem — "+
+				"check workspace.parent_page_id",
 			pageID, err)
 	}
 
-	// Un 429 épuisé est l'échec non-404 le plus probable, et c'est le seul dont
-	// l'action corrective est un réglage de notion-seed lui-même.
+	// An exhausted 429 is the most likely non-404 failure, and it is the only
+	// one whose corrective action is a setting of notion-seed itself.
 	if apiErr != nil && apiErr.Status == 429 {
 		return fmt.Errorf(
-			"page parente %s illisible: %w\n"+
-				"  → l'API a limité le débit et les tentatives sont épuisées : "+
-				"réessayez dans une minute, ou baissez `--rate` (actuellement %v appels/s)",
+			"parent page %s unreadable: %w\n"+
+				"  → the API rate-limited and the attempts are exhausted: "+
+				"retry in a minute, or lower `--rate` (currently %v calls/s)",
 			pageID, err, ratePerSec)
 	}
 
 	if apiErr == nil {
-		// L'erreur ne vient pas de l'API : format de sortie de ntn non reconnu,
-		// binaire introuvable, appel mal construit. Elle porte déjà sa propre
-		// action corrective — empiler un second conseil générique enverrait
-		// chercher au mauvais endroit.
-		return fmt.Errorf("page parente %s illisible: %w", pageID, err)
+		// The error does not come from the API: unrecognized ntn output format,
+		// binary not found, malformed call. It already carries its own
+		// corrective action — stacking a second generic hint would send the
+		// user looking in the wrong place.
+		return fmt.Errorf("parent page %s unreadable: %w", pageID, err)
 	}
 
 	return fmt.Errorf(
-		"page parente %s illisible: %w\n"+
-			"  → vérifiez que `ntn` est authentifié sur le bon workspace "+
-			"(`notion-seed init`) et que workspace.parent_page_id désigne une page "+
-			"de ce workspace ; réessayez si l'API est en incident",
+		"parent page %s unreadable: %w\n"+
+			"  → check that `ntn` is authenticated on the right workspace "+
+			"(`notion-seed init`) and that workspace.parent_page_id points to a page "+
+			"of this workspace; retry if the API has an incident",
 		pageID, err)
 }
 
-// checkParentPageAlive refuse une page parente à la corbeille.
+// checkParentPageAlive rejects a parent page in the trash.
 //
-// Une page à la corbeille se lit en 200 : le code de statut ne dit rien, seul
-// son champ in_trash le dit. Mesuré le 2026-09-25 contre l'API 2025-09-03 :
-// une page porte in_trash (true à la corbeille, false sinon) et aucun champ
-// archived. archived reste lu, par prudence envers une réponse d'une autre
-// version de l'API, mais ce n'est pas lui qui détecte. Sans ce
-// contrôle, plan annonçait « Aucun changement » alors que toute écriture sous
-// la page est refusée (`400 validation_error — Can't edit page on block with
-// an archived ancestor`).
+// A page in the trash reads as 200: the status code says nothing, only its
+// in_trash field does. Measured on 2026-09-25 against API 2025-09-03: a page
+// carries in_trash (true in the trash, false otherwise) and no archived field.
+// archived is still read, out of caution towards a response from another API
+// version, but it is not what detects. Without this check, plan announced
+// "No changes" while every write under the page is refused (`400
+// validation_error — Can't edit page on block with an archived ancestor`).
 //
-// Un ancêtre à la corbeille est détecté aussi : mesuré le 2026-09-25, une page
-// dont la page parente, ou une page deux niveaux au-dessus, est à la corbeille
-// se lit in_trash:true, sans avoir été écrite. Une database, elle, n'hérite
-// pas de ce champ : sous le même ancêtre, elle se lit in_trash:false. C'est
-// pourquoi le contrôle porte sur la page parente, et non sur les databases.
+// An ancestor in the trash is detected too: measured on 2026-09-25, a page
+// whose parent page, or a page two levels up, is in the trash reads
+// in_trash:true, without having been written. A database, however, does not
+// inherit this field: under the same ancestor, it reads in_trash:false. That
+// is why the check is on the parent page, not on the databases.
 //
-// Une réponse qui ne porte AUCUN des deux champs est refusée plutôt que lue
-// comme « vivante » : le silence de l'API n'est pas une mesure, et c'est
-// exactement l'affirmation que ce contrôle existe pour ne plus faire.
+// A response that carries NEITHER field is rejected rather than read as
+// "live": the API's silence is not a measurement, and that is exactly the
+// assertion this check exists to stop making.
 func checkParentPageAlive(pageID string, body []byte) error {
 	var page struct {
 		Archived *bool `json:"archived"`
@@ -494,23 +491,23 @@ func checkParentPageAlive(pageID string, body []byte) error {
 	}
 	if err := json.Unmarshal(body, &page); err != nil {
 		return fmt.Errorf(
-			"impossible de savoir si la page parente %s est à la corbeille : "+
-				"réponse de l'API illisible: %v\n"+
-				"  → réessayez ; si ça persiste, %s",
+			"cannot tell whether parent page %s is in the trash: "+
+				"unreadable response from the API: %v\n"+
+				"  → retry; if it persists, %s",
 			pageID, err, preflight.PinNtnHint())
 	}
 	if page.Archived == nil && page.InTrash == nil {
 		return fmt.Errorf(
-			"impossible de savoir si la page parente %s est à la corbeille : "+
-				"la réponse de l'API ne porte ni archived ni in_trash\n"+
-				"  → réessayez ; si ça persiste, %s",
+			"cannot tell whether parent page %s is in the trash: "+
+				"the API response carries neither archived nor in_trash\n"+
+				"  → retry; if it persists, %s",
 			pageID, preflight.PinNtnHint())
 	}
 	if (page.Archived != nil && *page.Archived) || (page.InTrash != nil && *page.InTrash) {
 		return fmt.Errorf(
-			"la page parente %s est à la corbeille : Notion refuse d'écrire sous elle\n"+
-				"  → restaurez-la depuis la corbeille de Notion, ou faites pointer "+
-				"workspace.parent_page_id vers une page vivante",
+			"parent page %s is in the trash: Notion refuses to write under it\n"+
+				"  → restore it from the Notion trash, or point "+
+				"workspace.parent_page_id to a live page",
 			pageID)
 	}
 	return nil
