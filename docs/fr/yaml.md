@@ -25,7 +25,7 @@ version: 1
 workspace:
   parent_page_id: 33333333-3333-4333-8333-333333333333
 lifecycle:
-  prevent_destroy:
+  acknowledge_destroy:
     - database.projects
 ```
 
@@ -33,8 +33,8 @@ lifecycle:
 |---|---|---|
 | `version` | oui | version de format de la configuration — `1` |
 | `workspace.parent_page_id` | oui | la page Notion sous laquelle les databases sont créées |
-| `lifecycle.prevent_destroy` | non | liste de `database.<key>` : accusé de lecture, affiché dans le plan — ne bloque rien |
-| `lifecycle.allow_data_loss` | non | liste de `database.<key>` : accusé de lecture, affiché dans le plan — ne bloque rien |
+| `lifecycle.acknowledge_destroy` | non | liste de `database.<key>` : accusé de lecture, affiché dans le plan — ne bloque rien |
+| `lifecycle.acknowledge_data_loss` | non | liste de `database.<key>` : accusé de lecture, affiché dans le plan — ne bloque rien |
 
 ## databases/*.yaml
 
@@ -139,16 +139,15 @@ source est changée à part, dans Notion, il ne la voit pas.
 
 ## lifecycle — des accusés de lecture {#lifecycle-des-accuses-de-lecture}
 
-::: danger prevent_destroy n'empêche rien
-Malgré son nom, une database listée dans `prevent_destroy` part à la corbeille
-comme les autres quand elle quitte le YAML. La clé ajoute seulement une mention
-au plan.
+::: danger acknowledge_destroy ne bloque rien
+Une database listée dans `acknowledge_destroy` part à la corbeille comme les
+autres quand elle quitte le YAML. La clé ajoute seulement une mention au plan.
 :::
 
-`prevent_destroy` et `allow_data_loss` ne bloquent **plus rien**. Malgré son
-nom, `prevent_destroy` n'empêche pas la destruction : ces deux clés ne sont que
-des accusés de lecture, affichés sous la ressource qu'elles nomment. Une
-database sortie du YAML, déclarée dans `prevent_destroy` :
+`acknowledge_destroy` et `acknowledge_data_loss` ne bloquent **rien**. Ces
+deux clés ne sont que des accusés de lecture, affichés sous la ressource
+qu'elles nomment. Une database sortie du YAML, déclarée dans
+`acknowledge_destroy` :
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
@@ -158,20 +157,36 @@ Plan: 0 to add, 0 to change, 1 to destroy
   - database.tasks  [destructive]
       - database.tasks — present in the state, absent from the configuration  [destructive]
           → 3 row(s) go to the trash with it.
-      → declared in lifecycle.prevent_destroy.
+      → declared in lifecycle.acknowledge_destroy.
 
 Impact: 1 database(s) in the trash with 3 row(s).
 ```
 
 Elles disent « je sais ce que cette ressource porte », et rien de plus. `apply`
-met donc à la corbeille une database déclarée dans `prevent_destroy` exactement
-comme une autre, en affichant la mention. C'est écrit noir sur blanc parce
-qu'une clé nommée `prevent_destroy` qu'on croirait bloquante serait un piège :
-vous compteriez sur elle, et elle ne vous retiendrait pas.
+met donc à la corbeille une database déclarée dans `acknowledge_destroy`
+exactement comme une autre, en affichant la mention.
 
 Ce qui arrête une commande, désormais, c'est ce que vous demandez dans votre
 workflow : [`--fail-on`](/fr/commands#en-ci). Ce qui informe, c'est la mesure.
 Ce qui décide, c'est vous.
+
+### Clés renommées
+
+`acknowledge_destroy` s'appelait `prevent_destroy`, et `acknowledge_data_loss`
+s'appelait `allow_data_loss` : les anciens noms promettaient un blocage qui
+n'existe plus, un piège pour qui comptait dessus. Les anciens noms sont
+**encore lus pendant une version**, avec un avertissement sur stderr à chaque
+commande qui charge la configuration, et disparaîtront à la suivante :
+
+```
+warning: workspace.yaml: `lifecycle.prevent_destroy` is deprecated, it is now `lifecycle.acknowledge_destroy` — the old name is still read in this version only
+  → rename `prevent_destroy` to `acknowledge_destroy` in workspace.yaml
+```
+
+D'ici là, la ligne du plan nomme la clé telle que vous l'avez écrite, pour
+qu'elle corresponde à votre YAML. Un ancien et un nouveau nom côte à côte voient
+leurs entrées fusionnées, avec un avertissement qui dit de déplacer les entrées
+de l'ancienne clé dans la nouvelle.
 
 ## Ce qui n'est pas déclaré
 
