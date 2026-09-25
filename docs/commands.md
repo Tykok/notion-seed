@@ -1,8 +1,9 @@
 # Commands
 
-Every command reads the configuration directory (`--dir`, default `.`) and
-talks to Notion through `ntn`. Only `import` and `apply` write — to Notion and
-to the state.
+Most commands read the configuration directory (`--dir`, default `.`) and talk
+to Notion through `ntn`. `init` takes no `--dir` — it only checks `ntn` — and
+`version` does neither: it just prints itself. Only `import` and `apply`
+write — to Notion and to the state.
 
 | Command | Writes to Notion | Writes the state |
 |---|---|---|
@@ -65,9 +66,6 @@ with an error if you asked for it with [`--fail-on`](#in-ci).
 — the command reads the actual state, it makes no sense offline — and
 `--fail-on`, since it computes no plan.
 
-`diff` is identical to `plan` today, since `plan` does not write any state yet.
-Both stay distinct so that CI usage is stable the day `plan` touches it.
-
 ### What can be counted, and what cannot
 
 Counting takes a filter, and `notion-seed` can only build one for `select`,
@@ -84,7 +82,8 @@ least N row(s)", and how many data sources were not counted. It stays
 `destructive` whatever the count, 0 included.
 
 A **type change** is quantified only if the source column is of one of them.
-Of the three dangerous pairs measured above, only one is:
+Of the three dangerous pairs measured on the overview ([Why](/#why)), only one
+is:
 
 | Pair | Quantified? |
 |---|---|
@@ -326,11 +325,6 @@ The binary installed by `go install` reports `0.0.0-dev`: the version is only
 injected by the release build.
 
 ## State
-
-::: tip Commit it
-`notion-seed.state.json` holds no secret. It is what makes the plan
-reproducible across machines and in CI.
-:::
 
 `notion-seed.state.json`, next to `workspace.yaml`, keeps the Notion identity
 of each managed resource and its last applied state. **Commit it**: it holds no

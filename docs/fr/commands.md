@@ -1,8 +1,10 @@
 # Commandes
 
-Chaque commande lit le dossier de configuration (`--dir`, `.` par défaut) et
-parle à Notion via `ntn`. Seules `import` et `apply` écrivent — dans Notion et
-dans le state.
+La plupart des commandes lisent le dossier de configuration (`--dir`, `.` par
+défaut) et parlent à Notion via `ntn`. `init` ne prend pas de `--dir` — elle ne
+fait que vérifier `ntn` — et `version` ne fait ni l'un ni l'autre : elle
+affiche seulement son numéro. Seules `import` et `apply` écrivent — dans
+Notion et dans le state.
 
 | Commande | Écrit dans Notion | Écrit le state |
 |---|---|---|
@@ -65,10 +67,6 @@ l'avez demandé avec [`--fail-on`](#en-ci).
 la commande lit l'état réel, elle n'a aucun sens hors ligne — et `--fail-on`,
 puisqu'elle ne calcule aucun plan.
 
-`diff` est aujourd'hui identique à `plan`, puisque `plan` n'écrit pas encore
-de state. Les deux restent distinctes pour que l'usage en CI soit stable le
-jour où `plan` y touchera.
-
 ### Ce qui peut être compté, et ce qui ne peut pas
 
 Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
@@ -85,7 +83,8 @@ disent alors « at least N row(s) », et combien de data sources n'ont pas été
 comptés. Elle reste `destructive` quel que soit ce compte, 0 compris.
 
 Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
-d'eux. Des trois couples dangereux mesurés plus haut, un seul l'est :
+d'eux. Des trois couples dangereux mesurés sur la présentation
+([Pourquoi](/fr/#pourquoi)), un seul l'est :
 
 | Couple | Chiffré ? |
 |---|---|
@@ -334,11 +333,6 @@ Le binaire installé par `go install` annonce `0.0.0-dev` : la version n'est
 injectée qu'au build de release.
 
 ## State
-
-::: tip À commiter
-`notion-seed.state.json` ne contient aucun secret. C'est lui qui rend le plan
-reproductible d'une machine à l'autre et en CI.
-:::
 
 `notion-seed.state.json`, à côté de `workspace.yaml`, retient l'identité Notion
 de chaque ressource gérée et son dernier état appliqué. **Versionnez-le** : il
