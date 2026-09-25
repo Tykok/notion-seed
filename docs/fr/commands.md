@@ -202,6 +202,29 @@ Une ressource écrite l'est en entier, à une exception près, qui n'est jamais
 silencieuse : une modification peut s'arrêter entre ses deux appels — voir
 [En cas d'échec](#en-cas-d-echec).
 
+La migration se fait à la main, avec le nombre de lignes que `plan` a compté :
+
+1. créer la nouvelle option dans Notion ;
+2. y déplacer les lignes que le plan a comptées ;
+3. retirer l'ancienne option, puis relancer.
+
+```
+  ~ database.tasks  [migration required]
+      ~ option "Fait" → "Terminé" (property "Statut") — the API returns 200 without changing anything: create, migrate the rows, then remove  [migration required]
+          → 2 rows hold "Fait": migrate them by hand before applying.
+
+Withheld — migration required
+
+  ~ database.tasks
+      an option must be migrated by hand: the API can neither rename an option nor change its color
+      → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
+```
+
+C'est le seul changement déclaré que notion-seed refuse d'écrire — et ce n'est
+pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
+inscrirait dans le state un état que Notion ne porte pas, et chaque run suivant
+afficherait une dérive fantôme.
+
 ### La confirmation
 
 Le mot `apply`, tapé en entier, après le plan et ce qui va se passer, par

@@ -198,6 +198,29 @@ A withheld resource is not touched at all: no call goes out for it. A written
 resource is written in full, with one exception, which is never silent: an
 update can stop between its two calls — see [On failure](#on-failure).
 
+The migration is done by hand, with the number of rows `plan` counted:
+
+1. create the new option in Notion;
+2. move the rows the plan counted to it;
+3. remove the old option, then rerun.
+
+```
+  ~ database.tasks  [migration required]
+      ~ option "Fait" → "Terminé" (property "Statut") — the API returns 200 without changing anything: create, migrate the rows, then remove  [migration required]
+          → 2 rows hold "Fait": migrate them by hand before applying.
+
+Withheld — migration required
+
+  ~ database.tasks
+      an option must be migrated by hand: the API can neither rename an option nor change its color
+      → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
+```
+
+It is the only declared change notion-seed refuses to write — and it is not a
+judgment on the cost, it is a limit of the API. Writing anyway would record in
+the state a state Notion does not hold, and every following run would show
+phantom drift.
+
 ### Confirmation
 
 The word `apply`, typed in full, after the plan and what is going to happen, by

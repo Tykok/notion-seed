@@ -92,10 +92,9 @@ Deux changements sont inexprimables, mesurés le 2026-09-24 :
 | Changer la couleur d'une option | Répond `400`, que l'option soit désignée par son id ou par son nom, et tout le PATCH de la propriété échoue |
 
 `notion-seed` ne les écrit donc pas, et retient la database entière tant qu'ils
-sont déclarés. Les autres databases du plan s'appliquent. La procédure est
-nommée, avec le nombre de lignes à migrer :
-
-La marche à suivre est détaillée dans [Ce qu'il retient](/fr/commands#ce-qu-il-retient).
+sont déclarés. Les autres databases du plan s'appliquent. Voir
+[Ce qu'il retient](/fr/commands#ce-qu-il-retient) pour la marche à suivre et le
+nombre de lignes qu'elle nomme.
 
 ## État actuel
 
