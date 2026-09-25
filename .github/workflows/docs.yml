@@ -1,0 +1,41 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - scripts/publish-gh-pages.sh
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with apt.yml: both push to gh-pages, each replacing its own part.
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build the site
+        working-directory: docs
+        run: npm ci && npm run build
+
+      # Replaces everything but apt/: the apt repository shares the branch.
+      - name: Publish to gh-pages
+        env:
+          PAGES_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          ./scripts/publish-gh-pages.sh site docs/.vitepress/dist "docs: publier ${GITHUB_SHA::7}"
