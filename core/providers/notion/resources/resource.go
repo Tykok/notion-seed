@@ -58,6 +58,23 @@ type Measurement struct {
 	// sources the count does not query: it counts only one, the trashing takes
 	// them all. When non-zero, the count is a lower bound.
 	UncountedDataSources int
+
+	// TargetType is the NEW type, on a type change and on the removal lines
+	// it brings: toward status, a value that is not redeclared is reassigned
+	// to the first option instead of emptied (measured on 2026-09-25).
+	TargetType string
+	// Bound also marks a retyped multi_select option removal as a lower bound
+	// of what its rows lose: toward select or status, only the first value is
+	// kept.
+	//
+	// Count, Bound, Except and Caveat describe a type change's count, as
+	// change.TypeChangeOf gives it: which rows to filter, how the figure
+	// relates to the rows really touched, which declared option names are
+	// excluded, and why the figure is only a bound or cannot be taken.
+	Count  change.Count
+	Bound  change.Bound
+	Except []string
+	Caveat string
 }
 
 // Detail describes an elementary change inside a resource.

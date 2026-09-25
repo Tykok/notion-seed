@@ -59,3 +59,25 @@ func TestClassStringIsStable(t *testing.T) {
 		}
 	}
 }
+
+// Measured on 2026-09-25: under a type change, an option that is not
+// redeclared empties its rows toward select or multi_select, and reassigns
+// them to the first declared option toward status.
+func TestClassifyRetypedOptionRemovalFollowsTheNewType(t *testing.T) {
+	tests := []struct {
+		to    string
+		count int
+		want  Class
+	}{
+		{"multi_select", 3, ClassDestructive},
+		{"select", 3, ClassDestructive},
+		{"status", 3, ClassSilentRewrite},
+		{"status", 0, ClassSafe},
+		{"status", -1, ClassUnknownImpact},
+	}
+	for _, tt := range tests {
+		if got := ClassifyRetypedOptionRemoval(tt.to, tt.count); got != tt.want {
+			t.Errorf("ClassifyRetypedOptionRemoval(%q, %d) = %v, want %v", tt.to, tt.count, got, tt.want)
+		}
+	}
+}
