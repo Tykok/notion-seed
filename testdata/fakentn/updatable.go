@@ -115,7 +115,7 @@ func runUpdatable() {
 	default:
 		fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
 			"< 200 OK\n< content-type: application/json\n")
-		fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+		fmt.Fprint(os.Stdout, parentPage)
 		return
 	}
 

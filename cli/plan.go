@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -405,12 +406,12 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 	if pageID == "" {
 		return fmt.Errorf("workspace.parent_page_id est vide dans workspace.yaml")
 	}
-	_, err := tr.Execute(ctx, transport.APIRequest{
+	resp, err := tr.Execute(ctx, transport.APIRequest{
 		Method: "GET",
 		Path:   "/v1/pages/" + pageID,
 	})
 	if err == nil {
-		return nil
+		return checkParentPageAlive(pageID, resp.Body)
 	}
 
 	// Une issue inconnue n'est pas un échec : le type le dit lui-même. La
@@ -464,4 +465,50 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 			"(`notion-seed init`) et que workspace.parent_page_id désigne une page "+
 			"de ce workspace ; réessayez si l'API est en incident",
 		pageID, err)
+}
+
+// checkParentPageAlive refuse une page parente à la corbeille.
+//
+// Une page à la corbeille se lit en 200 : le code de statut ne dit rien, seuls
+// ses champs archived et in_trash le disent. Mesuré le 2026-09-25 : sans ce
+// contrôle, plan annonçait « Aucun changement » alors que toute écriture sous
+// la page est refusée (`400 validation_error — Can't edit page on block with
+// an archived ancestor`).
+//
+// Seule une page parente mise à la corbeille ELLE-MÊME est détectée ici. Quand
+// c'est un de ses ancêtres qui y est, rien ne dit qu'elle porte in_trash : une
+// database sous un ancêtre à la corbeille se lit bien archived:false,
+// in_trash:false (mesuré). Ce cas-là n'est donc pas couvert, et ce contrôle ne
+// prétend pas le couvrir.
+//
+// Une réponse qui ne porte AUCUN des deux champs est refusée plutôt que lue
+// comme « vivante » : le silence de l'API n'est pas une mesure, et c'est
+// exactement l'affirmation que ce contrôle existe pour ne plus faire.
+func checkParentPageAlive(pageID string, body []byte) error {
+	var page struct {
+		Archived *bool `json:"archived"`
+		InTrash  *bool `json:"in_trash"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return fmt.Errorf(
+			"impossible de savoir si la page parente %s est à la corbeille : "+
+				"réponse de l'API illisible: %v\n"+
+				"  → réessayez ; si ça persiste, %s",
+			pageID, err, preflight.PinNtnHint())
+	}
+	if page.Archived == nil && page.InTrash == nil {
+		return fmt.Errorf(
+			"impossible de savoir si la page parente %s est à la corbeille : "+
+				"la réponse de l'API ne porte ni archived ni in_trash\n"+
+				"  → réessayez ; si ça persiste, %s",
+			pageID, preflight.PinNtnHint())
+	}
+	if (page.Archived != nil && *page.Archived) || (page.InTrash != nil && *page.InTrash) {
+		return fmt.Errorf(
+			"la page parente %s est à la corbeille : Notion refuse d'écrire sous elle\n"+
+				"  → restaurez-la depuis la corbeille de Notion, ou faites pointer "+
+				"workspace.parent_page_id vers une page vivante",
+			pageID)
+	}
+	return nil
 }
