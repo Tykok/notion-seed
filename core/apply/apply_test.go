@@ -347,24 +347,66 @@ func TestRunCleansStaleStateEntries(t *testing.T) {
 	}
 }
 
-// Ce qu'apply ne sait pas écrire est nommé, pas exécuté à moitié.
-func TestRunSkipsChangesItCannotWrite(t *testing.T) {
+// Review Focus #3 : Withheld vide EST l'autorisation d'écrire. Une modification
+// autorisée sans cible est un défaut interne : la sauter ferait converger un
+// apply qui n'a pas écrit ce que le plan montrait, et s'arrêter sur elle
+// laisserait écrite la création qui la précède. Le plan entier est refusé, avant
+// le premier appel.
+func TestRunRefusesAnAuthorizedChangeWithoutTargetBeforeAnyWrite(t *testing.T) {
 	dir := t.TempDir()
 	p := &diff.Plan{Changes: []diff.Change{
+		createChange("projects", "Projects"),
 		{Resource: "database.tasks", Key: "tasks", Kind: resources.KindUpdate},
 	}}
 
-	rep, err := Run(context.Background(), p, emptySnapshot(), Options{
+	_, err := Run(context.Background(), p, emptySnapshot(), Options{
 		Dir: dir, ParentPageID: testParentPageID, Creator: refuseToCreate(t),
 	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+	if err == nil {
+		t.Fatal("Run() error = nil, want le refus d'un changement autorisé sans cible")
 	}
-	if len(rep.Skipped) != 1 || !strings.Contains(rep.Skipped[0], "database.tasks") {
-		t.Errorf("Skipped = %v, want database.tasks", rep.Skipped)
+	for _, want := range []string{"database.tasks", "défaut interne", "rien n'a été appliqué", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
 	}
-	if rep.Converged() {
-		t.Error("Converged() = true alors qu'un changement n'a pas été appliqué")
+	if _, serr := os.Stat(state.Path(dir)); !os.IsNotExist(serr) {
+		t.Error("un state a été écrit alors que le plan est refusé")
+	}
+}
+
+// Une destruction n'a pas de cible : son identité vient du state. Sans id, le
+// PATCH viserait "/v1/databases/", qui ne désigne rien.
+func TestCheckRefusesADestroyWithoutAnIdentityInTheState(t *testing.T) {
+	p := &diff.Plan{Changes: []diff.Change{
+		{Resource: "database.tasks", Key: "tasks", Kind: resources.KindDestroy},
+	}}
+	snap := emptySnapshot()
+	snap.Databases["tasks"] = state.Database{Name: "Tasks"}
+
+	err := Check(p, snap)
+	if err == nil {
+		t.Fatal("Check() error = nil, want un refus")
+	}
+	for _, want := range []string{"database.tasks", "défaut interne", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+
+	snap.Databases["tasks"] = state.Database{ID: "db-1", Name: "Tasks"}
+	if err := Check(p, snap); err != nil {
+		t.Errorf("Check() error = %v, want nil : l'identité est dans le state", err)
+	}
+}
+
+// Une ressource retenue n'a pas de cible, et c'est voulu : Check la laisse
+// passer, Run la nommera sans l'écrire.
+func TestCheckLetsAWithheldChangeThrough(t *testing.T) {
+	c := updateChange("tasks", nil, prioDetail)
+	c.Withheld = "une option doit être migrée à la main"
+	if err := Check(&diff.Plan{Changes: []diff.Change{c}}, emptySnapshot()); err != nil {
+		t.Errorf("Check() error = %v, want nil", err)
 	}
 }
 
