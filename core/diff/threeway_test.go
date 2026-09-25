@@ -3,6 +3,7 @@
 package diff
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -288,6 +289,93 @@ func TestUpdateTargetGivesNoIDToAnUnresolvedOption(t *testing.T) {
 	}
 	if prio.Options[0].ID != "" {
 		t.Errorf("ID = %q, want vide : ni la key ni le nom ne résolvent", prio.Options[0].ID)
+	}
+}
+
+// Sur un update, une propriété neuve part avec TOUTES ses options, couleur et
+// groupe compris : le plan doit les montrer une à une, comme à la création. Les
+// taire serait écrire ce que le plan n'a jamais montré.
+func TestUpdateShowsTheOptionsOfANewProperty(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Etat"] = state.Property{Type: "select", Options: []state.Option{
+		{Key: "ouvert", Name: "Ouvert", Color: "green"},
+		{Key: "clos", Name: "Clos"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	assertOptionLinesMatchTarget(t, res, "Etat", []string{
+		`+ option "Ouvert" (propriété "Etat") color green`,
+		`+ option "Clos" (propriété "Etat") `,
+	})
+}
+
+// Un changement de type recrée les options : celles du YAML partent neuves, et
+// le plan les annonce. La classe de la ligne de propriété reste celle de la
+// table mesurée : les lignes d'option n'en inventent pas d'autre.
+func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
+	desired, applied, actual := fixtureTasks()
+	desired.Properties["Prio"] = state.Property{Type: "status", Options: []state.Option{
+		{Key: "haute", Name: "Haute", Color: "red", Group: "To-do"},
+		{Key: "faite", Name: "Faite", Group: "Complete"},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+	assertOptionLinesMatchTarget(t, res, "Prio", []string{
+		`+ option "Haute" (propriété "Prio") color red, group To-do`,
+		`+ option "Faite" (propriété "Prio") group Complete`,
+	})
+	for _, d := range res.Changeset.Details {
+		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
+			t.Errorf("classe du changement de type = %v, want celle de la table", d.Class)
+		}
+		if d.Property == "Prio" && d.Op == "+" && d.Class != ClassSafe {
+			t.Errorf("ligne %q : classe %v, want sûre — elle n'invente pas de classe", d.Target, d.Class)
+		}
+	}
+}
+
+// assertOptionLinesMatchTarget vérifie que les lignes d'option de la propriété
+// sont exactement celles attendues, dans l'ordre, qu'elles disent chacune ce que
+// la cible écrit, et qu'elles n'élargissent pas le jeu d'écriture : chacune
+// nomme une propriété qui porte déjà sa propre ligne.
+func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []string) {
+	t.Helper()
+	if res.Target == nil {
+		t.Fatalf("Target = nil, Withheld = %q", res.Withheld)
+	}
+	var got []string
+	propLine := false
+	for _, d := range res.Changeset.Details {
+		if d.Target == fmt.Sprintf("property %q", prop) ||
+			strings.HasPrefix(d.Target, fmt.Sprintf("property %q (", prop)) {
+			propLine = true
+			continue
+		}
+		if !strings.HasSuffix(d.Target, fmt.Sprintf("(propriété %q)", prop)) {
+			continue
+		}
+		if d.Property != prop || d.Field != "" {
+			t.Errorf("ligne %q : Property=%q Field=%q, want Property=%q seul",
+				d.Target, d.Property, d.Field, prop)
+		}
+		got = append(got, d.Op+" "+d.Target+" "+d.Note)
+	}
+	if !propLine {
+		t.Errorf("aucune ligne de propriété pour %q : les options élargiraient le jeu d'écriture", prop)
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("lignes d'option:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	opts := res.Target.Properties[prop].Options
+	if len(opts) != len(want) {
+		t.Fatalf("la cible écrit %d options, le plan en montre %d", len(opts), len(want))
+	}
+	for i, o := range opts {
+		line := fmt.Sprintf(`+ option %q (propriété %q) %s`, o.Name, prop, optionAttrNote(o))
+		if got[i] != line {
+			t.Errorf("option %d écrite %q, montrée %q", i, line, got[i])
+		}
+		if o.ID != "" {
+			t.Errorf("option %q porte l'id %q : elle part neuve", o.Name, o.ID)
+		}
 	}
 }
 
