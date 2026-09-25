@@ -185,7 +185,7 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 
 	// 1. Load — validate each file, merge, THEN check the global uniqueness of
 	// keys. config.Load guarantees this order.
-	cfg, err := config.Load(opts.dir)
+	cfg, err := loadConfig(cmd, opts.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +270,22 @@ func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refre
 		out[key] = r.Database.DataSourceID
 	}
 	return out
+}
+
+// loadConfig loads the configuration and prints its warnings on stderr. Every
+// command that reads the config goes through here, so that a deprecated key
+// warns wherever it is read, not only on the command that happened to be run.
+// stderr, not stdout: stdout carries only the plan, which must stay usable in
+// a pipe.
+func loadConfig(cmd *cobra.Command, dir string) (*config.Config, error) {
+	cfg, err := config.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range cfg.Warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+w)
+	}
+	return cfg, nil
 }
 
 // reportMeasureFailures says what could not be counted, on stderr: these are

@@ -27,8 +27,28 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "prevent_destroy": { "type": "array", "items": { "type": "string" } },
-        "allow_data_loss": { "type": "array", "items": { "type": "string" } }
+        "acknowledge_destroy": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Resources whose destruction you have read and accept (e.g. database.tasks). Prevents nothing: the plan only notes the acknowledgement on the resource's line."
+        },
+        "acknowledge_data_loss": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Resources whose data loss you have read and accept (e.g. database.tasks). Allows nothing that was refused: the plan only notes the acknowledgement on the resource's line."
+        },
+        "prevent_destroy": {
+          "type": "array",
+          "items": { "type": "string" },
+          "deprecated": true,
+          "description": "Deprecated: renamed acknowledge_destroy. Still read in this version only, with a warning."
+        },
+        "allow_data_loss": {
+          "type": "array",
+          "items": { "type": "string" },
+          "deprecated": true,
+          "description": "Deprecated: renamed acknowledge_data_loss. Still read in this version only, with a warning."
+        }
       }
     }
   },

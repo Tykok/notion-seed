@@ -43,8 +43,8 @@ databases:
           - key: backend
             name: "backend"
 lifecycle:
-  prevent_destroy: [projects]
-  allow_data_loss: []
+  acknowledge_destroy: [projects]
+  acknowledge_data_loss: []
 `)
 	if err := ValidateDocument("databases/projects.yaml", doc); err != nil {
 		t.Fatalf("ValidateDocument() error = %v", err)
@@ -430,5 +430,19 @@ databases:
 `)
 	if err := ValidateDocument("databases/tasks.yaml", doc); err != nil {
 		t.Fatalf("ValidateDocument() = %v, want nil", err)
+	}
+}
+
+// The schema accepts the names before the rename for one version, alone or
+// next to the current ones: the loader warns, it does not refuse.
+func TestValidateDocumentAcceptsDeprecatedLifecycleKeys(t *testing.T) {
+	for _, doc := range []string{
+		"lifecycle:\n  prevent_destroy: [database.a]\n  allow_data_loss: [database.b]\n",
+		"lifecycle:\n  prevent_destroy: [database.a]\n  acknowledge_destroy: [database.b]\n" +
+			"  allow_data_loss: []\n  acknowledge_data_loss: [database.c]\n",
+	} {
+		if err := ValidateDocument("workspace.yaml", []byte(doc)); err != nil {
+			t.Errorf("ValidateDocument(%q) error = %v", doc, err)
+		}
 	}
 }
