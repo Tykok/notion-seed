@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// updatableDatabase et updatableDataSource sont l'état de départ du scénario
-// authenticated_database_updatable : la même database que celle
-// d'authenticated_database, pour que les montages d'import soient les mêmes.
+// updatableDatabase and updatableDataSource are the starting state of the
+// authenticated_database_updatable scenario: the same database as
+// authenticated_database's, so the import setups are the same.
 const updatableDatabase = `{"object":"database","id":"db-1",` +
 	`"archived":false,"in_trash":false,` +
 	`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`
@@ -29,15 +29,15 @@ const updatableDataSource = `{"object":"data_source","id":"ds-1",` +
 	`{"id":"g1","name":"To-do","option_ids":["o-todo"]},` +
 	`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`
 
-// updatableState est ce que le scénario garde d'un appel à l'autre : chaque
-// invocation de fakentn est un processus neuf, donc l'état vit dans le fichier
-// que nomme FAKE_NTN_STATE_FILE.
+// updatableState is what the scenario keeps from one call to the next: each
+// fakentn invocation is a new process, so the state lives in the file named
+// by FAKE_NTN_STATE_FILE.
 type updatableState struct {
 	Database   map[string]any `json:"database"`
 	DataSource map[string]any `json:"data_source"`
 }
 
-// apiMethod rend la méthode passée à `ntn api -X`, GET par défaut.
+// apiMethod returns the method passed to `ntn api -X`, GET by default.
 func apiMethod() string {
 	args := os.Args[1:]
 	for i, a := range args {
@@ -48,26 +48,25 @@ func apiMethod() string {
 	return "GET"
 }
 
-// runUpdatable sert le scénario authenticated_database_updatable : une
-// database qui RETIENT ce qu'on lui écrit.
+// runUpdatable serves the authenticated_database_updatable scenario: a
+// database that REMEMBERS what is written to it.
 //
-// Les autres scénarios rendent des réponses fixes. Après un PATCH, la
-// relecture d'apply y retrouverait donc l'état d'avant, et apply signalerait un
-// écart entre la cible et le réel là où il n'y en a pas. Ici, chaque PATCH est
-// fusionné dans l'état persistant, et les GET suivants le rendent — comme le
-// ferait l'API.
+// The other scenarios return fixed responses. After a PATCH, apply's
+// read-back would therefore find the previous state there, and apply would
+// report a mismatch between the target and the actual state where there is
+// none. Here, each PATCH is merged into the persistent state, and the
+// following GETs return it — as the API would.
 //
-// Sans FAKE_NTN_STATE_FILE, rien n'est persisté : le scénario rend l'état de
-// départ, exactement comme authenticated_database.
+// Without FAKE_NTN_STATE_FILE, nothing is persisted: the scenario returns the
+// starting state, exactly like authenticated_database.
 //
-// Ce qui est fidèle aux mesures du 2026-09-24, et seulement cela : le titre est
-// partagé entre database et data source, l'icône écrite sur la database n'est
-// lue que sur la database, les options transmises avec un id le gardent, les
-// neuves en reçoivent un, et {"in_trash":true} rend archived et in_trash.
+// What is faithful to the 2026-09-24 measurements, and only that: the title
+// is shared between database and data source, the icon written on the
+// database is read only on the database, options sent with an id keep it, new
+// ones get one, and {"in_trash":true} returns archived and in_trash.
 //
-// Avec FAKE_NTN_LOG_FILE, chaque écriture est aussi journalisée : un test peut
-// alors dire EXACTEMENT ce qui est parti vers l'API, pas seulement ce que l'état
-// fusionné en a gardé.
+// With FAKE_NTN_LOG_FILE, each write is also logged: a test can then say
+// EXACTLY what went to the API, not only what the merged state kept of it.
 func runUpdatable() {
 	switch subcommand() {
 	case "whoami":
@@ -81,29 +80,29 @@ func runUpdatable() {
 
 	body, _ := io.ReadAll(os.Stdin)
 	path, method := apiPath(), apiMethod()
-	// Le comptage part en POST mais n'écrit rien : il n'est pas journalisé.
+	// The count goes out as a POST but writes nothing: it is not logged.
 	if method != "GET" && !strings.HasSuffix(path, "/query") {
 		if err := logMutation(method, path, body); err != nil {
-			fmt.Fprintf(os.Stderr, "fakentn: journal non écrit: %v\n", err)
+			fmt.Fprintf(os.Stderr, "fakentn: log not written: %v\n", err)
 			os.Exit(70)
 		}
 	}
 	st, err := loadUpdatable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fakentn: état illisible: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fakentn: unreadable state: %v\n", err)
 		os.Exit(70)
 	}
 
 	var out map[string]any
 	switch {
-	// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+	// Always BEFORE the prefix case: see queryTwoRows.
 	case strings.HasSuffix(path, "/query"):
 		fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
 			"< 200 OK\n< content-type: application/json\n")
-		// Sans filtre, c'est le compte de TOUTES les lignes — celui d'une
-		// destruction. La database en porte trois, dont deux portent « Fait » :
-		// un compte différent de queryTwoRows prouve que la requête est bien
-		// partie sans filtre.
+		// Without a filter, it is the count of ALL the rows — a destruction's.
+		// The database holds three, two of which hold "Fait": a count
+		// different from queryTwoRows proves the request went out without a
+		// filter.
 		if isUnfilteredQuery(body) {
 			fmt.Fprint(os.Stdout, queryThreeRows)
 			return
@@ -129,7 +128,7 @@ func runUpdatable() {
 
 	if method == "PATCH" {
 		if err := saveUpdatable(st); err != nil {
-			fmt.Fprintf(os.Stderr, "fakentn: état non écrit: %v\n", err)
+			fmt.Fprintf(os.Stderr, "fakentn: state not written: %v\n", err)
 			os.Exit(70)
 		}
 	}
@@ -139,13 +138,13 @@ func runUpdatable() {
 	fmt.Fprint(os.Stdout, string(b))
 }
 
-// queryThreeRows est toute la database du scénario : trois lignes.
+// queryThreeRows is the whole database of the scenario: three rows.
 const queryThreeRows = `{"object":"list","results":[` +
 	`{"object":"page","id":"p1"},{"object":"page","id":"p2"},` +
 	`{"object":"page","id":"p3"}],"has_more":false}`
 
-// isUnfilteredQuery dit si le corps d'une requête de comptage ne porte aucun
-// filtre.
+// isUnfilteredQuery says whether the body of a count query carries no
+// filter.
 func isUnfilteredQuery(body []byte) bool {
 	var q map[string]any
 	if json.Unmarshal(body, &q) != nil {
@@ -184,9 +183,9 @@ func saveUpdatable(st *updatableState) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-// logMutation ajoute « MÉTHODE chemin corps » au fichier que nomme
-// FAKE_NTN_LOG_FILE, une ligne par écriture. Sans la variable, rien n'est
-// journalisé.
+// logMutation appends "METHOD path body" to the file named by
+// FAKE_NTN_LOG_FILE, one line per write. Without the variable, nothing is
+// logged.
 func logMutation(method, path string, body []byte) error {
 	name := os.Getenv("FAKE_NTN_LOG_FILE")
 	if name == "" {
@@ -201,8 +200,8 @@ func logMutation(method, path string, body []byte) error {
 	return err
 }
 
-// patchDatabase fusionne un PATCH /v1/databases. Le titre et la description se
-// lisent des deux côtés ; l'icône, sur la database seule.
+// patchDatabase merges a PATCH /v1/databases. The title and the description
+// are read on both sides; the icon, on the database only.
 func patchDatabase(st *updatableState, body []byte) {
 	var patch map[string]any
 	if json.Unmarshal(body, &patch) != nil {
@@ -219,7 +218,7 @@ func patchDatabase(st *updatableState, body []byte) {
 	if v, ok := patch["icon"]; ok {
 		st.Database["icon"] = v
 	}
-	// Mesuré le 2026-09-24 : {"in_trash":true} rend archived=true et
+	// Measured on 2026-09-24: {"in_trash":true} returns archived=true and
 	// in_trash=true.
 	if v, ok := patch["in_trash"].(bool); ok && v {
 		st.Database["archived"] = true
@@ -227,8 +226,8 @@ func patchDatabase(st *updatableState, body []byte) {
 	}
 }
 
-// withPlainText complète un rich text envoyé par `text.content` du
-// `plain_text` que l'API rend en lecture, et que le décodeur lit.
+// withPlainText completes a rich text sent through `text.content` with the
+// `plain_text` the API returns on read, and that the decoder reads.
 func withPlainText(v any) any {
 	items, ok := v.([]any)
 	if !ok {
@@ -248,8 +247,8 @@ func withPlainText(v any) any {
 	return items
 }
 
-// patchDataSource fusionne un PATCH /v1/data_sources : les propriétés omises
-// restent intouchées, une propriété à null est retirée.
+// patchDataSource merges a PATCH /v1/data_sources: omitted properties stay
+// untouched, a property set to null is removed.
 func patchDataSource(st *updatableState, body []byte) {
 	var patch struct {
 		Properties map[string]map[string]any `json:"properties"`
@@ -272,9 +271,8 @@ func patchDataSource(st *updatableState, body []byte) {
 	}
 }
 
-// mergeProperty construit la propriété telle que l'API la relirait après le
-// PATCH : son id est conservé, son type est la seule clé de configuration du
-// payload.
+// mergeProperty builds the property as the API would read it back after the
+// PATCH: its id is kept, its type is the payload's only configuration key.
 func mergeProperty(name string, prior, payload map[string]any) map[string]any {
 	out := map[string]any{"id": "p-" + strings.ToLower(name), "name": name}
 	if prior != nil {
@@ -301,10 +299,10 @@ func mergeProperty(name string, prior, payload map[string]any) map[string]any {
 	return out
 }
 
-// mergeOptions attribue un id aux options neuves et garde celui des
-// existantes, avec leur couleur — immuable côté API. Pour un status, le
-// `group` de chaque option est replié dans `groups[].option_ids`, la forme que
-// l'API rend en lecture.
+// mergeOptions assigns an id to new options and keeps the existing ones', with
+// their color — immutable on the API side. For a status, each option's
+// `group` is folded into `groups[].option_ids`, the shape the API returns on
+// read.
 func mergeOptions(typ string, conf map[string]any, opts []any, priorConf map[string]any) map[string]any {
 	priorByID := map[string]map[string]any{}
 	priorGroupOf := map[string]string{}
@@ -368,8 +366,8 @@ func mergeOptions(typ string, conf map[string]any, opts []any, priorConf map[str
 		return conf
 	}
 
-	// Les groupes existants gardent leur id et leur ordre ; un groupe inconnu
-	// en reçoit un.
+	// Existing groups keep their id and their order; an unknown group gets
+	// one.
 	var groups []any
 	named := map[string]bool{}
 	build := func(gid, gname string) map[string]any {
