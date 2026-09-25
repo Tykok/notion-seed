@@ -1,0 +1,103 @@
+/* The look of developers.notion.com: Inter, soft black, one blue accent, a lot
+   of white. Only variables and a few selectors; no component is rewritten. */
+
+:root {
+  --vp-font-family-base: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+
+  --vp-c-text-1: #37352f;
+  --vp-c-text-2: #787774;
+  --vp-c-text-3: #a5a29a;
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: #fbfbfa;
+  --vp-c-bg-soft: #f7f6f3;
+  --vp-c-divider: #ededec;
+  --vp-c-gutter: #ededec;
+
+  --vp-c-brand-1: #2383e2;
+  --vp-c-brand-2: #0b6bcb;
+  --vp-c-brand-3: #2383e2;
+  --vp-c-brand-soft: rgba(35, 131, 226, 0.1);
+
+  --vp-code-block-bg: #f7f6f3;
+  --vp-code-bg: rgba(135, 131, 120, 0.15);
+  --vp-code-color: #eb5757;
+
+  --vp-custom-block-tip-bg: #e7f3f8;
+  --vp-custom-block-tip-border: transparent;
+  --vp-custom-block-warning-bg: #fbf3db;
+  --vp-custom-block-warning-border: transparent;
+  --vp-custom-block-danger-bg: #fdebec;
+  --vp-custom-block-danger-border: transparent;
+  --vp-custom-block-info-bg: #f1f1ef;
+  --vp-custom-block-info-border: transparent;
+
+  --vp-home-hero-name-color: var(--vp-c-text-1);
+}
+
+.dark {
+  --vp-c-text-1: #e3e2e0;
+  --vp-c-text-2: #9b9a97;
+  --vp-c-text-3: #6f6e69;
+  --vp-c-bg: #191919;
+  --vp-c-bg-alt: #202020;
+  --vp-c-bg-soft: #252525;
+  --vp-c-divider: #2f2f2f;
+  --vp-c-gutter: #2f2f2f;
+
+  --vp-c-brand-1: #529cca;
+  --vp-c-brand-2: #6aaedb;
+  --vp-c-brand-3: #529cca;
+  --vp-c-brand-soft: rgba(82, 156, 202, 0.16);
+
+  --vp-code-block-bg: #202020;
+  --vp-code-bg: rgba(135, 131, 120, 0.2);
+  --vp-code-color: #ff7369;
+
+  --vp-custom-block-tip-bg: #143a4e;
+  --vp-custom-block-warning-bg: #3f3212;
+  --vp-custom-block-danger-bg: #4a1f1f;
+  --vp-custom-block-info-bg: #252525;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h2 {
+  border-top: none;
+  margin-top: 40px;
+}
+
+.vp-doc div[class*='language-'] {
+  border-radius: 6px;
+}
+
+.vp-doc .custom-block {
+  border-radius: 6px;
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+
+.vp-doc tr,
+.vp-doc tr:nth-child(2n) {
+  background-color: transparent;
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  font-weight: 500;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: none;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
