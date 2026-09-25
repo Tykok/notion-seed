@@ -476,8 +476,8 @@ est vérifié **avant** la confirmation et avant la moindre écriture.
 ### En cas d'échec
 
 Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
-personne n'a demandée. Ce qui a été créé, modifié ou mis à la corbeille reste écrit, et le state le
-reflète.
+personne n'a demandée. Ce qui a été créé, modifié ou mis à la corbeille reste
+écrit, et le state le reflète.
 
 Une modification peut s'arrêter **entre ses deux appels** : le nom, la
 description ou l'icône sont passés, les propriétés non, et aucune donnée de ligne
