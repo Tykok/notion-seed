@@ -96,6 +96,27 @@ func Compare(saved File, fresh *diff.Plan) []Drift {
 	}
 
 	now := changesOf(fresh)
+
+	// Defensive: diff.Compute emits one Change per resource, so two changes
+	// naming the same resource cannot come from a computed plan. A plan file
+	// is unsigned by design (§9) though, and a hand-edited one could still
+	// name a resource twice. The maps built below would then silently keep
+	// only the last one, and compare against whichever survived — refuse
+	// explicitly instead, on either side, rather than pick a survivor nobody
+	// chose.
+	if dups := duplicateResources(saved.Changes); len(dups) > 0 {
+		for _, r := range dups {
+			out = append(out, Drift{Resource: r, Message: "named twice in the reviewed plan"})
+		}
+		return out
+	}
+	if dups := duplicateResources(now); len(dups) > 0 {
+		for _, r := range dups {
+			out = append(out, Drift{Resource: r, Message: "named twice in the recomputed plan"})
+		}
+		return out
+	}
+
 	byResource := make(map[string]Change, len(now))
 	// details keeps the recomputed details beside their lines: what a line
 	// does not carry — why it has no figure — is read there.
@@ -339,6 +360,23 @@ func compareStale(saved, fresh []string) []Drift {
 			out = append(out, Drift{Resource: r, Message: "stale state entry added"})
 		}
 	}
+	return out
+}
+
+// duplicateResources returns the resources that name more than one change,
+// sorted, deduplicated. An empty result is the ordinary case.
+func duplicateResources(changes []Change) []string {
+	count := make(map[string]int, len(changes))
+	for _, c := range changes {
+		count[c.Resource]++
+	}
+	var out []string
+	for r, n := range count {
+		if n > 1 {
+			out = append(out, r)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
