@@ -491,9 +491,9 @@ d'un échec rendrait invisible une database peut-être encore vivante.
 Sous une page ancêtre déjà à la corbeille, Notion refuse aussi la mise à la
 corbeille, et la database y part de toute façon avec sa page. `apply` propose
 les deux issues : restaurer la page parente puis relancer `apply`, ou supprimer
-définitivement la page parente depuis la corbeille de Notion — la database
-répond alors `404`, et le `notion-seed plan` suivant classe son entrée comme
-obsolète.
+définitivement la page parente depuis la corbeille de Notion, puis relancer
+`notion-seed plan` : si Notion ne connaît plus la database, son entrée est
+nettoyée comme entrée de state obsolète.
 
 Si l'issue d'une création est **inconnue** — un timeout ne dit pas si le serveur
 a appliqué la mutation — `apply` s'arrête net sans enchaîner, et nomme la
