@@ -296,7 +296,11 @@ func TestApplyNamesEndOfInputOnATerminal(t *testing.T) {
 	if strings.Contains(err.Error(), "pas un terminal") {
 		t.Errorf("message = %q, il accuse le terminal d'une fin d'entrée", err.Error())
 	}
-	for _, want := range []string{"fin d'entrée", "rien n'a été appliqué", "  → ", "apply"} {
+	// « relancez la commande », pas `notion-seed apply` : les flags de
+	// l'utilisateur seraient perdus. Et « apply » entre guillemets français,
+	// comme au prompt.
+	for _, want := range []string{"fin d'entrée", "rien n'a été appliqué", "  → ",
+		"relancez la commande", "« apply »"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
 		}
