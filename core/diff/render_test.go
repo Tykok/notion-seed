@@ -728,14 +728,14 @@ func TestRenderForApplyDiffersFromRenderOnlyByTheImpactLine(t *testing.T) {
 func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 	p := &Plan{ToDestroy: 1, Changes: []Change{{
 		Resource: "database.archive", Kind: resources.KindDestroy,
-		Class: ClassDestructive, Acknowledged: []string{"prevent_destroy"},
+		Class: ClassDestructive, Acknowledged: []string{"acknowledge_destroy"},
 		Details: []resources.Detail{{Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1}},
 	}}}
 	var b bytes.Buffer
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "prevent_destroy") {
+	if !strings.Contains(b.String(), "      → declared in lifecycle.acknowledge_destroy.\n") {
 		t.Errorf("output:\n%s", b.String())
 	}
 }

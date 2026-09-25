@@ -1437,11 +1437,11 @@ func TestRunNamesTheDestroysAcquiredBeforeAFailure(t *testing.T) {
 	}
 }
 
-// Review Focus #4: prevent_destroy is an acknowledgement. Run does not read it,
-// and the destruction goes out.
-func TestRunTrashesADestroyAcknowledgedByPreventDestroy(t *testing.T) {
+// Review Focus #4: acknowledge_destroy is an acknowledgement of reading. Run
+// does not read it, and the destruction goes out.
+func TestRunTrashesAnAcknowledgedDestroy(t *testing.T) {
 	c := destroyChange("tasks")
-	c.Acknowledged = []string{"prevent_destroy"}
+	c.Acknowledged = []string{"acknowledge_destroy"}
 	tr := &fakeTrasher{confirmed: true}
 
 	rep, err := Run(context.Background(), &diff.Plan{Changes: []diff.Change{c}},
@@ -1450,7 +1450,7 @@ func TestRunTrashesADestroyAcknowledgedByPreventDestroy(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(tr.ids) != 1 || len(rep.Destroyed) != 1 {
-		t.Errorf("ids = %v, Destroyed = %v: prevent_destroy must prevent nothing", tr.ids, rep.Destroyed)
+		t.Errorf("ids = %v, Destroyed = %v: acknowledge_destroy must prevent nothing", tr.ids, rep.Destroyed)
 	}
 }
 

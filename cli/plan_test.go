@@ -1180,3 +1180,47 @@ func TestRefreshManagedKeepsTheDataSourceCount(t *testing.T) {
 		t.Errorf("DataSources = %d, want 2", got["a"].DataSources)
 	}
 }
+
+// A deprecated lifecycle key is still read, and every command that loads the
+// config says so on stderr — stdout carries only the plan, which must stay
+// usable in a pipe. The current name warns about nothing.
+func TestPlanWarnsOnDeprecatedLifecycleKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lifecycle string
+		wantWarn  bool
+	}{
+		{"deprecated name", "lifecycle:\n  prevent_destroy: [database.projects]\n", true},
+		{"current name", "lifecycle:\n  acknowledge_destroy: [database.projects]\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeConfigDir(t, map[string]string{
+				"workspace.yaml":     workspaceYAML + tc.lifecycle,
+				"databases/all.yaml": twoDatabases,
+			})
+			for _, command := range []string{"plan", "diff"} {
+				cmd := NewRootCmd()
+				var out, errOut bytes.Buffer
+				cmd.SetOut(&out)
+				cmd.SetErr(&errOut)
+				cmd.SetArgs([]string{command, "--dir", dir, "--skip-preflight"})
+				if err := cmd.Execute(); err != nil {
+					t.Fatalf("%s: Execute() error = %v\n%s", command, err, errOut.String())
+				}
+				ws := filepath.Join(dir, "workspace.yaml")
+				want := "warning: " + ws + ": `lifecycle.prevent_destroy` is deprecated, it is now " +
+					"`lifecycle.acknowledge_destroy` — the old name is still read in this version only\n" +
+					"  → rename `prevent_destroy` to `acknowledge_destroy` in " + ws + "\n"
+				if tc.wantWarn && !strings.HasPrefix(errOut.String(), want) {
+					t.Errorf("%s: stderr =\n%s\nwant it to start with\n%s", command, errOut.String(), want)
+				}
+				if !tc.wantWarn && strings.Contains(errOut.String(), "warning:") {
+					t.Errorf("%s: stderr = %q, want no warning", command, errOut.String())
+				}
+				if strings.Contains(out.String(), "warning:") {
+					t.Errorf("%s: the warning leaked onto stdout:\n%s", command, out.String())
+				}
+			}
+		})
+	}
+}

@@ -116,5 +116,5 @@ faire à la main, et `apply` sort en code non nul tant qu'ils restent — voir
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
 | `apply` | créations, modifications et destructions — voir [Appliquer](/fr/commands#apply) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture) |
+| `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | accusés de lecture — voir [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture) |
 | `--fail-on` | le garde-fou de CI — voir [En CI](/fr/commands#en-ci) |
