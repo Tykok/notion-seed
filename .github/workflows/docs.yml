@@ -1,0 +1,45 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - scripts/publish-gh-pages.sh
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Own group: the latest docs push wins over one still running, so a rerun
+  # after a quick follow-up commit is not left publishing stale content. An
+  # apt publication racing this one is not handled here — it is handled by
+  # publish-gh-pages.sh, which retries on a rejected push instead of relying
+  # on a shared concurrency group with apt.yml.
+  group: gh-pages-docs
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build the site
+        working-directory: docs
+        run: npm ci && npm run build
+
+      # Replaces everything but apt/: the apt repository shares the branch.
+      - name: Publish to gh-pages
+        env:
+          PAGES_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          ./scripts/publish-gh-pages.sh site docs/.vitepress/dist "docs: publier ${GITHUB_SHA::7}"

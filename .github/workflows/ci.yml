@@ -44,3 +44,19 @@ jobs:
       # faulty expression would only show up at release time.
       - name: actionlint
         uses: raven-actions/actionlint@v2
+
+  # A dead link fails the VitePress build, so a PR cannot break the site.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: build the site
+        working-directory: docs
+        run: npm ci && npm run build

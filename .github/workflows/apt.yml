@@ -22,9 +22,10 @@ permissions:
   contents: write
 
 concurrency:
-  # Two releases published back to back would rewrite the same apt index: the
-  # second would start from a gh-pages the first has not pushed yet, and would
-  # lose its packages. One at a time, without cancelling the previous one.
+  # Own group: releases are serialized, so two runs of this workflow never
+  # overlap. A docs publication racing this one is not handled here — it is
+  # handled by publish-gh-pages.sh, which retries on a rejected push instead
+  # of relying on a shared concurrency group with docs.yml.
   group: apt-repo
   cancel-in-progress: false
 
@@ -79,21 +80,7 @@ jobs:
       - name: Publish to gh-pages
         env:
           TAG: ${{ inputs.tag }}
+          PAGES_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        # Replaces apt/ only: the documentation site shares the branch.
         run: |
-          rm -rf pages && mkdir pages && cd pages
-          git init -q -b gh-pages
-          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            git fetch --depth 1 origin gh-pages && git reset --soft FETCH_HEAD
-          fi
-          rm -rf apt
-          cp -r ../apt-repo apt
-          # Without this, GitHub Pages runs the content through Jekyll, which
-          # ignores directories starting with an underscore and rewrites some
-          # files.
-          touch .nojekyll
-          git add -A
-          git -c user.name="github-actions[bot]" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -q -m "apt: publier $TAG" || { echo "nothing to publish"; exit 0; }
-          git push -q origin gh-pages
+          ./scripts/publish-gh-pages.sh apt apt-repo "apt: publier $TAG"
