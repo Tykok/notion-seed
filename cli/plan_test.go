@@ -211,6 +211,19 @@ func TestApplyRefusesATrashedParentPageBeforeWriting(t *testing.T) {
 	}
 }
 
+// La forme mesurée le 2026-09-25 (API 2025-09-03) : in_trash seul, sans
+// archived. C'est in_trash, et lui seul, qui doit décider.
+func TestCheckParentPageReadsInTrashAlone(t *testing.T) {
+	if err := checkParentPage(context.Background(), fixedTransport{body: `{"object":"page","in_trash":true}`},
+		testParentPageID, 3); err == nil || !strings.Contains(err.Error(), "corbeille") {
+		t.Errorf(`{"in_trash":true} seul : err = %v, want un refus`, err)
+	}
+	if err := checkParentPage(context.Background(), fixedTransport{body: `{"object":"page","in_trash":false}`},
+		testParentPageID, 3); err != nil {
+		t.Errorf(`{"in_trash":false} seul : err = %v, want nil`, err)
+	}
+}
+
 // Une réponse qui ne dit pas si la page est à la corbeille ne vaut pas « page
 // vivante » : le silence de l'API n'est pas une mesure.
 func TestCheckParentPageRefusesAnAnswerWithoutTrashFields(t *testing.T) {
