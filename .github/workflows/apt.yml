@@ -22,11 +22,11 @@ permissions:
   contents: write
 
 concurrency:
-  # Shared with docs.yml: both push to gh-pages. Two publications running
-  # together would each start from a gh-pages the other has not pushed yet,
-  # and the second would drop the first one's work. One at a time, without
-  # cancelling the previous one.
-  group: gh-pages
+  # Own group: releases are serialized, so two runs of this workflow never
+  # overlap. A docs publication racing this one is not handled here — it is
+  # handled by publish-gh-pages.sh, which retries on a rejected push instead
+  # of relying on a shared concurrency group with docs.yml.
+  group: apt-repo
   cancel-in-progress: false
 
 jobs:

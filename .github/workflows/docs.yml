@@ -13,9 +13,13 @@ permissions:
   contents: write
 
 concurrency:
-  # Shared with apt.yml: both push to gh-pages, each replacing its own part.
-  group: gh-pages
-  cancel-in-progress: false
+  # Own group: the latest docs push wins over one still running, so a rerun
+  # after a quick follow-up commit is not left publishing stale content. An
+  # apt publication racing this one is not handled here — it is handled by
+  # publish-gh-pages.sh, which retries on a rejected push instead of relying
+  # on a shared concurrency group with apt.yml.
+  group: gh-pages-docs
+  cancel-in-progress: true
 
 jobs:
   publish:

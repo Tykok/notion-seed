@@ -60,6 +60,37 @@ func mustPublishPages(t *testing.T, remote, section string, files map[string]str
 	}
 }
 
+// installHook writes a pre-receive hook in the bare remote. The hook decides
+// whether to accept the push about to land on gh-pages, which is how these
+// tests simulate a push raced by a concurrent publication without actually
+// running two workflows at once.
+func installHook(t *testing.T, remote, script string) {
+	t.Helper()
+	path := filepath.Join(remote, "hooks", "pre-receive")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rejectOnceHook rejects exactly the first push it sees — as if another
+// publication had pushed gh-pages first — then accepts every push after that,
+// once the caller has re-fetched and retried.
+const rejectOnceHook = `#!/usr/bin/env bash
+marker="$(pwd)/reject-once.done"
+if [ ! -e "$marker" ]; then
+  touch "$marker"
+  echo "pre-receive: rejecting on purpose (test)" >&2
+  exit 1
+fi
+exit 0
+`
+
+// alwaysRejectHook rejects every push, as if gh-pages could never be updated.
+const alwaysRejectHook = `#!/usr/bin/env bash
+echo "pre-receive: rejecting on purpose (test)" >&2
+exit 1
+`
+
 func pagesTree(t *testing.T, remote string) []string {
 	t.Helper()
 	out, err := exec.Command("git", "--git-dir", remote, "ls-tree", "-r", "--name-only", "gh-pages").Output()
@@ -137,6 +168,30 @@ func TestASiteThatShipsAnAptDirectoryIsRefused(t *testing.T) {
 	if err := publishPages(t, remote, "site", map[string]string{"apt/gpg.key": "forged"}); err == nil {
 		t.Fatal("a site carrying apt/ was published: it would overwrite the apt repository")
 	}
+	assertPagesTree(t, remote, ".nojekyll", "apt/gpg.key")
+}
+
+func TestPublishRetriesAndSucceedsAfterARejectedPush(t *testing.T) {
+	remote := newPagesRemote(t)
+	mustPublishPages(t, remote, "apt", map[string]string{"gpg.key": "key"})
+	installHook(t, remote, rejectOnceHook)
+
+	if err := publishPages(t, remote, "site", map[string]string{"index.html": "home"}); err != nil {
+		t.Fatalf("publish site: %v", err)
+	}
+
+	assertPagesTree(t, remote, ".nojekyll", "apt/gpg.key", "index.html")
+}
+
+func TestPublishFailsWhenThePushIsAlwaysRejected(t *testing.T) {
+	remote := newPagesRemote(t)
+	mustPublishPages(t, remote, "apt", map[string]string{"gpg.key": "key"})
+	installHook(t, remote, alwaysRejectHook)
+
+	if err := publishPages(t, remote, "site", map[string]string{"index.html": "home"}); err == nil {
+		t.Fatal("publish succeeded despite a pre-receive hook rejecting every push")
+	}
+
 	assertPagesTree(t, remote, ".nojekyll", "apt/gpg.key")
 }
 
