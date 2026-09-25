@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Command fakentn imite `ntn` pour les tests. Le scénario est choisi par la
-// variable d'environnement FAKE_NTN_SCENARIO. Les sorties reproduisent des
-// captures réelles de ntn 0.22.11.
+// Command fakentn imitates `ntn` for the tests. The scenario is chosen by the
+// FAKE_NTN_SCENARIO environment variable. The outputs reproduce real captures
+// of ntn 0.22.11.
 package main
 
 import (
@@ -21,10 +21,11 @@ const (
 		"22222222-2222-4222-8222-222222222222\tExample User\tperson\n"
 )
 
-// createdDatabase et createdDataSource sont ce que fakentn rend après une
-// création, et aussi ce qu'il rend à la relecture : les deux doivent coïncider,
-// sinon apply signalerait un écart entre la cible et le réel là où il n'y en a
-// pas. Le schéma correspond à la database `projects` des tests d'apply.
+// createdDatabase and createdDataSource are what fakentn returns after a
+// creation, and also what it returns on read-back: both must match, otherwise
+// apply would report a mismatch between the target and the actual state where
+// there is none. The schema matches the `projects` database of the apply
+// tests.
 const createdDatabase = `{"object":"database","id":"db-new",` +
 	`"archived":false,"in_trash":false,` +
 	`"data_sources":[{"id":"ds-new","name":"Projects"}]}`
@@ -33,46 +34,44 @@ const createdDataSource = `{"object":"data_source","id":"ds-new",` +
 	`"title":[{"plain_text":"Projects"}],` +
 	`"properties":{"Name":{"id":"title","name":"Name","type":"title"}}}`
 
-// queryTwoRows est la réponse de toute requête de comptage
-// (`POST /v1/data_sources/<id>/query`), sauf le comptage sans filtre du
-// scénario authenticated_database_updatable (voir queryThreeRows). Deux lignes
-// portent l'option "Fait" : de quoi vérifier qu'un retrait mesuré ressort avec
-// son chiffre.
+// queryTwoRows is the response to every count query
+// (`POST /v1/data_sources/<id>/query`), except the unfiltered count of the
+// authenticated_database_updatable scenario (see queryThreeRows). Two rows
+// hold the "Fait" option: enough to check that a measured removal comes out
+// with its number.
 //
-// PIÈGE D'ORDRE, valable pour tous les scénarios : le chemin
-// `/v1/data_sources/ds-1/query` porte AUSSI le préfixe `/v1/data_sources/`. Un
-// scénario qui teste ce préfixe avant le suffixe `/query` rend le schéma d'un
-// data source à une requête de comptage — un 200 parfaitement valide, sans
-// aucun `results`. Le comptage n'y verrait aucune ligne, donc « 0 ligne
-// concernée », donc « rien à perdre » : une affirmation fausse, pas une erreur.
-// Le cas `/query` passe donc TOUJOURS avant le cas de préfixe
-// `/v1/data_sources/` — c'est ce recouvrement-là, et lui seul, qu'il faut
-// désarmer. Il ne passe pas forcément en tête du switch : `authenticated_database`
-// traite `/v1/databases/` avant lui, sans conséquence, puisque ce préfixe ne
-// recouvre aucun chemin de comptage.
+// ORDER TRAP, valid for every scenario: the path
+// `/v1/data_sources/ds-1/query` ALSO carries the `/v1/data_sources/` prefix. A
+// scenario that tests this prefix before the `/query` suffix returns a data
+// source's schema to a count query — a perfectly valid 200, without any
+// `results`. The count would see no rows there, hence "0 rows affected",
+// hence "nothing to lose": a false claim, not an error. The `/query` case
+// therefore ALWAYS comes before the `/v1/data_sources/` prefix case — it is
+// that overlap, and it alone, that must be defused. It does not necessarily
+// come first in the switch: `authenticated_database` handles `/v1/databases/`
+// before it, harmlessly, since that prefix overlaps no count path.
 //
-// TestFakeNtnAnswersQueryWithAListInEveryScenario vérifie le résultat plutôt
-// que l'ordre : chaque scénario qui sert `/v1/data_sources/` doit rendre une
-// liste avec un `results` à une requête de comptage.
+// TestFakeNtnAnswersQueryWithAListInEveryScenario checks the result rather
+// than the order: every scenario that serves `/v1/data_sources/` must return a
+// list with a `results` to a count query.
 //
-// Un compte non nul est délibéré : si un scénario reçoit une requête de
-// comptage qu'on n'avait pas prévue, il vaut mieux qu'elle produise un chiffre
-// visible qu'un zéro qui se lirait « sûr ».
+// A non-zero count is deliberate: if a scenario receives a count query nobody
+// planned for, it is better for it to produce a visible number than a zero
+// that would read as "safe".
 const queryTwoRows = `{"object":"list","results":[` +
 	`{"object":"page","id":"p1"},{"object":"page","id":"p2"}],` +
 	`"has_more":false}`
 
-// parentPage est la page parente lisible et vivante que rendent les scénarios.
-// Mesuré le 2026-09-25 contre l'API 2025-09-03 : une page porte in_trash, et
-// PAS archived. La fixture a la même forme, pour qu'une régression qui
-// cesserait de lire in_trash ne soit pas masquée par un archived que l'API
-// n'envoie pas.
+// parentPage is the readable, live parent page the scenarios return.
+// Measured on 2026-09-25 against API 2025-09-03: a page carries in_trash, and
+// NOT archived. The fixture has the same shape, so a regression that stopped
+// reading in_trash is not masked by an archived field the API does not send.
 const parentPage = `{"object":"page","id":"page1","in_trash":false}`
 
-// subcommand dit quelle sous-commande ntn a été invoquée. Les scénarios d'auth
-// doivent répondre différemment à --version et à whoami : dispatcher uniquement
-// sur la variable d'environnement ferait répondre la version à whoami, et
-// preflight.Check verrait une sortie illisible au lieu d'un défaut d'auth.
+// subcommand says which ntn subcommand was invoked. The auth scenarios must
+// answer --version and whoami differently: dispatching only on the
+// environment variable would make whoami answer with the version, and
+// preflight.Check would see an unreadable output instead of an auth failure.
 func subcommand() string {
 	for _, a := range os.Args[1:] {
 		switch a {
@@ -83,8 +82,8 @@ func subcommand() string {
 	return ""
 }
 
-// apiPath rend le chemin passé à `ntn api`, pour que la trace imite celle du
-// vrai binaire.
+// apiPath returns the path passed to `ntn api`, so the trace imitates the
+// real binary's.
 func apiPath() string {
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "/") {
@@ -97,8 +96,8 @@ func apiPath() string {
 func main() {
 	switch os.Getenv("FAKE_NTN_SCENARIO") {
 	case "authenticated":
-		// ntn présent, à jour, authentifié : le chemin heureux de preflight ET
-		// du preflight en ligne de plan, qui lit la page parente.
+		// ntn present, up to date, authenticated: the happy path of preflight
+		// AND of plan's online preflight, which reads the parent page.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -111,8 +110,8 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_page_404":
-		// ntn authentifié, mais la page parente n'existe pas : couvre la branche
-		// 404 de checkParentPage et son message.
+		// ntn authenticated, but the parent page does not exist: covers the 404
+		// branch of checkParentPage and its message.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -121,16 +120,16 @@ func main() {
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+apiPath()+"\n"+
 				"< 404 Not Found\n"+
 				"error: Public API request failed (404 Not Found object_not_found): "+
-				"Could not find page with ID: page-absente.\n")
+				"Could not find page with ID: page-missing.\n")
 			os.Exit(5)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_page_in_trash":
-		// ntn authentifié, page parente lisible mais à la corbeille : couvre le
-		// refus de checkParentPage. Seule la page est servie — plan s'arrête
-		// avant toute autre lecture, et une requête imprévue doit échouer
-		// bruyamment plutôt que rendre une réponse plausible.
+		// ntn authenticated, parent page readable but in the trash: covers
+		// checkParentPage's rejection. Only the page is served — plan stops
+		// before any other read, and an unexpected request must fail loudly
+		// rather than return a plausible response.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -138,20 +137,20 @@ func main() {
 			io.Copy(io.Discard, os.Stdin)
 			path := apiPath()
 			if !strings.HasPrefix(path, "/v1/pages/") {
-				fmt.Fprintf(os.Stderr, "fakentn: %s non servi par ce scénario\n", path)
+				fmt.Fprintf(os.Stderr, "fakentn: %s not served by this scenario\n", path)
 				os.Exit(64)
 			}
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
-			// La forme mesurée le 2026-09-25 : 200, in_trash à true, et aucun
-			// champ archived.
+			// The shape measured on 2026-09-25: 200, in_trash set to true, and no
+			// archived field.
 			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1","in_trash":true}`)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_rate_limited":
-		// ntn authentifié, mais l'API limite le débit à chaque tentative : couvre
-		// l'épuisement des retries, son message et l'annonce des attentes.
+		// ntn authenticated, but the API rate-limits every attempt: covers the
+		// exhaustion of retries, its message and the announcement of waits.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -166,8 +165,8 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_database":
-		// ntn authentifié, avec une database lisible : couvre import, le refresh
-		// et le diff à trois voies de bout en bout.
+		// ntn authenticated, with a readable database: covers import, the
+		// refresh and the three-way diff end to end.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -181,7 +180,7 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":false,"in_trash":false,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
-			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			// Always BEFORE the prefix case: see queryTwoRows.
 			case strings.HasSuffix(path, "/query"):
 				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
@@ -203,10 +202,10 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_database_select":
-		// La database d'authenticated_database, avec une propriété select au
-		// lieu du status : couvre de bout en bout le changement de type
-		// select → multi_select, dont les options non redéclarées perdent leurs
-		// lignes (mesuré le 2026-09-25).
+		// authenticated_database's database, with a select property instead of
+		// the status: covers end to end the select → multi_select type change,
+		// whose options that are not redeclared lose their rows (measured on
+		// 2026-09-25).
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -220,7 +219,7 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":false,"in_trash":false,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
-			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			// Always BEFORE the prefix case: see queryTwoRows.
 			case strings.HasSuffix(path, "/query"):
 				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
@@ -239,14 +238,14 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_database_updatable":
-		// La database d'authenticated_database, qui retient ce qu'on lui écrit :
-		// couvre l'update d'apply de bout en bout, relecture comprise. Voir
+		// authenticated_database's database, which remembers what is written to
+		// it: covers apply's update end to end, read-back included. See
 		// runUpdatable.
 		runUpdatable()
 	case "authenticated_database_query_403":
-		// Tout est lisible SAUF le comptage, refusé en 403 : couvre le fait
-		// qu'un comptage en échec n'empêche ni le plan ni son rendu, et que sa
-		// cause part sur stderr.
+		// Everything is readable EXCEPT the count, rejected with 403: covers the
+		// fact that a failed count prevents neither the plan nor its rendering,
+		// and that its cause goes to stderr.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -286,10 +285,10 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_database_404":
-		// ntn authentifié, page parente lisible, mais la database ancrée par le
-		// state a disparu (404) : couvre le blocage de bout en bout sur une
-		// ressource gérée introuvable — seul défaut resté sans test de bout en
-		// bout avant cette correction.
+		// ntn authenticated, parent page readable, but the database anchored by
+		// the state is gone (404): covers the end-to-end block on a managed
+		// resource that is not found — the only defect left without an
+		// end-to-end test before this fix.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -310,9 +309,9 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "archived_database":
-		// ntn authentifié, mais la database est archivée/en corbeille : couvre
-		// le refus d'import d'une ressource en corbeille, seul défaut à
-		// n'avoir eu aucun test — copie de authenticated_database avec
+		// ntn authenticated, but the database is archived/in the trash: covers
+		// the import rejection of a resource in the trash, the only defect that
+		// had no test — a copy of authenticated_database with
 		// "archived":true.
 		switch subcommand() {
 		case "whoami":
@@ -327,7 +326,7 @@ func main() {
 				fmt.Fprint(os.Stdout, `{"object":"database","id":"db-1",`+
 					`"archived":true,"in_trash":true,`+
 					`"data_sources":[{"id":"ds-1","name":"Tasks"}]}`)
-			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			// Always BEFORE the prefix case: see queryTwoRows.
 			case strings.HasSuffix(path, "/query"):
 				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/data_sources/"):
@@ -349,9 +348,9 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_create":
-		// ntn authentifié, page parente lisible, création acceptée : le chemin
-		// heureux d'apply de bout en bout. POST /v1/databases se distingue de
-		// GET /v1/databases/<id> par le chemin seul, pas besoin de la méthode.
+		// ntn authenticated, parent page readable, creation accepted: apply's
+		// happy path end to end. POST /v1/databases differs from
+		// GET /v1/databases/<id> by the path alone, no need for the method.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -361,7 +360,7 @@ func main() {
 			fmt.Fprint(os.Stderr, "> https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
 			switch {
-			// Toujours AVANT le cas de préfixe : voir queryTwoRows.
+			// Always BEFORE the prefix case: see queryTwoRows.
 			case strings.HasSuffix(path, "/query"):
 				fmt.Fprint(os.Stdout, queryTwoRows)
 			case strings.HasPrefix(path, "/v1/databases"):
@@ -375,8 +374,8 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "authenticated_create_refused":
-		// La création est refusée par l'API (400). Couvre l'arrêt sans rollback,
-		// et le fait que le state ne retient rien.
+		// The creation is rejected by the API (400). Covers the stop without
+		// rollback, and the fact that the state keeps nothing.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprint(os.Stdout, whoamiLine)
@@ -397,7 +396,7 @@ func main() {
 			fmt.Fprint(os.Stdout, versionLine)
 		}
 	case "version_no_auth":
-		// ntn présent et à jour, mais pas authentifié.
+		// ntn present and up to date, but not authenticated.
 		switch subcommand() {
 		case "whoami":
 			fmt.Fprintln(os.Stderr, "error: not logged in")
@@ -408,8 +407,8 @@ func main() {
 	case "version_old":
 		fmt.Fprint(os.Stdout, oldVersionLine)
 	case "ok":
-		// Consomme stdin pour reproduire `-d @-` : sans ça, un test qui écrit
-		// un body verrait un tuyau cassé.
+		// Consumes stdin to reproduce `-d @-`: without it, a test that writes a
+		// body would see a broken pipe.
 		io.Copy(io.Discard, os.Stdin)
 		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n< 200 OK\n"+
 			"< content-type: application/json\n")
@@ -439,31 +438,31 @@ func main() {
 	case "hang":
 		time.Sleep(10 * time.Minute)
 	case "echo_argv":
-		// Permet de vérifier les arguments construits par notion-seed. La ligne
-		// de statut est indispensable : sans elle, Execute refuse le succès.
+		// Makes it possible to check the arguments built by notion-seed. The
+		// status line is essential: without it, Execute rejects the success.
 		fmt.Fprint(os.Stderr, "< 200 OK\n")
 		for _, a := range os.Args[1:] {
 			fmt.Fprintln(os.Stdout, a)
 		}
 	case "exit0_status_403":
-		// ntn sort en 0 alors que l'API a répondu 403 : le statut est la seule
-		// façon de le savoir.
+		// ntn exits with 0 while the API answered 403: the status is the only
+		// way to know.
 		io.Copy(io.Discard, os.Stdin)
 		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n< 403 Forbidden\n")
 		fmt.Fprint(os.Stdout, `{"object":"error","status":403}`)
 	case "exit0_no_status":
-		// ntn sort en 0 mais sa trace -v ne porte aucune ligne "< NNN" : c'est la
-		// forme que prendrait un changement de format de sortie de ntn.
+		// ntn exits with 0 but its -v trace carries no "< NNN" line: it is the
+		// shape an ntn output format change would take.
 		io.Copy(io.Discard, os.Stdin)
 		fmt.Fprint(os.Stderr, "> GET https://api.notion.com/v1/x\n"+
-			"HTTP/2 200 (nouveau format)\n")
+			"HTTP/2 200 (new format)\n")
 		fmt.Fprint(os.Stdout, `{"object":"data_source","id":"abc"}`)
 	case "exit1_unreadable_trace":
-		// ntn sort en échec (1) avec une trace -v tronquée : une ligne de plus de
-		// 1 MiB sans retour à la ligne, au-delà de ce que le scanner accepte.
-		// Couvre le chemin où parseErr était perdu sur un exit non-nul, dégradant
-		// vers un OutcomeUnknownError générique sans dire que la trace elle-même
-		// était en cause.
+		// ntn exits with a failure (1) with a truncated -v trace: a line of more
+		// than 1 MiB without a newline, beyond what the scanner accepts. Covers
+		// the path where parseErr was lost on a non-zero exit, degrading into a
+		// generic OutcomeUnknownError without saying the trace itself was at
+		// fault.
 		io.Copy(io.Discard, os.Stdin)
 		fmt.Fprint(os.Stderr, strings.Repeat("a", 2*1024*1024))
 		os.Exit(1)
@@ -471,7 +470,7 @@ func main() {
 		fmt.Fprint(os.Stderr, "< 200 OK\n")
 		io.Copy(os.Stdout, os.Stdin)
 	default:
-		fmt.Fprintln(os.Stderr, "fakentn: scénario inconnu")
+		fmt.Fprintln(os.Stderr, "fakentn: unknown scenario")
 		os.Exit(64)
 	}
 }
