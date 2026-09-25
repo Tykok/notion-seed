@@ -198,7 +198,7 @@ func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Execute() error = nil, want un refus\n%s", out)
 	}
-	if !strings.Contains(out, "Plan bloqué") {
+	if !strings.Contains(out, "Plan blocked") {
 		t.Errorf("sortie:\n%s", out)
 	}
 	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
@@ -226,7 +226,7 @@ func TestApplyOnConvergedPlanWritesNothing(t *testing.T) {
 	if aerr != nil {
 		t.Fatalf("Execute() error = %v\n%s", aerr, out)
 	}
-	if !strings.Contains(out, "Aucun changement") {
+	if !strings.Contains(out, "No changes") {
 		t.Errorf("sortie:\n%s", out)
 	}
 	after, err := os.Stat(path)
@@ -512,7 +512,7 @@ func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
 	}
 	// La raison, pas seulement le fait : une ressource sautée sans motif renvoie
 	// l'utilisateur deviner.
-	if !strings.Contains(out, "migrée à la main") {
+	if !strings.Contains(out, "migrated by hand") {
 		t.Errorf("la section ne dit pas quoi faire:\n%s", out)
 	}
 	// Le bilan doit compter la ressource retenue alors qu'apply échoue
@@ -521,10 +521,10 @@ func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
 		t.Errorf("le bilan ne compte pas la ressource retenue:\n%s", out)
 	}
 	// Rien n'est écrit : le compte est le coût du remède, pas une perte.
-	if !strings.Contains(out, `2 lignes portent "Fait" : à migrer à la main`) {
+	if !strings.Contains(out, `2 rows hold "Fait": migrate them by hand`) {
 		t.Errorf("la ligne ne chiffre pas la migration à faire:\n%s", out)
 	}
-	if strings.Contains(out, "réassignées") {
+	if strings.Contains(out, "reassigned") {
 		t.Errorf("une ressource retenue est annoncée comme réassignant des lignes:\n%s", out)
 	}
 }
@@ -590,7 +590,7 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
-	if !strings.Contains(planOut, "Aucun changement") {
+	if !strings.Contains(planOut, "No changes") {
 		t.Errorf("le plan qui suit un apply réussi n'est pas vide:\n%s", planOut)
 	}
 }
@@ -669,7 +669,7 @@ func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
-	if !strings.Contains(planOut, "Aucun changement") {
+	if !strings.Contains(planOut, "No changes") {
 		t.Errorf("le plan qui suit une destruction n'est pas vide:\n%s", planOut)
 	}
 }
@@ -687,8 +687,8 @@ func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
 	}
 	for _, want := range []string{
 		"  - database.tasks  [destructive]",
-		"          → 3 ligne(s) partent à la corbeille avec elle.",
-		"Impact : 1 database(s) à la corbeille avec 3 ligne(s).",
+		"          → 3 row(s) go to the trash with it.",
+		"Impact: 1 database(s) in the trash with 3 row(s).",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sortie:\n%s\nwant %q", out, want)
@@ -710,7 +710,7 @@ func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "→ déclarée dans lifecycle.prevent_destroy.") {
+	if !strings.Contains(out, "→ declared in lifecycle.prevent_destroy.") {
 		t.Errorf("la mention prevent_destroy a disparu:\n%s", out)
 	}
 	if got := readMutationLog(t, logPath); got != trashLine {
@@ -744,7 +744,7 @@ func TestApplyFailOnDestructiveTrashesNothing(t *testing.T) {
 // exactement l'agrégat de plan — destruction comprise, maintenant qu'il l'écrit.
 func TestApplyShowsTheSameImpactAsPlanWhenNothingIsWithheld(t *testing.T) {
 	dir := importThenDeclare(t, orphanYAML)
-	const want = "Impact : 1 database(s) à la corbeille avec 3 ligne(s)."
+	const want = "Impact: 1 database(s) in the trash with 3 row(s)."
 
 	planOut, perr := runCmd(t, "plan", "--dir", dir)
 	if perr != nil {
@@ -791,7 +791,7 @@ func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
-	if !strings.Contains(planOut, "Impact : 2 valeurs réassignées sans trace.") {
+	if !strings.Contains(planOut, "Impact: 2 values reassigned without a trace.") {
 		t.Fatalf("montage du test faux : le plan doit agréger le retrait\n%s", planOut)
 	}
 	applyOut, aerr := runCmd(t, "apply", "--dir", dir, "--auto-approve")
@@ -801,7 +801,7 @@ func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
 	if !strings.Contains(applyOut, "Retenu — migration requise") {
 		t.Fatalf("montage du test faux : la ressource doit être retenue\n%s", applyOut)
 	}
-	if strings.Contains(applyOut, "Impact :") {
+	if strings.Contains(applyOut, "Impact:") {
 		t.Errorf("apply agrège l'impact d'une ressource qu'il n'écrit pas:\n%s", applyOut)
 	}
 	// Reliquat du lot A : le bilan ne suit plus la section « Retenu » de deux

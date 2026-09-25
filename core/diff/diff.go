@@ -11,65 +11,61 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Change est un changement présenté à l'utilisateur.
+// Change is a change shown to the user.
 type Change struct {
 	Class    Class
 	Resource string
 	Detail   string
 
-	// Details porte les changements élémentaires, non aplatis. La passe de
-	// mesure les enrichit APRÈS Compute : aplatir en chaînes ici rendrait le
-	// plan immesurable.
+	// Details holds the elementary changes, not flattened. The measurement
+	// pass enriches them AFTER Compute: flattening them into strings here would
+	// make the plan unmeasurable.
 	Details []resources.Detail
 
-	// Key est la key de configuration, sans le préfixe "database.". apply en a
-	// besoin pour indexer le state ; Resource est fait pour l'affichage.
+	// Key is the config key, without the "database." prefix. apply needs it to
+	// index the state; Resource is meant for display.
 	Key string
-	// Kind dit s'il s'agit d'une création, d'une modification ou d'une
-	// destruction. apply choisit son écriture sur lui, sans relire le texte des
-	// lignes.
+	// Kind says whether this is a creation, an update or a destruction. apply
+	// picks its write from it, without re-reading the text of the lines.
 	Kind resources.ChangeKind
-	// Target est ce qu'on écrit : non nulle sur une création ou une mise à jour
-	// autorisées, toujours nulle sur une destruction, qui n'a pas d'état après.
-	// L'autorisation d'écrire est Withheld == "", jamais Target : voir
-	// Result.Target.
+	// Target is what gets written: non-nil on an allowed creation or update,
+	// always nil on a destruction, which has no state afterwards. The
+	// permission to write is Withheld == "", never Target: see Result.Target.
 	Target *state.Database
-	// Withheld dit pourquoi cette ressource ne sera pas écrite, ou "" si elle
-	// peut l'être — Withheld == "" est l'autorisation. Voir
-	// diff.Result.Withheld.
+	// Withheld says why this resource will not be written, or "" if it can be
+	// — Withheld == "" is the permission. See diff.Result.Withheld.
 	Withheld string
 
-	// Acknowledged nomme les clés de lifecycle qui couvrent cette ressource.
+	// Acknowledged names the lifecycle keys that cover this resource.
 	//
-	// Elles ne bloquent plus rien : l'utilisateur est garant de sa base. Elles
-	// disent ce qu'il a déjà reconnu, et le rendu s'en sert pour hausser ou
-	// baisser le ton. Une clé absente ne retient pas l'écriture, elle rend la
-	// ligne plus bruyante.
+	// They no longer block anything: the user answers for their database. They
+	// say what the user has already acknowledged, and the rendering uses them
+	// to raise or lower the tone. A missing key does not withhold the write, it
+	// makes the line louder.
 	Acknowledged []string
 }
 
-// Drift est un écart constaté entre le state et le réel.
+// Drift is a mismatch found between the state and the actual state.
 type Drift struct {
 	Resource string
 	Lines    []string
 }
 
-// Unmanaged liste ce qui existe dans Notion sans être déclaré.
+// Unmanaged lists what exists in Notion without being declared.
 type Unmanaged struct {
 	Resource string
 	Lines    []string
 }
 
-// Refreshed est le résultat de la lecture d'une ressource du state.
+// Refreshed is the result of reading a resource from the state.
 //
-// Missing distingue « lue et absente » de « pas lue » : sans cette distinction,
-// une ressource gérée disparue passerait pour une ressource jamais appliquée,
-// donc pour une création — exactement le contresens à éviter.
+// Missing tells "read and absent" apart from "not read": without this
+// distinction, a vanished managed resource would pass for a resource never
+// applied, hence for a creation — exactly the misreading to avoid.
 //
-// DataSources est le nombre de data sources que la database relue porte, 0 si
-// on ne le sait pas. Il n'a pas sa place dans state.Database, qui est écrit sur
-// disque : c'est un fait du réel, qui ne sert qu'à dire qu'un compte de lignes
-// est partiel.
+// DataSources is the number of data sources the read-back database holds, 0 if
+// unknown. It has no place in state.Database, which is written to disk: it is
+// a fact of the actual state, used only to say that a row count is partial.
 type Refreshed struct {
 	Database    state.Database
 	Missing     bool
@@ -77,7 +73,7 @@ type Refreshed struct {
 	DataSources int
 }
 
-// Plan est le résultat de la passe de diff.
+// Plan is the result of the diff pass.
 type Plan struct {
 	ToAdd     int
 	ToChange  int
@@ -86,33 +82,34 @@ type Plan struct {
 	Drifts    []Drift
 	Unmanaged []Unmanaged
 
-	// NotCompared nomme les ressources que le state ancre mais que le réel n'a
-	// pas lues (--skip-preflight, qui ne fait aucun appel). CompareDatabase rend
-	// alors un résultat vide « on ne sait rien, donc on ne dit rien » — mais un
-	// résultat vide n'est pas une conformité constatée, et Render doit pouvoir
-	// distinguer les deux.
+	// NotCompared names the resources the state anchors but whose actual state
+	// was not read (--skip-preflight, which makes no call). CompareDatabase
+	// then returns an empty result, "we know nothing, so we say nothing" — but
+	// an empty result is not an observed match, and Render must be able to
+	// tell the two apart.
 	NotCompared []string
 
-	// StaleState nomme les ressources que le state ancre, que la configuration
-	// ne déclare plus, et qui n'existent plus dans Notion : la destruction a
-	// déjà eu lieu hors de notion-seed. Retirer leur entrée n'écrit rien dans
-	// Notion — c'est un nettoyage local, pas une destruction.
+	// StaleState names the resources the state anchors, that the configuration
+	// no longer declares, and that no longer exist in Notion: the destruction
+	// already happened outside notion-seed. Removing their entry writes nothing
+	// to Notion — it is a local cleanup, not a destruction.
 	StaleState []string
 
-	// Blocked ne concerne PLUS les classes de changement — plus aucune ne
-	// bloque. Il ne reste vrai que pour ce qui rend le plan incalculable : une
-	// ressource que le state ancre et que Notion ne connaît plus.
+	// Blocked NO LONGER concerns change classes — none of them blocks any
+	// more. It stays true only for what makes the plan impossible to compute: a
+	// resource the state anchors and that Notion no longer knows.
 	Blocked bool
-	// BlockedReasons nomme chaque blocage et son issue. « au moins un changement
-	// refusé » ne dit pas à l'utilisateur quoi faire.
+	// BlockedReasons names each block and its way out. "at least one change
+	// rejected" does not tell the user what to do.
 	BlockedReasons []string
 }
 
-// Compute compare la configuration désirée, le dernier état appliqué et le réel.
+// Compute compares the desired configuration, the last applied state and the
+// actual state.
 //
-// applied peut être nil (aucun state) et actual peut être vide : on retombe
-// alors exactement sur le comportement d'avant l'existence du state, où tout
-// ressort en création.
+// applied can be nil (no state) and actual can be empty: this falls back
+// exactly to the behaviour from before the state existed, where everything
+// comes out as a creation.
 func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refreshed) (*Plan, error) {
 	p := &Plan{}
 	appliedDBs := map[string]state.Database{}
@@ -135,19 +132,19 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		if r, ok := actual[db.Key]; ok {
 			if r.Missing {
 				p.block(fmt.Sprintf(
-					"database.%s est dans le state mais %s dans Notion.\n"+
-						"  → restaurez-la dans Notion, ou retirez son entrée de %s pour "+
-						"assumer une recréation (la nouvelle database repartira vide)",
+					"database.%s is in the state but %s in Notion.\n"+
+						"  → restore it in Notion, or remove its entry from %s to "+
+						"accept a re-creation (the new database will start empty)",
 					db.Key, r.Reason, state.FileName))
 				continue
 			}
 			d := r.Database
 			actualPtr = &d
 		} else if appliedPtr != nil {
-			// Le state ancre cette ressource, mais actual n'a pas d'entrée : c'est
-			// --skip-preflight, qui ne lit jamais le réel (voir le commentaire de
-			// CompareDatabase sur ce même cas). Le plan ne doit pas laisser croire
-			// qu'il a vérifié une conformité qu'il n'a en fait jamais lue.
+			// The state anchors this resource, but actual has no entry: this is
+			// --skip-preflight, which never reads the actual state (see the
+			// comment of CompareDatabase on this same case). The plan must not
+			// suggest it verified a match it never actually read.
 			p.NotCompared = append(p.NotCompared, "database."+db.Key)
 		}
 
@@ -155,7 +152,7 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 			allowDataLoss, preventDestroy)
 	}
 
-	// Les ressources du state que la configuration ne déclare plus.
+	// The state's resources that the configuration no longer declares.
 	orphans := make([]string, 0)
 	for key := range appliedDBs {
 		if !seen[key] {
@@ -170,19 +167,19 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		r, read := actual[key]
 		switch {
 		case !read:
-			// --skip-preflight : rien n'a été lu, donc on ne peut ni planifier la
-			// destruction ni conclure qu'elle a déjà eu lieu. Annoncer une
-			// destruction ici, c'est ce que faisait la version précédente : elle
-			// concluait sans jamais regarder le réel.
+			// --skip-preflight: nothing was read, so the destruction can neither
+			// be planned nor concluded to have already happened. Announcing a
+			// destruction here is what the previous version did: it concluded
+			// without ever looking at the actual state.
 			p.NotCompared = append(p.NotCompared, resource)
 			continue
 
 		case r.Missing:
-			// Introuvable ou archivée : dans Notion, détruire une database c'est
-			// l'archiver, donc les deux cas valent destruction déjà effective.
-			// prevent_destroy ne bloque plus ce nettoyage : l'entrée de state
-			// obsolète est retirée dans tous les cas, et c'est le rendu de
-			// StaleState qui porte la mention, pas un refus.
+			// Not found or archived: in Notion, destroying a database means
+			// archiving it, so both cases count as a destruction already done.
+			// prevent_destroy no longer blocks this cleanup: the stale state
+			// entry is removed in every case, and the rendering of StaleState
+			// carries the notice, not a refusal.
 			p.StaleState = append(p.StaleState, resource)
 			continue
 		}
@@ -195,10 +192,9 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 	return p, nil
 }
 
-// markUncountedDataSources note, sur la demande de comptage d'une destruction,
-// les data sources qu'elle n'interrogera pas : le comptage n'en lit qu'un, la
-// corbeille les emporte tous. Un nombre inconnu (0) ou un seul data source ne
-// marque rien.
+// markUncountedDataSources records, on a destruction's count request, the
+// data sources it will not query: the count reads only one, the trash takes
+// them all. An unknown number (0) or a single data source marks nothing.
 func markUncountedDataSources(details []resources.Detail, dataSources int) {
 	if dataSources <= 1 {
 		return
@@ -210,9 +206,9 @@ func markUncountedDataSources(details []resources.Detail, dataSources int) {
 	}
 }
 
-// absorb verse le résultat d'une ressource dans le plan, et y note les clés de
-// lifecycle qui la couvrent. allowDataLoss et preventDestroy ne bloquent plus
-// rien ici : ce sont des accusés de lecture, pas des garde-fous.
+// absorb pours a resource's result into the plan, and records the lifecycle
+// keys that cover it. allowDataLoss and preventDestroy no longer block
+// anything here: they are acknowledgements, not safeguards.
 func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[string]bool) {
 	resource := "database." + key
 
@@ -246,17 +242,17 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 	if res.Changeset.Kind == resources.KindCreate {
 		c.Detail = "(new)"
 	}
-	// Les détails passent tels quels : c'est la passe de mesure, après Compute,
-	// qui les enrichira. Les aplatir en chaînes ici — ce que faisait la version
-	// précédente — rendait le plan immesurable, et le rendu n'a de toute façon
-	// besoin que de Details.
+	// The details go through as they are: the measurement pass, after Compute,
+	// enriches them. Flattening them into strings here — what the previous
+	// version did — made the plan unmeasurable, and the rendering only needs
+	// Details anyway.
 	c.Details = res.Changeset.Details
 
-	// lifecycle ne bloque plus rien : notion-seed ne refuse plus un changement
-	// sur la foi de sa classe, il MESURE son coût et le dit (voir Class et
-	// Details ci-dessus). prevent_destroy et allow_data_loss ne sont donc plus
-	// que des accusés de lecture, versés sur la ligne pour que le rendu hausse
-	// ou baisse le ton.
+	// lifecycle no longer blocks anything: notion-seed no longer refuses a
+	// change on the strength of its class, it MEASURES its cost and says it
+	// (see Class and Details above). prevent_destroy and allow_data_loss are
+	// therefore only acknowledgements, put on the line so the rendering raises
+	// or lowers the tone.
 	if preventDestroy[resource] {
 		c.Acknowledged = append(c.Acknowledged, "prevent_destroy")
 	}

@@ -13,9 +13,8 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Une création doit annoncer ses OPTIONS, pas seulement ses propriétés. Sans
-// ça, apply écrit des options — avec leur couleur et leur groupe — que le plan
-// n'a jamais montrées.
+// A creation must announce its OPTIONS, not only its properties. Without it,
+// apply writes options — with their color and group — the plan never showed.
 func TestCompareDatabaseListsOptionsOnCreation(t *testing.T) {
 	desired := state.Database{
 		Name: "Tasks",
@@ -34,14 +33,14 @@ func TestCompareDatabaseListsOptionsOnCreation(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{`option "À faire"`, "color blue", "group To-do"} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("détails =\n%s\nil manque %q", joined, want)
+			t.Errorf("details =\n%s\nmissing %q", joined, want)
 		}
 	}
 }
 
-// Une création écrit AUSSI le nom, la description et l'icône : ils doivent donc
-// être annoncés. Les omettre était la moitié non corrigée du même défaut que
-// les options — écrire ce que le plan n'a pas montré.
+// A creation ALSO writes the name, description and icon: they must therefore
+// be announced. Omitting them was the unfixed half of the same flaw as the
+// options — writing what the plan did not show.
 func TestCompareDatabaseAnnouncesNameDescriptionAndIconOnCreation(t *testing.T) {
 	desired := state.Database{
 		Name:        "Notes de réunion",
@@ -62,17 +61,17 @@ func TestCompareDatabaseAnnouncesNameDescriptionAndIconOnCreation(t *testing.T) 
 		`icon "📝"`,
 	} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("détails =\n%s\nil manque %q", joined, want)
+			t.Errorf("details =\n%s\nmissing %q", joined, want)
 		}
 	}
-	// Le nom vient en premier : c'est ce que l'utilisateur cherche d'abord.
+	// The name comes first: it is what the user looks for first.
 	if !strings.HasPrefix(joined, `+ name "Notes de réunion"`) {
-		t.Errorf("la première ligne doit être le nom, obtenu :\n%s", joined)
+		t.Errorf("the first line must be the name, got:\n%s", joined)
 	}
 }
 
-// Ce que le YAML ne déclare pas n'est pas écrit, donc n'est pas annoncé : même
-// garde de non-vacuité que partout ailleurs.
+// What the YAML does not declare is not written, so it is not announced: same
+// non-emptiness guard as everywhere else.
 func TestCompareDatabaseOmitsUndeclaredFieldsOnCreation(t *testing.T) {
 	desired := state.Database{
 		Name:       "Notes",
@@ -81,14 +80,14 @@ func TestCompareDatabaseOmitsUndeclaredFieldsOnCreation(t *testing.T) {
 	res := CompareDatabase("notes", &desired, nil, nil)
 	for _, d := range res.Changeset.Details {
 		if strings.HasPrefix(d.Target, "description") || strings.HasPrefix(d.Target, "icon") {
-			t.Errorf("ligne inattendue %q : le YAML ne déclare ni description ni icône", d.Target)
+			t.Errorf("unexpected line %q: the YAML declares neither description nor icon", d.Target)
 		}
 	}
 }
 
-// La cible résolue EST ce qui sera écrit. Tant qu'apply ne fait que des
-// créations, elle coïncide avec la voie desired, et c'est précisément
-// l'invariant qui rend plan et apply indissociables.
+// The resolved target IS what will be written. As long as apply only makes
+// creations, it matches the desired way, and that is precisely the invariant
+// that makes plan and apply inseparable.
 func TestCompareDatabaseResolvesTargetOnCreation(t *testing.T) {
 	desired := state.Database{
 		Name:       "Tasks",
@@ -96,14 +95,14 @@ func TestCompareDatabaseResolvesTargetOnCreation(t *testing.T) {
 	}
 	res := CompareDatabase("tasks", &desired, nil, nil)
 	if res.Target == nil {
-		t.Fatal("Target = nil, want la cible résolue de la création")
+		t.Fatal("Target = nil, want the resolved target of the creation")
 	}
 	if !reflect.DeepEqual(*res.Target, desired) {
 		t.Errorf("Target = %+v, want %+v", *res.Target, desired)
 	}
 }
 
-// db construit une database pivot à une seule propriété, pour alléger la table.
+// db builds a pivot database with a single property, to lighten the table.
 func db(propName string, p state.Property) *state.Database {
 	return &state.Database{
 		Name:       "Tasks",
@@ -123,10 +122,9 @@ func multiSel(opts ...state.Option) state.Property {
 	return state.Property{ID: "p1", Type: "multi_select", Options: opts}
 }
 
-// fixtureTasks rend un triplet qui produit au moins une ligne de chaque forme :
-// un champ de database, une propriété neuve, un changement de type, une option
-// neuve, une option retirée. Les tests de ce fichier s'en servent plutôt que de
-// remonter un triplet chacun.
+// fixtureTasks returns a triple that produces at least one line of each shape:
+// a database field, a new property, a type change, a new option, a removed
+// option. The tests of this file use it rather than each building a triple.
 func fixtureTasks() (desired, applied, actual state.Database) {
 	actual = state.Database{
 		ID: "db-1", DataSourceID: "ds-1",
@@ -173,36 +171,36 @@ func TestUpdateTargetCarriesRemoteOptionIDs(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	if res.Target == nil {
-		t.Fatal("Target = nil sur un update")
+		t.Fatal("Target = nil on an update")
 	}
 
 	prio := res.Target.Properties["Prio"]
 	if len(prio.Options) != 2 {
 		t.Fatalf("options = %d, want 2", len(prio.Options))
 	}
-	// "Haute" existe dans Notion : la cible DOIT porter son id, sinon le PATCH
-	// la détruit et la recrée, et les lignes qui la portaient perdent leur
-	// valeur.
+	// "Haute" exists in Notion: the target MUST carry its id, otherwise the
+	// PATCH destroys and re-creates it, and the rows that held it lose their
+	// value.
 	if prio.Options[0].Name != "Haute" || prio.Options[0].ID != "o-haute" {
 		t.Errorf("option[0] = %+v, want Haute / o-haute", prio.Options[0])
 	}
-	// "Moyenne" est neuve : pas d'id, l'API lui en crée un.
+	// "Moyenne" is new: no id, the API creates one for it.
 	if prio.Options[1].Name != "Moyenne" || prio.Options[1].ID != "" {
-		t.Errorf("option[1] = %+v, want Moyenne sans id", prio.Options[1])
+		t.Errorf("option[1] = %+v, want Moyenne without an id", prio.Options[1])
 	}
-	// "Basse" n'est plus réclamée : son absence de la cible EST ce qui la
-	// détruit, et le plan l'annonce déjà par une ligne "-".
+	// "Basse" is no longer claimed: its absence from the target IS what
+	// destroys it, and the plan already announces it with a "-" line.
 	for _, o := range prio.Options {
 		if o.Name == "Basse" {
-			t.Error("l'option Basse est dans la cible alors que le YAML ne la réclame plus")
+			t.Error("option Basse is in the target while the YAML no longer claims it")
 		}
 	}
 }
 
-// Un renommage d'option — même key, nom différent — ne peut pas s'exprimer
-// dans l'API : le PATCH rend 200 sans rien changer. Écrire retiendrait dans le
-// state un nom que Notion ne porte pas, donc la ressource ENTIÈRE doit être
-// retenue plutôt qu'à moitié écrite.
+// An option rename — same key, different name — cannot be expressed in the
+// API: the PATCH returns 200 without changing anything. Writing would record
+// in the state a name Notion does not hold, so the WHOLE resource must be
+// withheld rather than half written.
 func TestMigrationWithholdsTheWholeResource(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
@@ -211,26 +209,26 @@ func TestMigrationWithholdsTheWholeResource(t *testing.T) {
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 
 	if res.Target != nil {
-		t.Error("Target non nulle sur une ressource retenue : apply l'écrirait")
+		t.Error("Target non-nil on a withheld resource: apply would write it")
 	}
 	if res.Withheld == "" {
-		t.Fatal("Withheld vide : une cible nulle sans motif renvoie l'utilisateur deviner")
+		t.Fatal("Withheld empty: a nil target with no reason leaves the user guessing")
 	}
 	if !strings.Contains(res.Withheld, "  → ") {
-		t.Errorf("Withheld = %q, want une action corrective introduite par \"  → \"", res.Withheld)
+		t.Errorf("Withheld = %q, want a corrective action introduced by \"  → \"", res.Withheld)
 	}
 }
 
-// Le cas symétrique : une ressource sans migration ne doit jamais être
-// retenue, et Target reste l'autorisation d'écrire attendue par apply.
+// The mirror case: a resource with no migration must never be withheld, and
+// Target stays the write permission apply expects.
 func TestAResourceWithoutMigrationIsNotWithheld(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	if res.Withheld != "" {
-		t.Errorf("Withheld = %q, want vide", res.Withheld)
+		t.Errorf("Withheld = %q, want empty", res.Withheld)
 	}
 	if res.Target == nil {
-		t.Error("Target = nil alors que rien ne retient la ressource")
+		t.Error("Target = nil while nothing withholds the resource")
 	}
 }
 
@@ -238,7 +236,7 @@ func TestUpdateTargetKeepsUndeclaredPropertiesOut(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	if _, present := res.Target.Properties["Libre"]; present {
-		t.Error("la propriété hors config est dans la cible : elle partirait dans un payload")
+		t.Error("the unmanaged property is in the target: it would go in a payload")
 	}
 }
 
@@ -247,14 +245,14 @@ func TestUpdateTargetDoesNotOverwriteUndeclaredFields(t *testing.T) {
 	desired.Name, desired.Description, desired.Icon = "", "", ""
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	if res.Target.Name != "Tasks" || res.Target.Description != "ancienne" || res.Target.Icon != "🔵" {
-		t.Errorf("cible = %q / %q / %q, want les valeurs réelles intactes",
+		t.Errorf("target = %q / %q / %q, want the actual values intact",
 			res.Target.Name, res.Target.Description, res.Target.Icon)
 	}
 }
 
-// Mesuré le 2026-09-24 : un changement de type RECRÉE les options, et l'API
-// ignore les ids transmis (envoyés 6993c61f/36af0279, rendus fba2569a/f62f86cf).
-// Les porter ferait croire à une continuité d'identité qui n'existe pas.
+// Measured on 2026-09-24: a type change RE-CREATES the options, and the API
+// ignores the ids sent (sent 6993c61f/36af0279, returned fba2569a/f62f86cf).
+// Carrying them would suggest an identity continuity that does not exist.
 func TestUpdateTargetDropsOptionIDsOnTypeChange(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Prio"] = state.Property{Type: "multi_select", Options: []state.Option{
@@ -268,14 +266,14 @@ func TestUpdateTargetDropsOptionIDsOnTypeChange(t *testing.T) {
 	}
 	for _, o := range prio.Options {
 		if o.ID != "" {
-			t.Errorf("option %q porte l'id %q alors que le type change", o.Name, o.ID)
+			t.Errorf("option %q carries id %q while the type changes", o.Name, o.ID)
 		}
 	}
 }
 
-// Review Focus #5 : une option dont ni la key ni le nom ne résolvent est
-// NEUVE. Lui donner l'id d'une autre option en ferait un renommage silencieux,
-// exactement ce que ce produit existe pour rendre impossible.
+// Review Focus #5: an option whose key and name both fail to resolve is NEW.
+// Giving it another option's id would make it a silent rename, exactly what
+// this product exists to make impossible.
 func TestUpdateTargetGivesNoIDToAnUnresolvedOption(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
@@ -288,13 +286,13 @@ func TestUpdateTargetGivesNoIDToAnUnresolvedOption(t *testing.T) {
 		t.Fatalf("options = %d, want 1", len(prio.Options))
 	}
 	if prio.Options[0].ID != "" {
-		t.Errorf("ID = %q, want vide : ni la key ni le nom ne résolvent", prio.Options[0].ID)
+		t.Errorf("ID = %q, want empty: neither the key nor the name resolves", prio.Options[0].ID)
 	}
 }
 
-// Sur un update, une propriété neuve part avec TOUTES ses options, couleur et
-// groupe compris : le plan doit les montrer une à une, comme à la création. Les
-// taire serait écrire ce que le plan n'a jamais montré.
+// On an update, a new property goes out with ALL its options, color and group
+// included: the plan must show them one by one, as at creation. Hiding them
+// would be writing what the plan never showed.
 func TestUpdateShowsTheOptionsOfANewProperty(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Etat"] = state.Property{Type: "select", Options: []state.Option{
@@ -303,14 +301,14 @@ func TestUpdateShowsTheOptionsOfANewProperty(t *testing.T) {
 	}}
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	assertOptionLinesMatchTarget(t, res, "Etat", []string{
-		`+ option "Ouvert" (propriété "Etat") color green`,
-		`+ option "Clos" (propriété "Etat") `,
+		`+ option "Ouvert" (property "Etat") color green`,
+		`+ option "Clos" (property "Etat") `,
 	})
 }
 
-// Un changement de type recrée les options : celles du YAML partent neuves, et
-// le plan les annonce. La classe de la ligne de propriété reste celle de la
-// table mesurée : les lignes d'option n'en inventent pas d'autre.
+// A type change re-creates the options: the YAML's go out new, and the plan
+// announces them. The class of the property line stays the measured table's:
+// the option lines do not invent another one.
 func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Prio"] = state.Property{Type: "status", Options: []state.Option{
@@ -319,33 +317,33 @@ func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 	}}
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	assertOptionLinesMatchTarget(t, res, "Prio", []string{
-		`+ option "Haute" (propriété "Prio") color red, group To-do`,
-		`+ option "Faite" (propriété "Prio") group Complete`,
-		// "Basse" n'est pas redéclarée : elle disparaît avec le changement de
-		// type, et ses lignes avec elle.
-		`- option "Basse" (propriété "Prio") non redéclarée sous ce nom : le changement de type recrée les options`,
+		`+ option "Haute" (property "Prio") color red, group To-do`,
+		`+ option "Faite" (property "Prio") group Complete`,
+		// "Basse" is not redeclared: it disappears with the type change, and its
+		// rows with it.
+		`- option "Basse" (property "Prio") not redeclared under this name: the type change re-creates the options`,
 	})
 	for _, d := range res.Changeset.Details {
 		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
-			t.Errorf("classe du changement de type = %v, want celle de la table", d.Class)
+			t.Errorf("class of the type change = %v, want the table's", d.Class)
 		}
 		if d.Property == "Prio" && d.Op == "+" && d.Class != ClassSafe {
-			t.Errorf("ligne %q : classe %v, want sûre — elle n'invente pas de classe", d.Target, d.Class)
+			t.Errorf("line %q: class %v, want safe — it does not invent a class", d.Target, d.Class)
 		}
 	}
 }
 
-// assertOptionLinesMatchTarget vérifie que les lignes d'option de la propriété
-// sont exactement celles attendues, dans l'ordre, qu'elles disent chacune ce que
-// la cible écrit, et qu'elles n'élargissent pas le jeu d'écriture : chacune
-// nomme une propriété qui porte déjà sa propre ligne.
+// assertOptionLinesMatchTarget checks that the property's option lines are
+// exactly the expected ones, in order, that each says what the target writes,
+// and that they do not widen the write set: each names a property that already
+// carries its own line.
 func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []string) {
 	t.Helper()
 	if res.Target == nil {
 		t.Fatalf("Target = nil, Withheld = %q", res.Withheld)
 	}
-	// Seules les lignes `+` disent ce que la cible écrit ; une ligne `-` dit ce
-	// que la cible n'écrit PAS, et n'a donc pas d'option en face.
+	// Only `+` lines say what the target writes; a `-` line says what the
+	// target does NOT write, and so has no option facing it.
 	var got, added []string
 	propLine := false
 	for _, d := range res.Changeset.Details {
@@ -354,11 +352,11 @@ func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []
 			propLine = true
 			continue
 		}
-		if !strings.HasSuffix(d.Target, fmt.Sprintf("(propriété %q)", prop)) {
+		if !strings.HasSuffix(d.Target, fmt.Sprintf("(property %q)", prop)) {
 			continue
 		}
 		if d.Property != prop || d.Field != "" {
-			t.Errorf("ligne %q : Property=%q Field=%q, want Property=%q seul",
+			t.Errorf("line %q: Property=%q Field=%q, want Property=%q only",
 				d.Target, d.Property, d.Field, prop)
 		}
 		got = append(got, d.Op+" "+d.Target+" "+d.Note)
@@ -367,22 +365,22 @@ func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []
 		}
 	}
 	if !propLine {
-		t.Errorf("aucune ligne de propriété pour %q : les options élargiraient le jeu d'écriture", prop)
+		t.Errorf("no property line for %q: the options would widen the write set", prop)
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("lignes d'option:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		t.Errorf("option lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	opts := res.Target.Properties[prop].Options
 	if len(opts) != len(added) {
-		t.Fatalf("la cible écrit %d options, le plan en montre %d", len(opts), len(added))
+		t.Fatalf("the target writes %d options, the plan shows %d", len(opts), len(added))
 	}
 	for i, o := range opts {
-		line := fmt.Sprintf(`+ option %q (propriété %q) %s`, o.Name, prop, optionAttrNote(o))
+		line := fmt.Sprintf(`+ option %q (property %q) %s`, o.Name, prop, optionAttrNote(o))
 		if added[i] != line {
-			t.Errorf("option %d écrite %q, montrée %q", i, line, added[i])
+			t.Errorf("option %d written %q, shown %q", i, line, added[i])
 		}
 		if o.ID != "" {
-			t.Errorf("option %q porte l'id %q : elle part neuve", o.Name, o.ID)
+			t.Errorf("option %q carries id %q: it goes out new", o.Name, o.ID)
 		}
 	}
 }
@@ -398,22 +396,22 @@ func TestPlanLinesComparesIcon(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("aucune ligne d'icône alors que 🔵 → 🟢")
+		t.Fatal("no icon line while 🔵 → 🟢")
 	}
 	if found.Op != "~" {
 		t.Errorf("Op = %q, want %q", found.Op, "~")
 	}
 }
 
-// Même garde de non-vacuité que pour le nom : une icône que le YAML ne déclare
-// pas ne doit produire aucune ligne.
+// Same non-emptiness guard as for the name: an icon the YAML does not declare
+// must produce no line.
 func TestPlanLinesIgnoresUndeclaredIcon(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Icon = ""
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	for _, d := range res.Changeset.Details {
 		if d.Field == "icon" {
-			t.Errorf("ligne d'icône %q alors que le YAML n'en déclare pas", d.Target)
+			t.Errorf("icon line %q while the YAML declares none", d.Target)
 		}
 	}
 }
@@ -421,23 +419,23 @@ func TestPlanLinesIgnoresUndeclaredIcon(t *testing.T) {
 func TestDriftLinesNamesIconChangedOutside(t *testing.T) {
 	_, applied, actual := fixtureTasks()
 	actual.Icon = "🟣"
-	desired := applied // le YAML colle au dernier état appliqué
+	desired := applied // the YAML sticks to the last applied state
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 
 	joined := strings.Join(res.Drift, "\n")
-	if !strings.Contains(joined, "icône") {
-		t.Errorf("dérive = %q, want une ligne nommant l'icône", joined)
+	if !strings.Contains(joined, "icon") {
+		t.Errorf("drift = %q, want a line naming the icon", joined)
 	}
 }
 
-// D1 (mesuré le 2026-09-24) : la couleur d'une option est immuable côté API —
-// le PATCH répond 400 « Cannot update color of select with id/name » et fait
-// échouer toute la propriété. Le remède passe par la recréation de l'option,
-// donc ClassMigration, et son coût se mesure — le nombre de lignes qui portent
-// l'option ACTUELLE.
+// D1 (measured on 2026-09-24): an option's color is immutable on the API side
+// — the PATCH returns 400 "Cannot update color of select with id/name" and
+// fails the whole property. The fix goes through re-creating the option, hence
+// ClassMigration, and its cost is measured — the number of rows holding the
+// CURRENT option.
 func TestOptionColorChangeIsMigrationAndIsMeasured(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
-	// Une seule option, un seul écart : la couleur.
+	// A single option, a single mismatch: the color.
 	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
 		{Key: "haute", Name: "Haute", Color: "purple"},
 		{Key: "basse", Name: "Basse", Color: "blue"},
@@ -451,24 +449,24 @@ func TestOptionColorChangeIsMigrationAndIsMeasured(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("aucune ligne de couleur alors que red → purple")
+		t.Fatal("no color line while red → purple")
 	}
 	if found.Class != change.ClassMigration {
 		t.Errorf("Class = %v, want ClassMigration", found.Class)
 	}
 	if found.Measure == nil {
-		t.Fatal("Measure = nil : le remède passe par le retrait de l'option, son coût se mesure")
+		t.Fatal("Measure = nil: the fix goes through removing the option, its cost is measured")
 	}
 	if found.Measure.Option != "Haute" || found.Measure.PropertyType != "select" {
 		t.Errorf("Measure = %+v, want Option=Haute PropertyType=select", *found.Measure)
 	}
 	if found.Count != -1 {
-		t.Errorf("Count = %d, want -1 (non mesuré)", found.Count)
+		t.Errorf("Count = %d, want -1 (not measured)", found.Count)
 	}
 }
 
-// Le group est MUTABLE par id (mesuré le 2026-09-24 : "Fait" déplacée de
-// Complete vers In progress). Il ne doit donc pas suivre la couleur.
+// The group is MUTABLE by id (measured on 2026-09-24: "Fait" moved from
+// Complete to In progress). It must therefore not follow the color.
 func TestOptionGroupChangeStaysSafe(t *testing.T) {
 	actual := state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
@@ -492,15 +490,15 @@ func TestOptionGroupChangeStaysSafe(t *testing.T) {
 
 	res := CompareDatabase("tasks", &desired, &applied, &actual)
 	if len(res.Changeset.Details) != 1 {
-		t.Fatalf("détails = %d, want 1 : %+v", len(res.Changeset.Details), res.Changeset.Details)
+		t.Fatalf("details = %d, want 1: %+v", len(res.Changeset.Details), res.Changeset.Details)
 	}
 	if got := res.Changeset.Details[0].Class; got != change.ClassSafe {
-		t.Errorf("Class = %v, want ClassSafe — le group est mutable", got)
+		t.Errorf("Class = %v, want ClassSafe — the group is mutable", got)
 	}
 }
 
-// Un renommage porte lui aussi son coût : le remède passe par le retrait de
-// l'ancienne option.
+// A rename carries its cost too: the fix goes through removing the old
+// option.
 func TestOptionRenameIsMeasured(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Prio"] = state.Property{Type: "select", Options: []state.Option{
@@ -514,15 +512,15 @@ func TestOptionRenameIsMeasured(t *testing.T) {
 			continue
 		}
 		if d.Measure == nil {
-			t.Fatalf("ligne de migration %q sans Measure", d.Target)
+			t.Fatalf("migration line %q without Measure", d.Target)
 		}
 		if d.Measure.Option != "Haute" {
-			t.Errorf("Measure.Option = %q, want %q (le nom ACTUEL, celui qui filtre)",
+			t.Errorf("Measure.Option = %q, want %q (the CURRENT name, the one that filters)",
 				d.Measure.Option, "Haute")
 		}
 		return
 	}
-	t.Fatal("aucune ligne de migration alors que le nom change")
+	t.Fatal("no migration line while the name changes")
 }
 
 func TestUpdateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
@@ -532,12 +530,12 @@ func TestUpdateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
 		t.Fatalf("Kind = %v, want KindUpdate", res.Changeset.Kind)
 	}
 	if len(res.Changeset.Details) == 0 {
-		t.Fatal("aucun détail : la fixture ne teste rien")
+		t.Fatal("no detail: the fixture tests nothing")
 	}
 	for _, d := range res.Changeset.Details {
 		hasProp, hasField := d.Property != "", d.Field != ""
 		if hasProp == hasField {
-			t.Errorf("détail %q %q : Property=%q Field=%q — il en faut exactement un",
+			t.Errorf("detail %q %q: Property=%q Field=%q — exactly one is required",
 				d.Op, d.Target, d.Property, d.Field)
 		}
 	}
@@ -552,7 +550,7 @@ func TestCreateDetailsNameExactlyOnePropertyOrField(t *testing.T) {
 	for _, d := range res.Changeset.Details {
 		hasProp, hasField := d.Property != "", d.Field != ""
 		if hasProp == hasField {
-			t.Errorf("détail %q %q : Property=%q Field=%q — il en faut exactement un",
+			t.Errorf("detail %q %q: Property=%q Field=%q — exactly one is required",
 				d.Op, d.Target, d.Property, d.Field)
 		}
 	}
@@ -566,19 +564,19 @@ func TestCompareDatabase(t *testing.T) {
 		actual    *state.Database
 		wantKind  resources.ChangeKind
 		wantClass change.Class
-		wantLine  string // sous-chaîne attendue dans une ligne de changement
-		wantDrift string // sous-chaîne attendue dans la dérive ("" = aucune)
-		wantUnman string // sous-chaîne attendue en hors config ("" = aucun)
+		wantLine  string // substring expected in a change line
+		wantDrift string // substring expected in the drift ("" = none)
+		wantUnman string // substring expected in unmanaged ("" = none)
 	}{
 		{
-			name:      "création quand rien n'existe",
+			name:      "creation when nothing exists",
 			desired:   db("Name", state.Property{Type: "title"}),
 			wantKind:  resources.KindCreate,
 			wantClass: change.ClassSafe,
 			wantLine:  `property "Name"`,
 		},
 		{
-			name:      "aucun changement quand les trois voies coïncident",
+			name:      "no change when all three ways match",
 			desired:   db("Statut", status(state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Key: "todo", Name: "À faire", Group: "To-do"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "À faire", Group: "To-do"})),
@@ -586,7 +584,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantClass: change.ClassSafe,
 		},
 		{
-			name:      "option renommée par key",
+			name:      "option renamed by key",
 			desired:   db("Statut", status(state.Option{Key: "done", Name: "Terminé", Group: "Complete"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Key: "done", Name: "Fait", Group: "Complete"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "Fait", Group: "Complete"})),
@@ -595,11 +593,11 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"Fait" → "Terminé"`,
 		},
 		{
-			// Le retrait passe par ClassifyOptionRemoval(have.Type, -1) à cet
-			// endroit du plan : le nombre de lignes concernées n'y est pas encore
-			// mesuré (une tâche ultérieure le branchera), donc -1 dit « non mesuré »
-			// et la classe rendue est ClassUnknownImpact, quel que soit le type.
-			name:      "option renommée sans key : retrait plus ajout, impact non mesuré",
+			// The removal goes through ClassifyOptionRemoval(have.Type, -1) at
+			// this point of the plan: the number of affected rows is not measured
+			// yet (a later task will wire it in), so -1 says "not measured" and
+			// the returned class is ClassUnknownImpact, whatever the type.
+			name:      "option renamed without a key: removal plus addition, impact not measured",
 			desired:   db("Statut", status(state.Option{Name: "Terminé", Group: "Complete"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Name: "Fait", Group: "Complete"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "Fait", Group: "Complete"})),
@@ -608,7 +606,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"Fait"`,
 		},
 		{
-			name:      "option de status retirée : impact non mesuré à ce point du plan",
+			name:      "status option removed: impact not measured at this point of the plan",
 			desired:   db("Statut", status(state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
 			applied:   db("Statut", status(state.Option{ID: "o1", Key: "todo", Name: "À faire", Group: "To-do"}, state.Option{ID: "o2", Key: "ko", Name: "Annulé", Group: "Complete"})),
 			actual:    db("Statut", status(state.Option{ID: "o1", Name: "À faire", Group: "To-do"}, state.Option{ID: "o2", Name: "Annulé", Group: "Complete"})),
@@ -617,7 +615,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"Annulé"`,
 		},
 		{
-			name:      "option de select retirée : impact non mesuré à ce point du plan",
+			name:      "select option removed: impact not measured at this point of the plan",
 			desired:   db("Tag", sel(state.Option{Key: "a", Name: "A"})),
 			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "a", Name: "A"}, state.Option{ID: "o2", Key: "b", Name: "B"})),
 			actual:    db("Tag", sel(state.Option{ID: "o1", Name: "A"}, state.Option{ID: "o2", Name: "B"})),
@@ -626,7 +624,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"B"`,
 		},
 		{
-			name:      "option de multi_select retirée : impact non mesuré à ce point du plan",
+			name:      "multi_select option removed: impact not measured at this point of the plan",
 			desired:   db("Tags", multiSel(state.Option{Key: "a", Name: "A"})),
 			applied:   db("Tags", multiSel(state.Option{ID: "o1", Key: "a", Name: "A"}, state.Option{ID: "o2", Key: "b", Name: "B"})),
 			actual:    db("Tags", multiSel(state.Option{ID: "o1", Name: "A"}, state.Option{ID: "o2", Name: "B"})),
@@ -635,7 +633,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"B"`,
 		},
 		{
-			name:      "option ajoutée : sûr",
+			name:      "option added: safe",
 			desired:   db("Tag", sel(state.Option{Key: "a", Name: "A"}, state.Option{Key: "b", Name: "B"})),
 			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "a", Name: "A"})),
 			actual:    db("Tag", sel(state.Option{ID: "o1", Name: "A"})),
@@ -644,29 +642,29 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"B"`,
 		},
 		{
-			// L'id porté par `applied` ("o1") n'existe plus côté réel : l'option a
-			// été détruite puis recréée hors de notion-seed, sous un nouvel id mais
-			// le même nom. La key ne peut plus servir de pont — elle doit retomber
-			// sur l'appariement par nom plutôt que produire un retrait suivi d'une
-			// création fantômes.
-			name:      "key déclarée sans correspondance dans le réel : retombe sur le nom",
+			// The id carried by `applied` ("o1") no longer exists in the actual
+			// state: the option was destroyed then re-created outside notion-seed,
+			// under a new id but the same name. The key can no longer serve as a
+			// bridge — it must fall back on pairing by name rather than produce a
+			// phantom removal followed by a phantom creation.
+			name:      "declared key with no match in the actual state: falls back on the name",
 			desired:   db("Tag", sel(state.Option{Key: "x", Name: "Foo"})),
 			applied:   db("Tag", sel(state.Option{ID: "o1", Key: "x", Name: "Foo"})),
 			actual:    db("Tag", sel(state.Option{ID: "o2", Name: "Foo"})),
 			wantKind:  resources.KindNone,
 			wantClass: change.ClassSafe,
-			// L'id "o1" que portait `applied` a réellement disparu du réel : c'est
-			// une vraie dérive (constat), distincte du plan (Changeset) qui, lui,
-			// ne doit ni recréer ni retirer "Foo" — c'est ce que vérifient
-			// wantKind/wantClass ci-dessus.
-			wantDrift: "hors de notion-seed",
+			// The id "o1" `applied` carried really vanished from the actual state:
+			// it is real drift (an observation), distinct from the plan
+			// (Changeset), which must neither re-create nor remove "Foo" — that
+			// is what wantKind/wantClass above check.
+			wantDrift: "outside notion-seed",
 		},
 		{
-			// La classe vient désormais de la table MESURÉE, plus du refus par
-			// principe : number → rich_text a été essayé le 2026-09-24 et ne perd
-			// rien (7 devient "7"). L'annoncer destructif serait précisément
-			// l'affirmation invérifiée que ce produit existe pour supprimer.
-			name:      "type de propriété changé : classé par la table mesurée",
+			// The class now comes from the MEASURED table, no longer from refusal
+			// on principle: number → rich_text was tried on 2026-09-24 and loses
+			// nothing (7 becomes "7"). Announcing it destructive would be
+			// precisely the unverified claim this product exists to remove.
+			name:      "property type changed: classified by the measured table",
 			desired:   db("Estimate", state.Property{Type: "rich_text"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
@@ -675,10 +673,10 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "number → rich_text",
 		},
 		{
-			// Hors de la table : personne n'a essayé, donc l'impact est inconnu —
-			// et il domine l'en-tête, parce que ne pas savoir mérite plus
-			// d'attention que savoir que c'est sûr.
-			name:      "type de propriété changé hors de la table : impact inconnu",
+			// Outside the table: nobody tried, so the impact is unknown — and it
+			// dominates the header, because not knowing deserves more attention
+			// than knowing it is safe.
+			name:      "property type changed outside the table: unknown impact",
 			desired:   db("Estimate", state.Property{Type: "people"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
@@ -687,7 +685,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "number → people",
 		},
 		{
-			name:      "format de number changé : sûr",
+			name:      "number format changed: safe",
 			desired:   db("Estimate", state.Property{Type: "number", Format: "euro"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
@@ -696,16 +694,15 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "euro",
 		},
 		{
-			// I1 : color et group sont stockés dans le state et comparés nulle
-			// part avant cette correction — vérifié en inversant les deux groupes
-			// et en changeant les deux couleurs dans un YAML de test, qui
-			// ressortait alors en « Aucun changement ».
+			// I1: color and group are stored in the state and compared nowhere
+			// before this fix — checked by swapping both groups and changing both
+			// colors in a test YAML, which then came out as "No changes".
 			//
-			// D1 (mesuré le 2026-09-24) : la couleur d'une option est IMMUABLE côté
-			// API — le PATCH répond 400 et fait échouer toute la propriété. Le
-			// remède passe par la recréation de l'option, d'où ClassMigration à la
-			// place du ClassSafe d'origine.
-			name: "option couleur déclarée et différente : migration requise",
+			// D1 (measured on 2026-09-24): an option's color is IMMUTABLE on the
+			// API side — the PATCH returns 400 and fails the whole property. The
+			// fix goes through re-creating the option, hence ClassMigration in
+			// place of the original ClassSafe.
+			name: "option color declared and different: migration required",
 			desired: db("Statut", status(
 				state.Option{Key: "todo", Name: "À faire", Color: "red", Group: "To-do"})),
 			applied: db("Statut", status(
@@ -717,10 +714,10 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "color blue → red",
 		},
 		{
-			// Symétrique du cas précédent : sans `color` dans le YAML, une couleur
-			// qui diffère côté réel n'est pas l'affaire de notion-seed — exactement
-			// comme une description omise n'écrase jamais celle de Notion.
-			name: "option couleur absente du YAML : aucune ligne",
+			// Mirror of the previous case: without `color` in the YAML, a color
+			// that differs in the actual state is not notion-seed's business —
+			// exactly as an omitted description never overwrites Notion's.
+			name: "option color absent from the YAML: no line",
 			desired: db("Statut", status(
 				state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
 			applied: db("Statut", status(
@@ -731,10 +728,10 @@ func TestCompareDatabase(t *testing.T) {
 			wantClass: change.ClassSafe,
 		},
 		{
-			// Le group d'une option déplacée à la main dans Notion doit ressortir
-			// à la fois en dérive (constat) et en plan (réconciliation vers le
-			// YAML) — même schéma que le renommage d'option testé plus haut.
-			name: "dérive : group d'une option changé dans Notion",
+			// The group of an option moved by hand in Notion must come out both
+			// as drift (observation) and in the plan (reconciliation towards the
+			// YAML) — same pattern as the option rename tested above.
+			name: "drift: group of an option changed in Notion",
 			desired: db("Statut", status(
 				state.Option{Key: "todo", Name: "À faire", Group: "To-do"})),
 			applied: db("Statut", status(
@@ -744,13 +741,13 @@ func TestCompareDatabase(t *testing.T) {
 			wantKind:  resources.KindUpdate,
 			wantClass: change.ClassSafe,
 			wantLine:  "group In progress → To-do",
-			wantDrift: "groupe To-do → In progress",
+			wantDrift: "group To-do → In progress",
 		},
 		{
-			// La description n'est pas gardée comme le nom : une database sans
-			// `description` dans le YAML ne doit jamais proposer d'écraser celle que
-			// porte Notion — sinon chaque plan afficherait un changement fantôme.
-			name:    "description omise du YAML : aucune ligne",
+			// The description is not guarded like the name: a database without
+			// `description` in the YAML must never offer to overwrite the one
+			// Notion holds — otherwise every plan would show a phantom change.
+			name:    "description omitted from the YAML: no line",
 			desired: db("Name", state.Property{Type: "title"}),
 			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
 			actual: &state.Database{Name: "Tasks", Description: "Description existante", Properties: map[string]state.Property{
@@ -760,7 +757,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantClass: change.ClassSafe,
 		},
 		{
-			name: "description déclarée et différente : les deux valeurs",
+			name: "description declared and different: both values",
 			desired: &state.Database{Name: "Tasks", Description: "Nouvelle description", Properties: map[string]state.Property{
 				"Name": {Type: "title"},
 			}},
@@ -773,7 +770,7 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  `"Ancienne description" → "Nouvelle description"`,
 		},
 		{
-			name:    "propriété hors config : listée, non touchée",
+			name:    "unmanaged property: listed, left untouched",
 			desired: db("Name", state.Property{Type: "title"}),
 			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
 			actual: &state.Database{Name: "Tasks", Properties: map[string]state.Property{
@@ -782,26 +779,26 @@ func TestCompareDatabase(t *testing.T) {
 			}},
 			wantKind:  resources.KindNone,
 			wantClass: change.ClassSafe,
-			// "Créé le" n'est dans aucun `applied` connu : elle est aussi une
-			// dérive (apparue hors de notion-seed), en plus d'être hors config.
+			// "Créé le" is in no known `applied`: it is also drift (appeared
+			// outside notion-seed), on top of being unmanaged.
 			wantDrift: `"Créé le"`,
 			wantUnman: `"Créé le"`,
 		},
 		{
-			name:    "dérive : option renommée dans Notion",
+			name:    "drift: option renamed in Notion",
 			desired: db("Statut", status(state.Option{Key: "done", Name: "Fait", Group: "Complete"})),
 			applied: db("Statut", status(state.Option{ID: "o1", Key: "done", Name: "Fait", Group: "Complete"})),
 			actual:  db("Statut", status(state.Option{ID: "o1", Name: "Terminé", Group: "Complete"})),
-			// Le YAML gagne : on replanifie le retour à "Fait". L'assertion cible le
-			// texte du renommage, pas seulement "Fait" : une ligne de RETRAIT
-			// contiendrait aussi "Fait" et laisserait passer une régression qui
-			// confondrait renommage et suppression.
+			// The YAML wins: the return to "Fait" is planned again. The assertion
+			// targets the rename text, not only "Fait": a REMOVAL line would also
+			// contain "Fait" and would let through a regression that confused
+			// rename and deletion.
 			wantKind:  resources.KindUpdate,
 			wantClass: change.ClassMigration,
-			wantDrift: `renommée en "Terminé"`,
+			wantDrift: `renamed to "Terminé"`,
 		},
 		{
-			name:      "database orpheline : destruction planifiée",
+			name:      "orphan database: destruction planned",
 			applied:   db("Name", state.Property{ID: "p1", Type: "title"}),
 			actual:    db("Name", state.Property{ID: "p1", Type: "title"}),
 			wantKind:  resources.KindDestroy,
@@ -818,30 +815,30 @@ func TestCompareDatabase(t *testing.T) {
 				t.Errorf("Kind = %v, want %v", got.Changeset.Kind, tc.wantKind)
 			}
 			if c := WorstClass(got.Changeset.Details); c != tc.wantClass {
-				t.Errorf("classe = %v, want %v (détails: %+v)", c, tc.wantClass, got.Changeset.Details)
+				t.Errorf("class = %v, want %v (details: %+v)", c, tc.wantClass, got.Changeset.Details)
 			}
 			if tc.wantLine != "" && !containsSub(detailStrings(got.Changeset.Details), tc.wantLine) {
-				t.Errorf("aucune ligne ne contient %q: %+v", tc.wantLine, got.Changeset.Details)
+				t.Errorf("no line contains %q: %+v", tc.wantLine, got.Changeset.Details)
 			}
 			if tc.wantDrift == "" && len(got.Drift) != 0 {
-				t.Errorf("dérive inattendue: %v", got.Drift)
+				t.Errorf("unexpected drift: %v", got.Drift)
 			}
 			if tc.wantDrift != "" && !containsSub(got.Drift, tc.wantDrift) {
-				t.Errorf("dérive attendue contenant %q, got %v", tc.wantDrift, got.Drift)
+				t.Errorf("expected drift containing %q, got %v", tc.wantDrift, got.Drift)
 			}
 			if tc.wantUnman == "" && len(got.Unmanaged) != 0 {
-				t.Errorf("hors config inattendu: %v", got.Unmanaged)
+				t.Errorf("unexpected unmanaged: %v", got.Unmanaged)
 			}
 			if tc.wantUnman != "" && !containsSub(got.Unmanaged, tc.wantUnman) {
-				t.Errorf("hors config attendu contenant %q, got %v", tc.wantUnman, got.Unmanaged)
+				t.Errorf("expected unmanaged containing %q, got %v", tc.wantUnman, got.Unmanaged)
 			}
 		})
 	}
 }
 
 func TestCompareDatabaseSaysNothingWhenRemoteWasNotRead(t *testing.T) {
-	// --skip-preflight ne lit rien. Une database déjà importée ne doit surtout
-	// pas ressortir en création.
+	// --skip-preflight reads nothing. An already imported database must above
+	// all not come out as a creation.
 	desired := db("Name", state.Property{Type: "title"})
 	applied := db("Name", state.Property{ID: "p1", Type: "title"})
 
@@ -851,12 +848,12 @@ func TestCompareDatabaseSaysNothingWhenRemoteWasNotRead(t *testing.T) {
 		t.Errorf("Kind = %v, want KindNone", got.Changeset.Kind)
 	}
 	if len(got.Changeset.Details) != 0 {
-		t.Errorf("aucun détail attendu sans lecture du réel: %+v", got.Changeset.Details)
+		t.Errorf("no detail expected without reading the actual state: %+v", got.Changeset.Details)
 	}
 }
 
-// Review Focus 4 : un state écrit à la main peut porter une database sans
-// `properties`. La map nulle doit se comporter comme vide.
+// Review Focus 4: a hand-written state can hold a database without
+// `properties`. The nil map must behave as empty.
 func TestCompareDatabaseHandlesNilProperties(t *testing.T) {
 	desired := &state.Database{Name: "Tasks"}
 	applied := &state.Database{ID: "db1", Name: "Tasks"}
@@ -878,23 +875,23 @@ func TestCompareDatabaseRenamedPropertyIsCreationPlusUnmanaged(t *testing.T) {
 
 	lines := detailStrings(got.Changeset.Details)
 	if !containsSub(lines, `"Charge"`) {
-		t.Errorf("la nouvelle propriété doit être créée: %v", lines)
+		t.Errorf("the new property must be created: %v", lines)
 	}
 	if !containsSub(lines, "Estimate") {
-		t.Errorf("la ligne doit prévenir que Estimate reste en place: %v", lines)
+		t.Errorf("the line must warn that Estimate stays in place: %v", lines)
 	}
 	if !containsSub(got.Unmanaged, `"Estimate"`) {
-		t.Errorf("Estimate doit apparaître hors config: %v", got.Unmanaged)
+		t.Errorf("Estimate must appear as unmanaged: %v", got.Unmanaged)
 	}
 	if WorstClass(got.Changeset.Details) != change.ClassSafe {
-		t.Error("un renommage de propriété ne détruit rien, il duplique")
+		t.Error("a property rename destroys nothing, it duplicates")
 	}
 }
 
-// Correction 1 (ronde de relecture 1) : `claimed` était indexée par nom, donc
-// une option renommée par key libérait son ancien nom, et la branche de
-// repli par nom croyait ce nom encore occupé — une option déclarée sortait
-// du plan sans une ligne. Triplet fourni par la relecture.
+// Fix 1 (review round 1): `claimed` was indexed by name, so an option renamed
+// by key freed its old name, and the fallback-by-name branch thought that name
+// still taken — a declared option dropped out of the plan without a line.
+// Triple provided by the review.
 func TestCompareDatabaseOptionRenameFreesNameForNewOption(t *testing.T) {
 	desired := db("Statut", status(
 		state.Option{Key: "a", Name: "Terminé"},
@@ -909,27 +906,27 @@ func TestCompareDatabaseOptionRenameFreesNameForNewOption(t *testing.T) {
 		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
 	}
 	if c := WorstClass(got.Changeset.Details); c != change.ClassMigration {
-		t.Errorf("classe = %v, want ClassMigration (détails: %+v)", c, got.Changeset.Details)
+		t.Errorf("class = %v, want ClassMigration (details: %+v)", c, got.Changeset.Details)
 	}
 
 	lines := detailStrings(got.Changeset.Details)
 	if !containsSub(lines, `"Fait" → "Terminé"`) {
-		t.Errorf("la migration par key doit apparaître: %v", lines)
+		t.Errorf("the migration by key must appear: %v", lines)
 	}
 	if !containsSub(lines, `+ option "Fait"`) {
 		t.Errorf(
-			"la création de \"Fait\" doit apparaître : sans elle le YAML déclare "+
-				"une option qui ne sera jamais créée, sans que le plan ne le montre: %v",
+			"the creation of \"Fait\" must appear: without it the YAML declares "+
+				"an option that will never be created, without the plan showing it: %v",
 			lines)
 	}
 }
 
-// Angle mort de la table (ronde de relecture 1) : un renommage par key et un
-// retrait sur la même propriété status doivent produire les DEUX lignes, et
-// la classe rendue doit rester la plus grave des deux. Le retrait n'est pas
-// mesuré à ce point du plan (ClassifyOptionRemoval y reçoit -1), donc c'est
-// l'impact inconnu qui domine la migration — pas la réécriture silencieuse
-// que la mesure révélera une fois branchée.
+// Blind spot of the table (review round 1): a rename by key and a removal on
+// the same status property must produce BOTH lines, and the returned class
+// must stay the more severe of the two. The removal is not measured at this
+// point of the plan (ClassifyOptionRemoval receives -1 there), so it is the
+// unknown impact that dominates the migration — not the silent rewrite the
+// measurement will reveal once wired in.
 func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 	desired := db("Statut", status(state.Option{Key: "a", Name: "Migré"}))
 	applied := db("Statut", status(
@@ -947,20 +944,20 @@ func TestCompareDatabaseStatusRenameAndRemovalTogether(t *testing.T) {
 		t.Errorf("Kind = %v, want KindUpdate", got.Changeset.Kind)
 	}
 	if c := WorstClass(got.Changeset.Details); c != change.ClassUnknownImpact {
-		t.Errorf("classe = %v, want ClassUnknownImpact (détails: %+v)", c, got.Changeset.Details)
+		t.Errorf("class = %v, want ClassUnknownImpact (details: %+v)", c, got.Changeset.Details)
 	}
 
 	lines := detailStrings(got.Changeset.Details)
 	if !containsSub(lines, `"Ancien" → "Migré"`) {
-		t.Errorf("la migration doit apparaître: %v", lines)
+		t.Errorf("the migration must appear: %v", lines)
 	}
 	if !containsSub(lines, `"Obsolète"`) {
-		t.Errorf("le retrait doit apparaître: %v", lines)
+		t.Errorf("the removal must appear: %v", lines)
 	}
 }
 
-// Un retrait d'option doit porter la DEMANDE de mesure, pas la mesure : le
-// comparateur reste pur, c'est là que vit la sûreté du produit.
+// An option removal must carry the measurement REQUEST, not the measurement:
+// the comparator stays pure, that is where the product's safety lives.
 func TestCompareDatabaseRequestsAMeasurementForOptionRemoval(t *testing.T) {
 	desired := state.Database{
 		Name: "Tasks",
@@ -986,25 +983,25 @@ func TestCompareDatabaseRequestsAMeasurementForOptionRemoval(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("aucune ligne de retrait d'option")
+		t.Fatal("no option removal line")
 	}
 	if found.Measure == nil {
-		t.Fatal("la ligne de retrait ne porte aucune demande de mesure")
+		t.Fatal("the removal line carries no measurement request")
 	}
 	if found.Measure.Property != "Statut" || found.Measure.Option != "Annulé" ||
 		found.Measure.PropertyType != "status" {
 		t.Errorf("Measure = %+v", *found.Measure)
 	}
 	if found.Count != -1 {
-		t.Errorf("Count = %d, want -1 tant que rien n'a été mesuré", found.Count)
+		t.Errorf("Count = %d, want -1 as long as nothing was measured", found.Count)
 	}
 	if found.Class != change.ClassUnknownImpact {
-		t.Errorf("Class = %v, want ClassUnknownImpact avant mesure", found.Class)
+		t.Errorf("Class = %v, want ClassUnknownImpact before measurement", found.Class)
 	}
 }
 
-// Un changement de type porte lui aussi sa demande — le nombre de valeurs non
-// vides de la colonne — et sa classe vient de la table mesurée.
+// A type change carries its request too — the number of non-empty values of
+// the column — and its class comes from the measured table.
 func TestCompareDatabaseClassifiesTypeChangeFromTheMeasuredTable(t *testing.T) {
 	desired := state.Database{
 		Name:       "Clients",
@@ -1023,19 +1020,19 @@ func TestCompareDatabaseClassifiesTypeChangeFromTheMeasuredTable(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("aucune ligne de changement de type")
+		t.Fatal("no type change line")
 	}
-	// multi_select → select : mesuré réécriture silencieuse le 2026-09-24.
+	// multi_select → select: measured as a silent rewrite on 2026-09-24.
 	if found.Class != change.ClassSilentRewrite {
 		t.Errorf("Class = %v, want ClassSilentRewrite", found.Class)
 	}
 	if found.Measure == nil || found.Measure.Option != "" {
-		t.Errorf("Measure = %+v, want une demande de comptage des valeurs non vides", found.Measure)
+		t.Errorf("Measure = %+v, want a request to count the non-empty values", found.Measure)
 	}
 }
 
-// Un ajout d'option ne coûte rien : aucune mesure ne doit être demandée, donc
-// aucun appel ne sera payé.
+// An option addition costs nothing: no measurement must be requested, so no
+// call will be paid.
 func TestCompareDatabaseRequestsNoMeasurementForSafeDetails(t *testing.T) {
 	desired := state.Database{
 		Name: "Tasks",
@@ -1054,25 +1051,25 @@ func TestCompareDatabaseRequestsNoMeasurementForSafeDetails(t *testing.T) {
 	res := CompareDatabase("tasks", &desired, &applied, &applied)
 	for _, d := range res.Changeset.Details {
 		if d.Op == "+" && d.Measure != nil {
-			t.Errorf("la ligne %q demande une mesure alors qu'elle ne coûte rien", d.Target)
+			t.Errorf("line %q requests a measurement while it costs nothing", d.Target)
 		}
 	}
 }
 
-// Aucun détail émis par le comparateur ne doit porter Count == 0.
+// No detail emitted by the comparator must carry Count == 0.
 //
-// POURQUOI c'est un bug et pas une lubie : 0 se lit « 0 ligne concernée », donc
-// « rien à perdre », donc « sûr ». Or CompareDatabase est PURE — elle ne compte
-// rien, elle se contente d'ÉMETTRE des demandes de mesure. Un 0 sorti d'ici
-// serait donc une affirmation d'innocuité que personne n'a vérifiée, et c'est
-// exactement le défaut que ce produit existe pour rendre impossible. Avant la
-// passe de mesure, le seul compte honnête est -1 : « on ne sait pas ».
+// WHY it is a bug and not a whim: 0 reads as "0 rows affected", hence "nothing
+// to lose", hence "safe". But CompareDatabase is PURE — it counts nothing, it
+// only EMITS measurement requests. A 0 coming out of here would therefore be a
+// claim of harmlessness nobody verified, and that is exactly the flaw this
+// product exists to make impossible. Before the measurement pass, the only
+// honest count is -1: "we don't know".
 //
-// Ce test existe parce que resources.NewDetail ne suffit pas : un littéral
-// `resources.Detail{...}` reste toujours possible, et le champ Count vaut 0 par
-// défaut en Go. Le constructeur est la commodité ; ce test est le garde-fou. Il
-// balaie un éventail de cas, pas un seul, parce que le trou peut s'ouvrir dans
-// n'importe quelle branche de planLines, optionLines ou createLines.
+// This test exists because resources.NewDetail is not enough: a
+// `resources.Detail{...}` literal is always possible, and the Count field
+// defaults to 0 in Go. The constructor is the convenience; this test is the
+// safeguard. It sweeps a range of cases, not just one, because the hole can
+// open in any branch of planLines, optionLines or createLines.
 func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 	withColor := func(name, color, group string) state.Property {
 		return state.Property{ID: "p1", Type: "status", Options: []state.Option{
@@ -1085,11 +1082,11 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 		desired, applied, actual *state.Database
 	}{
 		{
-			name:    "création complète",
+			name:    "full creation",
 			desired: db("Statut", status(state.Option{Key: "todo", Name: "À faire", Color: "blue", Group: "To-do"})),
 		},
 		{
-			name: "nom et description modifiés",
+			name: "name and description updated",
 			desired: &state.Database{Name: "Nouveau", Description: "Nouvelle", Properties: map[string]state.Property{
 				"Name": {Type: "title"},
 			}},
@@ -1099,7 +1096,7 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			}},
 		},
 		{
-			name: "ajout de propriété",
+			name: "property added",
 			desired: &state.Database{Name: "Tasks", Properties: map[string]state.Property{
 				"Name":     {Type: "title"},
 				"Estimate": {Type: "number"},
@@ -1108,25 +1105,25 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			actual:  db("Name", state.Property{ID: "p1", Type: "title"}),
 		},
 		{
-			name:    "changement de type dans la table mesurée",
+			name:    "type change in the measured table",
 			desired: db("Tags", state.Property{Type: "multi_select"}),
 			applied: db("Tags", state.Property{ID: "p1", Type: "select"}),
 			actual:  db("Tags", state.Property{ID: "p1", Type: "select"}),
 		},
 		{
-			name:    "changement de type hors de la table mesurée",
+			name:    "type change outside the measured table",
 			desired: db("Estimate", state.Property{Type: "people"}),
 			applied: db("Estimate", state.Property{ID: "p1", Type: "number"}),
 			actual:  db("Estimate", state.Property{ID: "p1", Type: "number"}),
 		},
 		{
-			name:    "format de number modifié",
+			name:    "number format updated",
 			desired: db("Estimate", state.Property{Type: "number", Format: "euro"}),
 			applied: db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:  db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 		},
 		{
-			name: "ajout d'option",
+			name: "option added",
 			desired: db("Statut", status(
 				state.Option{Key: "todo", Name: "À faire"},
 				state.Option{Name: "Neuve"},
@@ -1135,7 +1132,7 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			actual:  db("Statut", status(state.Option{ID: "o1", Name: "À faire"})),
 		},
 		{
-			name:    "retrait d'option de status",
+			name:    "status option removed",
 			desired: db("Statut", status(state.Option{Key: "todo", Name: "À faire"})),
 			applied: db("Statut", status(
 				state.Option{ID: "o1", Key: "todo", Name: "À faire"},
@@ -1147,7 +1144,7 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			)),
 		},
 		{
-			name:    "retrait d'option de select",
+			name:    "select option removed",
 			desired: db("Tag", sel(state.Option{Key: "a", Name: "A"})),
 			applied: db("Tag", sel(
 				state.Option{ID: "o1", Key: "a", Name: "A"},
@@ -1159,7 +1156,7 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			)),
 		},
 		{
-			name:    "retrait d'option de multi_select",
+			name:    "multi_select option removed",
 			desired: db("Tag", multiSel(state.Option{Key: "a", Name: "A"})),
 			applied: db("Tag", multiSel(
 				state.Option{ID: "o1", Key: "a", Name: "A"},
@@ -1171,19 +1168,19 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 			)),
 		},
 		{
-			name:    "renommage d'option par key",
+			name:    "option renamed by key",
 			desired: db("Statut", status(state.Option{Key: "done", Name: "Terminé"})),
 			applied: db("Statut", status(state.Option{ID: "o1", Key: "done", Name: "Fait"})),
 			actual:  db("Statut", status(state.Option{ID: "o1", Name: "Fait"})),
 		},
 		{
-			name:    "couleur et groupe d'option modifiés",
+			name:    "option color and group updated",
 			desired: db("Statut", withColor("Fait", "green", "Complete")),
 			applied: db("Statut", withColor("Fait", "blue", "To-do")),
 			actual:  db("Statut", withColor("Fait", "blue", "To-do")),
 		},
 		{
-			name:    "destruction d'une database orpheline",
+			name:    "destruction of an orphan database",
 			applied: db("Name", state.Property{ID: "p1", Type: "title"}),
 			actual:  db("Name", state.Property{ID: "p1", Type: "title"}),
 		},
@@ -1193,13 +1190,13 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res := CompareDatabase("tasks", tc.desired, tc.applied, tc.actual)
 			if len(res.Changeset.Details) == 0 {
-				t.Fatal("aucun détail : ce cas ne couvre plus rien, corrigez le triplet")
+				t.Fatal("no detail: this case no longer covers anything, fix the triple")
 			}
 			for _, d := range res.Changeset.Details {
 				if d.Count == 0 {
 					t.Errorf(
-						"le détail %q %q porte Count = 0, donc « 0 ligne concernée », "+
-							"donc « sûr » — alors que rien n'a été mesuré ; want -1",
+						"detail %q %q carries Count = 0, hence \"0 rows affected\", "+
+							"hence \"safe\" — while nothing was measured; want -1",
 						d.Op, d.Target)
 				}
 			}
@@ -1207,10 +1204,10 @@ func TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount(t *testing.T) {
 	}
 }
 
-// Un changement de type que la table MESURÉE dit sûr ne doit coûter aucun
-// appel : le compte des valeurs non vides ne changerait ni sa classe ni la
-// décision de l'utilisateur. Un plan qui ne contient qu'un `number → rich_text`
-// paierait sinon un comptage contre l'API pour un nombre qui ne change rien.
+// A type change the MEASURED table says is safe must cost no call: the count
+// of non-empty values would change neither its class nor the user's decision.
+// A plan that holds only a `number → rich_text` would otherwise pay for a
+// count against the API for a number that changes nothing.
 func TestCompareDatabaseRequestsNoMeasurementForASafeTypeChange(t *testing.T) {
 	desired := state.Database{
 		Name:       "Clients",
@@ -1230,18 +1227,18 @@ func TestCompareDatabaseRequestsNoMeasurementForASafeTypeChange(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("aucune ligne de changement de type")
+		t.Fatal("no type change line")
 	}
-	// number → rich_text : mesuré sûr le 2026-09-24, donc rien à compter.
+	// number → rich_text: measured safe on 2026-09-24, so nothing to count.
 	if found.Class != change.ClassSafe {
 		t.Fatalf("Class = %v, want ClassSafe", found.Class)
 	}
 	if found.Measure != nil {
-		t.Errorf("Measure = %+v, want nil : un changement de type sûr ne coûte aucun appel",
+		t.Errorf("Measure = %+v, want nil: a safe type change costs no call",
 			found.Measure)
 	}
-	// La ligne reste « non mesurée » : 0 vaudrait « aucune ligne concernée »,
-	// une affirmation que personne n'a vérifiée.
+	// The line stays "not measured": 0 would mean "no rows affected", a claim
+	// nobody verified.
 	if found.Count != -1 {
 		t.Errorf("Count = %d, want -1", found.Count)
 	}
@@ -1264,12 +1261,12 @@ func containsSub(lines []string, sub string) bool {
 	return false
 }
 
-// Mesuré le 2026-09-25 sur select → multi_select : une ligne ne garde sa valeur
-// que si une option de MÊME NOM part dans le payload. Celles que le YAML ne
-// redéclare pas disparaissent du schéma, et leurs lignes passent à vide. Le plan
-// doit donc annoncer chacune, mesurée comme un retrait ordinaire — sinon ce
-// changement de type, classé sûr par la table, perd des valeurs sans qu'aucune
-// ligne ni aucun --fail-on ne le dise.
+// Measured on 2026-09-25 on select → multi_select: a row keeps its value only
+// if an option with the SAME NAME goes in the payload. Those the YAML does not
+// redeclare disappear from the schema, and their rows are emptied. The plan
+// must therefore announce each one, measured as an ordinary removal —
+// otherwise this type change, classified safe by the table, loses values
+// without any line or any --fail-on saying so.
 func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 	actual := state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
@@ -1291,9 +1288,9 @@ func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 			}},
 		},
 	}
-	// "Haute" garde son nom sous une autre key : le nom seul compte, puisque
-	// l'API recrée les ids. "Moyenne" garde sa key mais change de nom : sous un
-	// changement de type, c'est une perte, pas un renommage.
+	// "Haute" keeps its name under another key: the name alone counts, since
+	// the API re-creates the ids. "Moyenne" keeps its key but changes name:
+	// under a type change, it is a loss, not a rename.
 	desired := state.Database{Properties: map[string]state.Property{
 		"Prio": {Type: "multi_select", Options: []state.Option{
 			{Key: "h", Name: "Haute", Color: "red"},
@@ -1312,50 +1309,50 @@ func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 	for _, d := range removed {
 		names = append(names, d.Target)
 	}
-	want := []string{`option "Basse" (propriété "Prio")`, `option "Moyenne" (propriété "Prio")`}
+	want := []string{`option "Basse" (property "Prio")`, `option "Moyenne" (property "Prio")`}
 	if !reflect.DeepEqual(names, want) {
-		t.Fatalf("retraits = %q, want %q", names, want)
+		t.Fatalf("removals = %q, want %q", names, want)
 	}
 	for _, d := range removed {
 		if d.Property != "Prio" || d.Field != "" {
-			t.Errorf("%s : Property=%q Field=%q, want Property=\"Prio\" seul", d.Target, d.Property, d.Field)
+			t.Errorf("%s: Property=%q Field=%q, want Property=\"Prio\" only", d.Target, d.Property, d.Field)
 		}
-		if d.Note != "non redéclarée sous ce nom : le changement de type recrée les options" {
-			t.Errorf("%s : Note = %q", d.Target, d.Note)
+		if d.Note != "not redeclared under this name: the type change re-creates the options" {
+			t.Errorf("%s: Note = %q", d.Target, d.Note)
 		}
 		if d.Class != change.ClassUnknownImpact || d.Count != -1 {
-			t.Errorf("%s : {Class:%v Count:%d}, want {impact inconnu -1} avant mesure",
+			t.Errorf("%s: {Class:%v Count:%d}, want {unknown impact -1} before measurement",
 				d.Target, d.Class, d.Count)
 		}
 		if d.Measure == nil {
-			t.Fatalf("%s : aucune demande de mesure", d.Target)
+			t.Fatalf("%s: no measurement request", d.Target)
 		}
 	}
-	// La mesure porte l'ANCIEN type : c'est lui qui filtre les lignes avant
-	// l'écriture, et le nom actuel qui les trouve.
+	// The measurement carries the OLD type: it is what filters the rows before
+	// the write, and the current name that finds them.
 	wantMeasure := resources.Measurement{
 		Property: "Prio", PropertyType: "select", Option: "Basse", Retyped: true,
 	}
 	if *removed[0].Measure != wantMeasure {
 		t.Errorf("Measure = %+v, want %+v", *removed[0].Measure, wantMeasure)
 	}
-	// La cible reste celle que la mesure du 2026-09-25 dit juste : les seules
-	// options déclarées, par nom, sans id.
+	// The target stays the one the 2026-09-25 measurement says is right: only
+	// the declared options, by name, with no id.
 	var sent []string
 	for _, o := range res.Target.Properties["Prio"].Options {
 		sent = append(sent, o.Name)
 		if o.ID != "" {
-			t.Errorf("option %q porte l'id %q : elle part neuve", o.Name, o.ID)
+			t.Errorf("option %q carries id %q: it goes out new", o.Name, o.ID)
 		}
 	}
 	if !reflect.DeepEqual(sent, []string{"Haute", "Normale"}) {
-		t.Errorf("options écrites = %q", sent)
+		t.Errorf("options written = %q", sent)
 	}
 }
 
-// Un changement vers un type SANS options (select → rich_text) n'a aucun nom à
-// retrouver : ce qu'il fait des valeurs est l'affaire de la table des couples et
-// du compte des non vides, pas d'une ligne de retrait par option.
+// A change to a type WITHOUT options (select → rich_text) has no name to find:
+// what it does to the values is the business of the table of pairs and of the
+// count of non-empty values, not of a removal line per option.
 func TestTypeChangeToATypeWithoutOptionsAnnouncesNoRemoval(t *testing.T) {
 	actual := state.Database{
 		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
@@ -1369,14 +1366,14 @@ func TestTypeChangeToATypeWithoutOptionsAnnouncesNoRemoval(t *testing.T) {
 	res := CompareDatabase("tasks", &desired, &actual, &actual)
 	for _, d := range res.Changeset.Details {
 		if d.Op == "-" {
-			t.Errorf("ligne de retrait inattendue : %s", d.Target)
+			t.Errorf("unexpected removal line: %s", d.Target)
 		}
 	}
 }
 
-// Une option neuve sur une propriété existante part avec sa couleur et son
-// groupe, comme à la création : le plan doit les montrer, sinon apply écrit ce
-// qu'il n'a jamais affiché.
+// A new option on an existing property goes out with its color and group, as
+// at creation: the plan must show them, otherwise apply writes what it never
+// displayed.
 func TestUpdateShowsTheAttributesOfANewOption(t *testing.T) {
 	desired, applied, actual := fixtureTasks()
 	desired.Properties["Etat"] = state.Property{Type: "status", Options: []state.Option{
@@ -1391,14 +1388,14 @@ func TestUpdateShowsTheAttributesOfANewOption(t *testing.T) {
 
 	lines := detailStrings(res.Changeset.Details)
 	for _, want := range []string{
-		`+ option "Moyenne" (propriété "Prio") color orange`,
-		`+ option "Bloqué" (propriété "Etat") color red, group In progress`,
+		`+ option "Moyenne" (property "Prio") color orange`,
+		`+ option "Bloqué" (property "Etat") color red, group In progress`,
 	} {
 		if !containsSub(lines, want) {
-			t.Errorf("il manque %q dans :\n%s", want, strings.Join(lines, "\n"))
+			t.Errorf("missing %q in:\n%s", want, strings.Join(lines, "\n"))
 		}
 	}
-	// Et c'est bien ce que la cible écrit.
+	// And it is indeed what the target writes.
 	var sent state.Option
 	for _, o := range res.Target.Properties["Prio"].Options {
 		if o.Name == "Moyenne" {
@@ -1406,12 +1403,12 @@ func TestUpdateShowsTheAttributesOfANewOption(t *testing.T) {
 		}
 	}
 	if sent.Color != "orange" {
-		t.Errorf("option écrite = %+v, want color orange", sent)
+		t.Errorf("option written = %+v, want color orange", sent)
 	}
 }
 
-// L'autorisation d'écrire est Withheld == "" pour les trois natures de
-// changement. Une destruction l'obtient SANS cible : il n'y a pas d'état après.
+// The write permission is Withheld == "" for all three kinds of change. A
+// destruction gets it WITHOUT a target: there is no state afterwards.
 func TestCompareDatabaseAuthorizesADestroyWithoutATarget(t *testing.T) {
 	applied := state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Tasks"}
 	actual := applied
@@ -1420,24 +1417,24 @@ func TestCompareDatabaseAuthorizesADestroyWithoutATarget(t *testing.T) {
 		t.Fatalf("Kind = %v, want KindDestroy", res.Changeset.Kind)
 	}
 	if res.Withheld != "" {
-		t.Errorf("Withheld = %q, want vide : une destruction est autorisée", res.Withheld)
+		t.Errorf("Withheld = %q, want empty: a destruction is allowed", res.Withheld)
 	}
 	if res.Target != nil {
-		t.Errorf("Target = %+v, want nil : une destruction n'a pas d'état après", res.Target)
+		t.Errorf("Target = %+v, want nil: a destruction has no state afterwards", res.Target)
 	}
 }
 
-// Une destruction demande le compte de TOUTES les lignes : c'est ce qui part à
-// la corbeille avec la database. Non mesurée, elle reste à -1, jamais à 0.
+// A destruction requests the count of ALL rows: it is what goes to the trash
+// with the database. Not measured, it stays at -1, never at 0.
 func TestCompareDatabaseAsksToCountTheRowsOfADestroy(t *testing.T) {
 	applied := state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Tasks"}
 	actual := applied
 	res := CompareDatabase("tasks", nil, &applied, &actual)
 	if len(res.Changeset.Details) != 1 {
-		t.Fatalf("Details = %+v, want une ligne", res.Changeset.Details)
+		t.Fatalf("Details = %+v, want one line", res.Changeset.Details)
 	}
 	d := res.Changeset.Details[0]
 	if d.Measure == nil || !d.Measure.AllRows || d.Count != -1 || d.Class != ClassDestructive {
-		t.Errorf("Detail = %+v, want une demande AllRows, Count -1, destructif", d)
+		t.Errorf("Detail = %+v, want an AllRows request, Count -1, destructive", d)
 	}
 }
