@@ -324,7 +324,7 @@ func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 		`- option "Basse" (property "Prio") not redeclared under this name: the type change re-creates the options`,
 	})
 	for _, d := range res.Changeset.Details {
-		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
+		if d.Target == `property "Prio"` && d.Class != change.TypeChangeOf("select", "status", []string{"Haute", "Faite"}).Class {
 			t.Errorf("class of the type change = %v, want the table's", d.Class)
 		}
 		if d.Property == "Prio" && d.Op == "+" && d.Class != ClassSafe {
@@ -673,15 +673,13 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "number → rich_text",
 		},
 		{
-			// Outside the table: nobody tried, so the impact is unknown — and it
-			// dominates the header, because not knowing deserves more attention
-			// than knowing it is safe.
-			name:      "property type changed outside the table: unknown impact",
+			// Measured on 2026-09-25: nothing survives number → people.
+			name:      "property type changed, measured destructive",
 			desired:   db("Estimate", state.Property{Type: "people"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassUnknownImpact,
+			wantClass: change.ClassDestructive,
 			wantLine:  "number → people",
 		},
 		{
@@ -1436,5 +1434,65 @@ func TestCompareDatabaseAsksToCountTheRowsOfADestroy(t *testing.T) {
 	d := res.Changeset.Details[0]
 	if d.Measure == nil || !d.Measure.AllRows || d.Count != -1 || d.Class != ClassDestructive {
 		t.Errorf("Detail = %+v, want an AllRows request, Count -1, destructive", d)
+	}
+}
+
+// The API refuses to change the type of a title property, both ways (400,
+// measured on 2026-09-25). Sending it would fail the whole PATCH: the
+// resource is withheld, with its own procedure — not the option one.
+func TestTitleTypeChangeWithholdsTheResource(t *testing.T) {
+	for _, tc := range []struct{ from, to string }{
+		{"title", "rich_text"},
+		{"rich_text", "title"},
+	} {
+		actual := state.Database{
+			ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+			Properties: map[string]state.Property{"Nom": {ID: "p1", Type: tc.from}},
+		}
+		desired := state.Database{Properties: map[string]state.Property{
+			"Nom": {Type: tc.to, Options: nil},
+		}}
+		res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+		if res.Target != nil {
+			t.Errorf("%s → %s: Target non-nil: apply would send a PATCH the API refuses", tc.from, tc.to)
+		}
+		if len(res.Changeset.Details) != 1 {
+			t.Fatalf("%s → %s: details = %+v, want the one refused line", tc.from, tc.to, res.Changeset.Details)
+		}
+		d := res.Changeset.Details[0]
+		if d.Class != change.ClassMigration || d.Measure != nil {
+			t.Errorf("%s → %s: {Class:%v Measure:%+v}, want migration required, nothing to count",
+				tc.from, tc.to, d.Class, d.Measure)
+		}
+		if !strings.Contains(d.Note, "400") {
+			t.Errorf("%s → %s: Note = %q, want the API refusal named", tc.from, tc.to, d.Note)
+		}
+		if !strings.Contains(res.Withheld, "title") || !strings.Contains(res.Withheld, "  → ") {
+			t.Errorf("%s → %s: Withheld = %q, want the title procedure", tc.from, tc.to, res.Withheld)
+		}
+		if strings.Contains(res.Withheld, "option") {
+			t.Errorf("%s → %s: Withheld = %q speaks of options", tc.from, tc.to, res.Withheld)
+		}
+	}
+}
+
+// The line says what survives, measured: the user reads it to decide.
+func TestTypeChangeLineSaysWhatSurvives(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{"Notes": {ID: "p1", Type: "rich_text"}},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Notes": {Type: "select", Options: []state.Option{{Name: "Un"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	lines := detailStrings(res.Changeset.Details)
+	if !containsSub(lines, "rich_text → select: the API creates no option: values survive only where an option with the same text is declared") {
+		t.Errorf("lines:\n%s", strings.Join(lines, "\n"))
+	}
+	// A declared option brings the cut at the first comma: a rewrite.
+	if res.Changeset.Details[0].Class != change.ClassSilentRewrite {
+		t.Errorf("Class = %v, want silent rewrite", res.Changeset.Details[0].Class)
 	}
 }
