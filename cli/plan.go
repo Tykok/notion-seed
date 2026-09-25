@@ -478,11 +478,11 @@ func checkParentPage(ctx context.Context, tr transport.Transport, pageID string,
 // la page est refusée (`400 validation_error — Can't edit page on block with
 // an archived ancestor`).
 //
-// Seule une page parente mise à la corbeille ELLE-MÊME est détectée ici. Quand
-// c'est un de ses ancêtres qui y est, rien ne dit qu'elle porte in_trash : une
-// database sous un ancêtre à la corbeille se lit bien archived:false,
-// in_trash:false (mesuré). Ce cas-là n'est donc pas couvert, et ce contrôle ne
-// prétend pas le couvrir.
+// Un ancêtre à la corbeille est détecté aussi : mesuré le 2026-09-25, une page
+// dont la page parente, ou une page deux niveaux au-dessus, est à la corbeille
+// se lit in_trash:true, sans avoir été écrite. Une database, elle, n'hérite
+// pas de ce champ : sous le même ancêtre, elle se lit in_trash:false. C'est
+// pourquoi le contrôle porte sur la page parente, et non sur les databases.
 //
 // Une réponse qui ne porte AUCUN des deux champs est refusée plutôt que lue
 // comme « vivante » : le silence de l'API n'est pas une mesure, et c'est
