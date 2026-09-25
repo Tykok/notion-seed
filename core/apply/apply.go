@@ -494,6 +494,17 @@ func updateError(
 					"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est "+
 					"annulé. %s ; %s",
 				c.Resource, apiErr.Status, apiErr.NotionCode, perr, here, acquired)
+		case exists && upd.DatabaseWritten:
+			// Le PATCH database vient de passer : un ancêtre à la corbeille l'aurait
+			// fait échouer le premier (mesuré, voir plus haut). Ce diagnostic est
+			// donc exclu, et seul le data source reste en cause.
+			return fmt.Errorf(
+				"modification de %s impossible : la database se lit et vient d'être "+
+					"écrite, mais son data source répond %d — il a disparu, ou n'est plus "+
+					"partagé avec l'intégration\n"+
+					"  → vérifiez dans Notion que la database est toujours partagée avec "+
+					"l'intégration, puis relancez `notion-seed plan`. %s ; %s",
+				c.Resource, apiErr.Status, here, acquired)
 		case exists:
 			return fmt.Errorf(
 				"modification de %s impossible : ancêtre archivé — la database se lit "+
