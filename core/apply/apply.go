@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package apply exécute le plan : il écrit dans Notion ce que le plan a
-// affiché, et rien d'autre.
+// Package apply executes the plan: it writes to Notion what the plan showed,
+// and nothing else.
 //
-// Périmètre : les créations, les modifications, les destructions — une database
-// sortie du YAML est mise à la corbeille — et le nettoyage des entrées de state
-// dont la ressource a déjà disparu. Seul ce que l'API ne sait pas exprimer est
-// retenu, et nommé avec sa raison.
+// Scope: creations, updates, destructions — a database removed from the YAML
+// is moved to the trash — and the cleanup of state entries whose resource has
+// already vanished. Only what the API cannot express is withheld, and named
+// with its reason.
 package apply
 
 import (
@@ -23,36 +23,35 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Creator est ce dont apply a besoin pour écrire. L'interface est déclarée ici,
-// côté consommateur, pour que les tests n'aient pas à monter une pile de
-// transport complète.
+// Creator is what apply needs to write. The interface is declared here, on the
+// consumer side, so the tests do not have to build a full transport stack.
 type Creator interface {
 	Create(ctx context.Context, body []byte) (resources.CreatedDatabase, error)
 }
 
-// Updater est ce dont apply a besoin pour écrire une database existante.
+// Updater is what apply needs to write an existing database.
 //
-// DatabaseExists en fait partie, et ce n'est pas une commodité : le 404 du PATCH
-// du data source accuse le partage avec l'intégration, alors que la cause peut
-// être une page ancêtre à la corbeille. Sonder la database — et elle seule, sans
-// son data source qui répondrait le même 404 — est le seul moyen de trancher, et
-// il ne coûte un appel que sur un chemin déjà en échec.
+// DatabaseExists is part of it, and it is not a convenience: the 404 of the
+// data source PATCH blames the sharing with the integration, while the cause
+// can be an ancestor page in the trash. Probing the database — and it alone,
+// without its data source, which would answer the same 404 — is the only way
+// to decide, and it costs a call only on a path that is already failing.
 type Updater interface {
 	Update(ctx context.Context, id, dsID string, dbBody, dsBody []byte) (resources.UpdatedDatabase, error)
 	DatabaseExists(ctx context.Context, id string) (bool, error)
 }
 
-// Trasher est ce dont apply a besoin pour mettre une database à la corbeille.
+// Trasher is what apply needs to move a database to the trash.
 //
-// Une interface à part plutôt qu'une méthode de plus sur Updater : la
-// destruction n'a besoin ni des deux PATCH ni de la sonde d'existence, et
-// chaque faux des tests n'implémente ainsi que ce qu'il exerce. Le booléen dit
-// si la réponse CONFIRME la corbeille.
+// A separate interface rather than one more method on Updater: the
+// destruction needs neither the two PATCHes nor the existence probe, and each
+// test fake thus implements only what it exercises. The boolean says whether
+// the response CONFIRMS the trashing.
 type Trasher interface {
 	Trash(ctx context.Context, id string) (bool, error)
 }
 
-// Options porte ce qui vient de la ligne de commande et de la configuration.
+// Options holds what comes from the command line and the configuration.
 type Options struct {
 	Dir          string
 	ParentPageID string
@@ -61,38 +60,36 @@ type Options struct {
 	Trasher      Trasher
 }
 
-// Report est le compte rendu d'une exécution. Chaque champ est une liste de
-// lignes prêtes à afficher, dans l'ordre où elles se sont produites.
+// Report is the account of a run. Each field is a list of lines ready to
+// print, in the order they happened.
 type Report struct {
 	Created   []string
 	Updated   []string
 	Destroyed []string
 	Cleaned   []string
-	// Skipped nomme les ressources retenues : Withheld leur interdit l'écriture.
+	// Skipped names the withheld resources: Withheld forbids writing them.
 	Skipped    []string
 	Mismatches []string
 }
 
-// Converged dit si le plan a été appliqué en entier, et si l'API a écrit ce qui
-// était annoncé. C'est ce qui décide du code de sortie : un apply qui laisse du
-// travail derrière lui doit être bruyant en CI.
+// Converged says whether the plan was applied in full, and whether the API
+// wrote what was announced. It is what decides the exit code: an apply that
+// leaves work behind must be loud in CI.
 func (r Report) Converged() bool {
 	return len(r.Skipped) == 0 && len(r.Mismatches) == 0
 }
 
-// Check refuse, AVANT toute écriture, un plan qu'apply ne saurait pas parcourir
-// en entier.
+// Check rejects, BEFORE any write, a plan apply could not walk in full.
 //
-// L'autorisation d'écrire est Withheld == "", et elle seule : une ressource dont
-// Withheld est vide DOIT être écrite. Une création ou une modification sans
-// cible, ou une destruction dont le state ne porte pas l'identité, ne peut venir
-// que d'un défaut de notion-seed. La sauter ferait converger un apply qui n'a
-// pas écrit ce que le plan montrait ; s'arrêter sur elle laisserait écrites les
-// ressources qui la précèdent. On refuse donc le plan entier, avant le premier
-// appel.
+// The permission to write is Withheld == "", and it alone: a resource whose
+// Withheld is empty MUST be written. A creation or an update with no target,
+// or a destruction whose identity the state does not hold, can only come from
+// a notion-seed bug. Skipping it would make an apply converge that did not
+// write what the plan showed; stopping on it would leave written the resources
+// before it. So the whole plan is rejected, before the first call.
 //
-// La commande l'appelle avant la confirmation ; Run l'appelle de nouveau, parce
-// que la garde doit vivre dans le paquet qui écrit.
+// The command calls it before the confirmation; Run calls it again, because
+// the guard must live in the package that writes.
 func Check(p *diff.Plan, snap *state.Snapshot) error {
 	for _, c := range p.Changes {
 		if c.Withheld != "" {
@@ -109,16 +106,16 @@ func Check(p *diff.Plan, snap *state.Snapshot) error {
 			}
 		}
 		return fmt.Errorf(
-			"%s : le plan autorise son écriture sans dire quoi écrire, rien n'a été "+
-				"appliqué\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", c.Resource)
+			"%s: the plan allows writing it without saying what to write, nothing was "+
+				"applied\n"+
+				"  → this is a notion-seed bug: report it with the "+
+				"output of `notion-seed plan`", c.Resource)
 	}
 	return nil
 }
 
-// checkWriters refuse un plan dont un changement autorisé n'a personne pour
-// l'écrire. Seul un appelant mal câblé y arrive : c'est un défaut interne.
+// checkWriters rejects a plan in which an allowed change has nobody to write
+// it. Only a miswired caller gets there: it is a notion-seed bug.
 func checkWriters(p *diff.Plan, opts Options) error {
 	for _, c := range p.Changes {
 		if c.Withheld != "" {
@@ -127,53 +124,53 @@ func checkWriters(p *diff.Plan, opts Options) error {
 		var missing string
 		switch {
 		case c.Kind == resources.KindCreate && opts.Creator == nil:
-			missing = "une création est à écrire mais aucun Creator n'est branché"
+			missing = "a creation is to be written but no Creator is wired"
 		case c.Kind == resources.KindUpdate && opts.Updater == nil:
-			missing = "une modification est à écrire mais aucun Updater n'est branché"
+			missing = "an update is to be written but no Updater is wired"
 		case c.Kind == resources.KindDestroy && opts.Trasher == nil:
-			missing = "une destruction est à écrire mais aucun Trasher n'est branché"
+			missing = "a destruction is to be written but no Trasher is wired"
 		default:
 			continue
 		}
-		return fmt.Errorf("%s : %s, rien n'a été appliqué\n"+
-			"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-			"sortie de `notion-seed plan`", c.Resource, missing)
+		return fmt.Errorf("%s: %s, nothing was applied\n"+
+			"  → this is a notion-seed bug: report it with the "+
+			"output of `notion-seed plan`", c.Resource, missing)
 	}
 	return nil
 }
 
-// Run écrit les créations, les modifications et les destructions du plan, une
-// ressource à la fois.
+// Run writes the plan's creations, updates and destructions, one resource at a
+// time.
 //
-// Le state est sauvegardé APRÈS CHAQUE écriture réussie, pas une fois à la fin :
-// un arrêt à n'importe quel instant laisse alors un state exactement vrai. Ce
-// qui est créé est ancré, ce qui ne l'est pas ressortira en création au prochain
-// plan. Sauver une seule fois à la fin produirait, à la moindre interruption,
-// des databases réellement créées dont le state ignore l'existence — donc
-// recréées en double au prochain apply.
+// The state is saved AFTER EACH successful write, not once at the end: a stop
+// at any moment then leaves an exactly true state. What is created is
+// anchored, what is not will come out as a creation in the next plan. Saving
+// only once at the end would produce, at the slightest interruption, databases
+// really created whose existence the state ignores — hence created twice on
+// the next apply.
 //
-// Aucun rollback : archiver ce qu'on vient de créer serait une destruction que
-// personne n'a demandée.
+// No rollback: archiving what was just created would be a destruction nobody
+// asked for.
 func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) (Report, error) {
 	var rep Report
 
-	// La garde vit ICI, dans le paquet qui écrit, et pas seulement dans la
-	// commande. Un plan peut être bloqué par une AUTRE ressource que celles
-	// qu'on s'apprête à créer : sans cette ligne, un second appelant écrirait
-	// les créations d'un plan refusé, et aucun test ne le verrait.
+	// The guard lives HERE, in the package that writes, and not only in the
+	// command. A plan can be blocked by ANOTHER resource than the ones about to
+	// be created: without this line, a second caller would write the creations
+	// of a rejected plan, and no test would see it.
 	if p.Blocked {
 		return rep, fmt.Errorf(
-			"plan bloqué, rien n'a été appliqué\n" +
-				"  → levez chaque blocage listé par `notion-seed plan` avant de relancer")
+			"plan blocked, nothing was applied\n" +
+				"  → clear each block listed by `notion-seed plan` before rerunning")
 	}
 
-	// Check AVANT la première écriture : un changement autorisé qu'apply ne
-	// saurait pas écrire arrête le plan entier, pas la moitié de la série.
+	// Check BEFORE the first write: an allowed change apply could not write
+	// stops the whole plan, not half of the series.
 	if err := Check(p, snap); err != nil {
 		return rep, err
 	}
-	// De même pour ce qui écrit : un Trasher absent, découvert à la
-	// destruction, laisserait écrites les créations qui la précèdent.
+	// Likewise for the writers: a missing Trasher, discovered at the
+	// destruction, would leave written the creations before it.
 	if err := checkWriters(p, opts); err != nil {
 		return rep, err
 	}
@@ -183,14 +180,13 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 	}
 
 	for _, c := range p.Changes {
-		// Withheld EST l'interdiction d'écrire : voir diff.Result.Withheld.
+		// Withheld IS the ban on writing: see diff.Result.Withheld.
 		if c.Withheld != "" {
 			rep.Skipped = append(rep.Skipped, c.Resource)
 			continue
 		}
-		// Check a garanti la forme de chaque changement autorisé : une cible pour
-		// une création ou une modification, une identité dans le state pour une
-		// destruction.
+		// Check guaranteed the shape of each allowed change: a target for a
+		// creation or an update, an identity in the state for a destruction.
 		var err error
 		switch c.Kind {
 		case resources.KindCreate:
@@ -212,13 +208,13 @@ func Run(ctx context.Context, p *diff.Plan, snap *state.Snapshot, opts Options) 
 			return rep, err
 		}
 		rep.Cleaned = append(rep.Cleaned, fmt.Sprintf(
-			"%s — entrée retirée du state, rien n'a été écrit dans Notion", resource))
+			"%s — entry removed from the state, nothing was written to Notion", resource))
 	}
 
 	return rep, nil
 }
 
-// createOne crée une database et inscrit le résultat relu dans le state.
+// createOne creates a database and records the read-back result in the state.
 func createOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
 	body, err := mapper.DatabaseCreatePayload(c.Key, *c.Target, opts.ParentPageID)
 	if err != nil {
@@ -231,11 +227,11 @@ func createOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 	}
 
 	if created.ReadErr != nil {
-		// La database EXISTE et on a son id. On inscrit une entrée partielle
-		// plutôt que de perdre l'identité : une identité perdue coûte un
-		// doublon, une entrée partielle ne coûte qu'une dérive non détectable
-		// sur les options — driftLines ignore les options sans id, donc aucune
-		// FAUSSE dérive n'en sortira.
+		// The database EXISTS and its id is known. A partial entry is recorded
+		// rather than losing the identity: a lost identity costs a duplicate, a
+		// partial entry only costs undetectable drift on the options —
+		// driftLines ignores options without an id, so no FALSE drift will come
+		// out of it.
 		partial := *c.Target
 		partial.ID = created.ID
 		partial.DataSourceID = created.DataSourceID
@@ -244,10 +240,10 @@ func createOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 			return serr
 		}
 		return fmt.Errorf(
-			"%s a été créée (id %s) mais son état n'a pas pu être relu: %w\n"+
-				"  → son identité est inscrite dans %s, donc elle ne sera pas recréée. "+
-				"Pour resynchroniser son instantané, retirez son entrée de %s puis "+
-				"lancez `notion-seed import %s <url>`",
+			"%s was created (id %s) but its state could not be read back: %w\n"+
+				"  → its identity is recorded in %s, so it will not be created again. "+
+				"To resync its snapshot, remove its entry from %s then "+
+				"run `notion-seed import %s <url>`",
 			c.Resource, created.ID, created.ReadErr,
 			state.FileName, state.FileName, c.Resource)
 	}
@@ -258,94 +254,94 @@ func createOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 		return err
 	}
 	rep.Created = append(rep.Created, fmt.Sprintf(
-		"%s créée — id %s (state mis à jour)", c.Resource, created.ID))
+		"%s created — id %s (state updated)", c.Resource, created.ID))
 	rep.Mismatches = append(rep.Mismatches, mismatchLines(c, adopted)...)
 	return nil
 }
 
-// mismatchLines confronte le réel relu à ce que le plan avait annoncé, sur
-// notre propre écriture.
+// mismatchLines confronts the read-back actual state with what the plan had
+// announced, on notion-seed's own write.
 //
-// Le comparateur du plan est réutilisé tel quel : `adopted` joue à la fois la
-// voie « dernier état appliqué » et la voie « réel », donc tout détail qui
-// subsiste est un écart entre la cible et ce que l'API a réellement écrit. Un
-// second comparateur écrit pour l'occasion serait exactement le genre de chemin
-// parallèle que cette PR existe pour supprimer.
+// The plan's comparator is reused as is: `adopted` plays both the "last
+// applied state" way and the "actual" way, so any detail that remains is a
+// mismatch between the target and what the API really wrote. A second
+// comparator written for the occasion would be exactly the kind of parallel
+// path this PR exists to remove.
 func mismatchLines(c diff.Change, adopted state.Database) []string {
 	gap := diff.CompareDatabase(c.Key, c.Target, &adopted, &adopted)
 	out := make([]string, 0, len(gap.Changeset.Details))
 	for _, d := range gap.Changeset.Details {
-		// La Note des détails est écrite pour le contexte du PLAN — « absente du
-		// YAML », par exemple — et se lit à l'envers ici : ce qui manquait au YAML
-		// est ce que l'API a écrit en trop. On ne la reprend donc pas, et on dit
-		// le sens réel à partir de l'opération.
-		out = append(out, fmt.Sprintf("%s — %s : %s",
+		// The details' Note is written for the PLAN context — "absent from the
+		// YAML", for example — and reads backwards here: what was missing from
+		// the YAML is what the API wrote in excess. So it is not reused, and the
+		// real meaning is stated from the operation.
+		out = append(out, fmt.Sprintf("%s — %s: %s",
 			c.Resource, mismatchVerb(d.Op), d.Target))
 	}
 	return out
 }
 
-// mismatchVerb traduit l'opération du plan en ce qui s'est réellement passé
-// pendant l'écriture. `-` est le cas qui se lisait à l'envers : dans un plan il
-// veut dire « à retirer », ici il veut dire « l'API l'a écrit alors que la
-// cible ne le portait pas ».
+// mismatchVerb translates the plan's operation into what really happened
+// during the write. `-` is the case that read backwards: in a plan it means
+// "to remove", here it means "the API wrote it while the target did not hold
+// it".
 func mismatchVerb(op string) string {
 	switch op {
 	case "-":
-		return "l'API a écrit en trop"
+		return "the API wrote in excess"
 	case "~":
-		return "l'API a écrit une autre valeur que celle annoncée"
+		return "the API wrote a different value than the one announced"
 	default:
-		return "l'API n'a pas écrit"
+		return "the API did not write"
 	}
 }
 
-// creationError rend l'échec d'une création en nommant ce qui est acquis et ce
-// qui ne l'est pas. Un message qui ne dit pas où s'est arrêtée la série laisse
-// l'utilisateur deviner l'état de son workspace.
+// creationError reports a creation failure, naming what is done and what is
+// not. A message that does not say where the series stopped leaves the user
+// guessing the state of their workspace.
 func creationError(c diff.Change, rep Report, err error, parentPageID string) error {
 	acquired := acquiredBefore(rep)
 
 	var unknown *transport.OutcomeUnknownError
 	if errors.As(err, &unknown) {
-		// On ne sait pas si la mutation a été appliquée côté serveur. On
-		// n'enchaîne surtout pas : le workspace est dans un état indéterminé, et
-		// la création suivante travaillerait à l'aveugle.
+		// We don't know whether the mutation was applied server-side. Above all,
+		// nothing is chained: the workspace is in an undetermined state, and the
+		// next creation would work blind.
 		return fmt.Errorf(
-			"création de %s : issue inconnue: %w\n"+
-				"  → ouvrez la page parente %s dans Notion. Si la database %q existe, "+
-				"adoptez-la avec `notion-seed import %s <url>` ; sinon relancez apply. "+
+			"creating %s: unknown outcome: %w\n"+
+				"  → open the parent page %s in Notion. If the database %q exists, "+
+				"adopt it with `notion-seed import %s <url>`; otherwise rerun apply. "+
 				"%s",
 			c.Resource, err, parentPageID, c.Target.Name, c.Resource, acquired)
 	}
 	return fmt.Errorf(
-		"création de %s impossible: %w\n"+
-			"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est annulé, "+
+		"failed to create %s: %w\n"+
+			"  → fix the cause above, then rerun apply; nothing is rolled back, "+
 			"%s",
 		c.Resource, err, acquired)
 }
 
-// acquiredBefore nomme ce que l'exécution a déjà écrit et inscrit dans le
-// state avant la ressource en échec. Un message qui ne dit pas où s'est arrêtée
-// la série laisse l'utilisateur deviner l'état de son workspace.
+// acquiredBefore names what the run already wrote and recorded in the state
+// before the failing resource. A message that does not say where the series
+// stopped leaves the user guessing the state of their workspace.
 func acquiredBefore(rep Report) string {
 	var parts []string
 	if names := resourceNames(rep.Created); len(names) > 0 {
-		parts = append(parts, "déjà créées et inscrites dans le state : "+strings.Join(names, ", "))
+		parts = append(parts, "already created and recorded in the state: "+strings.Join(names, ", "))
 	}
 	if names := resourceNames(rep.Updated); len(names) > 0 {
-		parts = append(parts, "déjà modifiées et inscrites dans le state : "+strings.Join(names, ", "))
+		parts = append(parts, "already updated and recorded in the state: "+strings.Join(names, ", "))
 	}
 	if names := resourceNames(rep.Destroyed); len(names) > 0 {
-		parts = append(parts, "déjà mises à la corbeille et retirées du state : "+strings.Join(names, ", "))
+		parts = append(parts, "already moved to the trash and removed from the state: "+strings.Join(names, ", "))
 	}
 	if len(parts) == 0 {
-		return "aucune écriture n'avait abouti avant celle-ci"
+		return "no write had succeeded before this one"
 	}
-	return strings.Join(parts, " ; ")
+	return strings.Join(parts, "; ")
 }
 
-// resourceNames extrait le nom de ressource en tête de chaque ligne du rapport.
+// resourceNames extracts the resource name at the head of each report line.
 func resourceNames(lines []string) []string {
 	names := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -354,12 +350,12 @@ func resourceNames(lines []string) []string {
 	return names
 }
 
-// writeSet dérive du PLAN ce qui part vers l'API : les champs de database et les
-// propriétés qui portent au moins une ligne.
+// writeSet derives from the PLAN what goes to the API: the database fields and
+// the properties that carry at least one line.
 //
-// C'est l'invariant du produit rendu littéral — ce qui est écrit est exactement
-// ce qui est affiché. Une propriété déclarée mais identique au réel ne porte
-// aucune ligne, donc ne part pas ; une propriété hors config n'en porte jamais.
+// It is the product's invariant made literal — what is written is exactly what
+// is shown. A property declared but identical to the actual state carries no
+// line, so it is not sent; an unmanaged property never carries one.
 func writeSet(details []resources.Detail) (fields, props []string) {
 	seenF := map[string]bool{}
 	seenP := map[string]bool{}
@@ -381,24 +377,24 @@ func writeSet(details []resources.Detail) (fields, props []string) {
 	return fields, props
 }
 
-// updateOne écrit une database existante et inscrit le résultat relu dans le
-// state.
+// updateOne writes an existing database and records the read-back result in
+// the state.
 func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
 	if opts.Updater == nil {
 		return fmt.Errorf(
-			"%s : une modification est à écrire mais aucun Updater n'est branché\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", c.Resource)
+			"%s: an update is to be written but no Updater is wired\n"+
+				"  → this is a notion-seed bug: report it with the "+
+				"output of `notion-seed plan`", c.Resource)
 	}
-	// La cible d'un update vient TOUJOURS d'une relecture fraîche : un id vide
-	// ne peut venir que d'un défaut en amont. PATCHer "/v1/data_sources/" ne
-	// désignerait rien — on refuse AVANT tout appel.
+	// An update's target ALWAYS comes from a fresh read-back: an empty id can
+	// only come from an upstream bug. PATCHing "/v1/data_sources/" would point
+	// at nothing — it is rejected BEFORE any call.
 	if c.Target.ID == "" || c.Target.DataSourceID == "" {
 		return fmt.Errorf(
-			"%s : la cible de la modification ne porte pas d'id de database ou de "+
-				"data source, rien n'a été écrit\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", c.Resource)
+			"%s: the update target carries no database or "+
+				"data source id, nothing was written\n"+
+				"  → this is a notion-seed bug: report it with the "+
+				"output of `notion-seed plan`", c.Resource)
 	}
 
 	fields, props := writeSet(c.Details)
@@ -419,21 +415,21 @@ func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 		dsBody = b
 	}
 	if dbBody == nil && dsBody == nil {
-		// Un changement sans aucune ligne écrivable n'existe pas : le plan ne
-		// produit un KindUpdate que s'il porte des détails. Sauter en silence
-		// masquerait un défaut de writeSet.
+		// A change with no writable line does not exist: the plan produces a
+		// KindUpdate only if it carries details. Skipping silently would hide a
+		// writeSet bug.
 		return fmt.Errorf(
-			"%s : le plan annonce une modification mais aucune écriture n'en découle\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", c.Resource)
+			"%s: the plan announces an update but no write follows from it\n"+
+				"  → this is a notion-seed bug: report it with the "+
+				"output of `notion-seed plan`", c.Resource)
 	}
 
 	upd, err := opts.Updater.Update(ctx, c.Target.ID, c.Target.DataSourceID, dbBody, dsBody)
 	if err != nil {
-		// Le PATCH database est passé avant l'échec : Notion porte déjà ces
-		// champs. Les inscrire garde le state exactement vrai — sinon notre
-		// propre écriture ressortirait au prochain plan comme une dérive venue
-		// d'ailleurs.
+		// The database PATCH went through before the failure: Notion already
+		// holds these fields. Recording them keeps the state exactly true —
+		// otherwise notion-seed's own write would come out in the next plan as
+		// drift from elsewhere.
 		if upd.DatabaseWritten {
 			snap.Databases[c.Key] = overlayWritten(snap.Databases[c.Key], *c.Target, fields, nil)
 			if serr := state.Save(opts.Dir, snap); serr != nil {
@@ -443,17 +439,18 @@ func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 		return updateError(ctx, c, *rep, err, upd, fields, len(dbBody) > 0, opts)
 	}
 	if upd.ReadErr != nil {
-		// Les deux écritures sont passées, seule la relecture manque : on inscrit
-		// ce qui a été ÉCRIT, faute de pouvoir inscrire ce qui a été relu.
+		// Both writes went through, only the read-back is missing: what was
+		// WRITTEN is recorded, for lack of being able to record what was read
+		// back.
 		snap.Databases[c.Key] = overlayWritten(snap.Databases[c.Key], *c.Target, fields, props)
 		if serr := state.Save(opts.Dir, snap); serr != nil {
 			return serr
 		}
 		return fmt.Errorf(
-			"%s a été modifiée mais son état n'a pas pu être relu: %w\n"+
-				"  → son entrée de %s porte ce qui a été écrit, sans les ids des options "+
-				"neuves que seule la relecture rapporte. Relancez `notion-seed plan` pour "+
-				"voir le réel",
+			"%s was updated but its state could not be read back: %w\n"+
+				"  → its entry in %s holds what was written, without the ids of the new "+
+				"options that only the read-back brings. Run `notion-seed plan` again to "+
+				"see the actual state",
 			c.Resource, upd.ReadErr, state.FileName)
 	}
 
@@ -463,20 +460,21 @@ func updateOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snap
 		return err
 	}
 	rep.Updated = append(rep.Updated, fmt.Sprintf(
-		"%s modifiée — %d champ(s), %d propriété(s) (state mis à jour)",
+		"%s updated — %d field(s), %d property(ies) (state updated)",
 		c.Resource, len(fields), len(props)))
 	rep.Mismatches = append(rep.Mismatches, mismatchLines(c, adopted)...)
 	return nil
 }
 
-// overlayWritten superpose à l'entrée de state antérieure EXACTEMENT ce qui a
-// été écrit : les champs de database du jeu d'écriture et, si le data source a
-// été écrit, les propriétés du jeu, prises dans la cible.
+// overlayWritten lays over the prior state entry EXACTLY what was written: the
+// database fields of the write set and, if the data source was written, the
+// properties of the set, taken from the target.
 //
-// La cible n'est pas inscrite en bloc : elle ne porte que le réel relu au plan
-// et le déclaré, et écraserait ce que le state sait d'autre. Les keys d'options
-// viennent de la cible elle-même, qui les porte déjà : JoinOptionKeys, qui part
-// d'un réel relu, n'a rien à apporter ici.
+// The target is not recorded as a whole: it holds only the actual state read
+// at plan time and the declared one, and would overwrite what else the state
+// knows. The option keys come from the target itself, which already holds
+// them: JoinOptionKeys, which starts from a read-back actual state, has
+// nothing to add here.
 func overlayWritten(prior, target state.Database, fields, props []string) state.Database {
 	out := prior
 	out.ID, out.DataSourceID = target.ID, target.DataSourceID
@@ -490,7 +488,7 @@ func overlayWritten(prior, target state.Database, fields, props []string) state.
 			out.Icon = target.Icon
 		}
 	}
-	// Copie : l'entrée antérieure partage sa map avec le snapshot.
+	// Copy: the prior entry shares its map with the snapshot.
 	out.Properties = make(map[string]state.Property, len(prior.Properties)+len(props))
 	for name, prop := range prior.Properties {
 		out.Properties[name] = prop
@@ -505,17 +503,17 @@ func overlayWritten(prior, target state.Database, fields, props []string) state.
 	return out
 }
 
-// fieldLabels nomme, en français, les champs de database écrits.
+// fieldLabels names, in plain words, the database fields written.
 func fieldLabels(fields []string) string {
 	labels := make([]string, 0, len(fields))
 	for _, f := range fields {
 		switch f {
 		case "name":
-			labels = append(labels, "le nom")
+			labels = append(labels, "the name")
 		case "description":
-			labels = append(labels, "la description")
+			labels = append(labels, "the description")
 		case "icon":
-			labels = append(labels, "l'icône")
+			labels = append(labels, "the icon")
 		default:
 			labels = append(labels, f)
 		}
@@ -523,39 +521,39 @@ func fieldLabels(fields []string) string {
 	if len(labels) <= 1 {
 		return strings.Join(labels, "")
 	}
-	return strings.Join(labels[:len(labels)-1], ", ") + " et " + labels[len(labels)-1]
+	return strings.Join(labels[:len(labels)-1], ", ") + " and " + labels[len(labels)-1]
 }
 
-// updateError rend l'échec d'une mise à jour en nommant ce qui est passé sur
-// cette ressource, et ce qui était acquis avant elle.
+// updateError reports an update failure, naming what went through on this
+// resource, and what was done before it.
 //
-// Quel PATCH a échoué se déduit : si un corps partait vers la database et
-// qu'elle n'est pas écrite, c'est le premier ; sinon, c'est le data source.
+// Which PATCH failed is deduced: if a body was going to the database and it is
+// not written, it is the first one; otherwise, it is the data source.
 func updateError(
 	ctx context.Context, c diff.Change, rep Report, err error,
 	upd resources.UpdatedDatabase, fields []string, dbSent bool, opts Options,
 ) error {
 	dsFailed := upd.DatabaseWritten || !dbSent
 	acquired := acquiredBefore(rep)
-	here := "rien n'a été écrit sur cette ressource"
+	here := "nothing was written on this resource"
 	if upd.DatabaseWritten {
-		here = "déjà écrit sur cette ressource : " + fieldLabels(fields) +
-			" ; aucune donnée de ligne n'a été touchée"
+		here = "already written on this resource: " + fieldLabels(fields) +
+			"; no row data was touched"
 	}
 
 	var unknown *transport.OutcomeUnknownError
 	if errors.As(err, &unknown) {
-		// Arrêt net, sans enchaîner : la ressource suivante travaillerait sur un
-		// workspace dans un état indéterminé. Contrairement à la création, aucune
-		// identité n'est en jeu — la relecture du plan suffit.
-		pending := "l'écriture a peut-être abouti côté serveur"
+		// Hard stop, nothing chained: the next resource would work on a workspace
+		// in an undetermined state. Unlike creation, no identity is at stake —
+		// the plan's read-back is enough.
+		pending := "the write may have succeeded server-side"
 		if upd.DatabaseWritten {
-			pending = here + ", mais l'écriture du schéma a peut-être abouti côté serveur"
+			pending = here + ", but the schema write may have succeeded server-side"
 		}
 		return fmt.Errorf(
-			"modification de %s : issue inconnue: %w\n"+
-				"  → lancez `notion-seed plan` pour voir ce que Notion porte réellement ; "+
-				"il suffit, rien n'est à ré-adopter. %s. %s",
+			"updating %s: unknown outcome: %w\n"+
+				"  → run `notion-seed plan` to see what Notion actually holds; "+
+				"that is enough, nothing needs re-adopting. %s. %s",
 			c.Resource, err, pending, acquired)
 	}
 
@@ -564,53 +562,53 @@ func updateError(
 		return genericUpdateError(c, err, here, acquired, upd.DatabaseWritten)
 	}
 
-	// Mesuré le 2026-09-24 : sur une page ancêtre à la corbeille, le PATCH
-	// database rend un 400 qui nomme la cause.
+	// Measured on 2026-09-24: under an ancestor page in the trash, the database
+	// PATCH returns a 400 that names the cause.
 	if !dsFailed && apiErr.Status == 400 && strings.Contains(apiErr.Message, "archived ancestor") {
 		return fmt.Errorf(
-			"modification de %s impossible : une page ancêtre de la database est à "+
-				"la corbeille\n"+
-				"  → restaurez la page parente dans Notion, puis relancez apply. %s ; %s",
+			"failed to update %s: an ancestor page of the database is in "+
+				"the trash\n"+
+				"  → restore the parent page in Notion, then rerun apply. %s; %s",
 			c.Resource, here, acquired)
 	}
 
-	// Le 404 du PATCH data source accuse le partage avec l'intégration, et il
-	// peut mentir : mesuré le 2026-09-24, une page ancêtre à la corbeille produit
-	// exactement ce 404, alors que GET /v1/databases répond 200. Son texte n'est
-	// donc JAMAIS relayé tel quel ; la sonde de la database tranche.
+	// The 404 of the data source PATCH blames the sharing with the
+	// integration, and it can lie: measured on 2026-09-24, an ancestor page in
+	// the trash produces exactly this 404, while GET /v1/databases returns 200.
+	// Its text is therefore NEVER relayed as is; the database probe decides.
 	if dsFailed && apiErr.Status == 404 {
 		exists, perr := opts.Updater.DatabaseExists(ctx, c.Target.ID)
 		switch {
 		case perr != nil:
 			return fmt.Errorf(
-				"modification de %s impossible : le data source répond %d %s, et la "+
-					"database n'a pas pu être relue pour en trouver la cause: %w\n"+
-					"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est "+
-					"annulé. %s ; %s",
+				"failed to update %s: the data source returns %d %s, and the "+
+					"database could not be read back to find the cause: %w\n"+
+					"  → fix the cause above, then rerun apply; nothing is "+
+					"rolled back. %s; %s",
 				c.Resource, apiErr.Status, apiErr.NotionCode, perr, here, acquired)
 		case exists && upd.DatabaseWritten:
-			// Le PATCH database vient de passer : un ancêtre à la corbeille l'aurait
-			// fait échouer le premier (mesuré, voir plus haut). Ce diagnostic est
-			// donc exclu, et seul le data source reste en cause.
+			// The database PATCH just went through: an ancestor in the trash would
+			// have failed it first (measured, see above). This diagnosis is
+			// therefore ruled out, and only the data source remains at fault.
 			return fmt.Errorf(
-				"modification de %s impossible : la database se lit et vient d'être "+
-					"écrite, mais son data source répond %d — il a disparu, ou n'est plus "+
-					"partagé avec l'intégration\n"+
-					"  → vérifiez dans Notion que la database est toujours partagée avec "+
-					"l'intégration, puis relancez `notion-seed plan`. %s ; %s",
+				"failed to update %s: the database can be read and was just "+
+					"written, but its data source returns %d — it vanished, or is no longer "+
+					"shared with the integration\n"+
+					"  → check in Notion that the database is still shared with "+
+					"the integration, then run `notion-seed plan` again. %s; %s",
 				c.Resource, apiErr.Status, here, acquired)
 		case exists:
 			return fmt.Errorf(
-				"modification de %s impossible : ancêtre archivé — la database se lit "+
-					"encore, mais une page ancêtre est à la corbeille\n"+
-					"  → restaurez la page parente dans Notion, puis relancez apply. %s ; %s",
+				"failed to update %s: archived ancestor — the database can still be "+
+					"read, but an ancestor page is in the trash\n"+
+					"  → restore the parent page in Notion, then rerun apply. %s; %s",
 				c.Resource, here, acquired)
 		default:
 			return fmt.Errorf(
-				"modification de %s impossible : la database a réellement disparu, ou "+
-					"n'est plus partagée avec l'intégration\n"+
-					"  → vérifiez dans Notion qu'elle existe et qu'elle est partagée avec "+
-					"l'intégration, puis relancez `notion-seed plan`. %s ; %s",
+				"failed to update %s: the database really vanished, or "+
+					"is no longer shared with the integration\n"+
+					"  → check in Notion that it exists and is shared with "+
+					"the integration, then run `notion-seed plan` again. %s; %s",
 				c.Resource, here, acquired)
 		}
 	}
@@ -618,32 +616,34 @@ func updateError(
 	return genericUpdateError(c, err, here, acquired, upd.DatabaseWritten)
 }
 
-// genericUpdateError est le message d'un échec sans diagnostic propre.
+// genericUpdateError is the message of a failure with no specific diagnosis.
 func genericUpdateError(c diff.Change, err error, here, acquired string, dbWritten bool) error {
-	next := "corrigez la cause ci-dessus puis relancez apply"
+	next := "fix the cause above, then rerun apply"
 	if dbWritten {
-		next += " ; `notion-seed plan` montre ce qui reste à écrire"
+		next += "; `notion-seed plan` shows what is left to write"
 	}
 	return fmt.Errorf(
-		"modification de %s impossible: %w\n"+
-			"  → %s ; rien n'est annulé. %s ; %s",
+		"failed to update %s: %w\n"+
+			"  → %s; nothing is rolled back. %s; %s",
 		c.Resource, err, next, here, acquired)
 }
 
-// destroyOne met une database à la corbeille, puis retire son entrée du state.
+// destroyOne moves a database to the trash, then removes its entry from the
+// state.
 //
-// L'identité vient du STATE, pas d'une cible : une destruction n'a pas d'état
-// après. Check a déjà garanti qu'elle y est.
+// The identity comes from the STATE, not from a target: a destruction has no
+// state afterwards. Check already guaranteed it is there.
 //
-// L'entrée n'est retirée que si l'API CONFIRME la corbeille. Toute autre issue
-// la garde, et le plan suivant relit le réel pour trancher : une database partie
-// y ressort en entrée de state obsolète, qu'apply retire sans rien écrire ; une
-// database encore là y ressort en destruction. Retirer l'entrée sur un doute
-// abandonnerait l'identité d'une database peut-être vivante, qui deviendrait
-// invisible à notion-seed : ni déclarée, ni dans le state.
+// The entry is removed only if the API CONFIRMS the trashing. Any other
+// outcome keeps it, and the next plan reads the actual state back to decide: a
+// database that is gone comes out there as a stale state entry, which apply
+// removes without writing anything; a database still there comes out as a
+// destruction. Removing the entry on a doubt would abandon the identity of a
+// possibly live database, which would become invisible to notion-seed:
+// neither declared, nor in the state.
 //
-// Run ne lit pas Acknowledged : lifecycle.prevent_destroy est un accusé de
-// lecture du plan, pas une interdiction d'écrire.
+// Run does not read Acknowledged: lifecycle.prevent_destroy is an
+// acknowledgement of the plan, not a ban on writing.
 func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
 	id := snap.Databases[c.Key].ID
 
@@ -653,48 +653,48 @@ func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Sna
 	}
 	if !trashed {
 		rep.Mismatches = append(rep.Mismatches, fmt.Sprintf(
-			"%s — l'API a répondu sans mettre la database à la corbeille : son entrée "+
-				"de state est gardée", c.Resource))
+			"%s — the API answered without moving the database to the trash: its state "+
+				"entry is kept", c.Resource))
 		return nil
 	}
 
 	delete(snap.Databases, c.Key)
 	if err := state.Save(opts.Dir, snap); err != nil {
-		// L'API a déjà confirmé la corbeille : le %w de state.Save dit « l'ancien
-		// state est intact », ce qui est vrai pour le FICHIER mais tairait que la
-		// database, elle, est déjà partie. Le dire ici évite l'inverse de
-		// destroyError : un lecteur qui croirait n'avoir rien à faire. `plan` ne
-		// fait que relire et classer, jamais écrire : c'est un `apply` suivant,
-		// sur son StaleState, qui retire l'entrée.
+		// The API already confirmed the trashing: state.Save's %w says "the
+		// previous state is intact", which is true for the FILE but would hide
+		// that the database itself is already gone. Saying it here avoids the
+		// opposite of destroyError: a reader who would think there is nothing
+		// to do. `plan` only reads back and classifies, never writes: it is a
+		// following `apply`, on its StaleState, that removes the entry.
 		return fmt.Errorf(
-			"%s a bien été mise à la corbeille dans Notion, mais son entrée n'a pas "+
-				"pu être retirée de %s: %w\n"+
-				"  → relancez `notion-seed plan` : la database s'y lira comme à la "+
-				"corbeille, son entrée apparaîtra comme entrée de state obsolète, qu'un "+
-				"`apply` suivant retirera sans rien écrire dans Notion",
+			"%s was indeed moved to the trash in Notion, but its entry could not "+
+				"be removed from %s: %w\n"+
+				"  → run `notion-seed plan` again: the database will read there as in the "+
+				"trash, its entry will show up as a stale state entry, which a following "+
+				"`apply` will remove without writing anything to Notion",
 			c.Resource, state.FileName, err)
 	}
 	rep.Destroyed = append(rep.Destroyed, fmt.Sprintf(
-		"%s mise à la corbeille — id %s (entrée retirée du state)", c.Resource, id))
+		"%s moved to the trash — id %s (entry removed from the state)", c.Resource, id))
 	return nil
 }
 
-// destroyError rend l'échec d'une mise à la corbeille. Quel qu'il soit, l'entrée
-// de state est GARDÉE (voir destroyOne) : le message le dit, et nomme ce qui
-// était acquis avant.
+// destroyError reports a trashing failure. Whatever it is, the state entry is
+// KEPT (see destroyOne): the message says so, and names what was done
+// before.
 func destroyError(c diff.Change, rep Report, err error) error {
 	acquired := acquiredBefore(rep)
 
 	var unknown *transport.OutcomeUnknownError
 	if errors.As(err, &unknown) {
-		// Arrêt net, sans enchaîner : la ressource suivante travaillerait sur un
-		// workspace dans un état indéterminé.
+		// Hard stop, nothing chained: the next resource would work on a workspace
+		// in an undetermined state.
 		return fmt.Errorf(
-			"mise à la corbeille de %s : issue inconnue: %w\n"+
-				"  → lancez `notion-seed plan` pour voir ce que Notion porte réellement : "+
-				"si la database est à la corbeille, elle y ressort en entrée de state "+
-				"obsolète, qu'apply retirera sans rien écrire ; sinon, sa destruction y "+
-				"est proposée de nouveau. Son entrée de state est gardée ; %s",
+			"trashing %s: unknown outcome: %w\n"+
+				"  → run `notion-seed plan` to see what Notion actually holds: "+
+				"if the database is in the trash, it comes out there as a stale state "+
+				"entry, which apply will remove without writing anything; otherwise, its "+
+				"destruction is offered again. Its state entry is kept; %s",
 			c.Resource, err, acquired)
 	}
 
@@ -702,45 +702,45 @@ func destroyError(c diff.Change, rep Report, err error) error {
 	if errors.As(err, &apiErr) {
 		switch {
 		case apiErr.Status == 400 && strings.Contains(apiErr.Message, "archived ancestor"):
-			// Mesuré le 2026-09-25 sur {"in_trash":true} : sous une page ancêtre
-			// déjà à la corbeille, Notion répond ce 400 et ne modifie rien — la
-			// database se relit ensuite en 200, archived:false. Restaurer la page
-			// rend donc la destruction écrivable. Supprimer définitivement la page
-			// parente n'a pas été mesuré ici : ce que rendra alors la lecture de la
-			// database (404, ou archivée) n'est pas garanti, seul le prochain
-			// `notion-seed plan` le tranche — voir cli/plan.go, où un 404 comme une
-			// lecture archivée valent tous deux entrée de state obsolète.
+			// Measured on 2026-09-25 on {"in_trash":true}: under an ancestor page
+			// already in the trash, Notion answers this 400 and changes nothing —
+			// the database then reads back as 200, archived:false. Restoring the
+			// page therefore makes the destruction writable. Permanently deleting
+			// the parent page was not measured here: what reading the database
+			// will then return (404, or archived) is not guaranteed, only the next
+			// `notion-seed plan` decides — see cli/plan.go, where a 404 and an
+			// archived read both count as a stale state entry.
 			return fmt.Errorf(
-				"mise à la corbeille de %s impossible : une page ancêtre de la database "+
-					"est déjà à la corbeille, et Notion refuse d'écrire sous elle — la "+
-					"database y part déjà avec sa page parente\n"+
-					"  → soit restaurez la page parente dans Notion, puis relancez apply ; "+
-					"soit supprimez définitivement la page parente depuis la corbeille de "+
-					"Notion, puis relancez `notion-seed plan` : si Notion ne connaît plus la "+
-					"database, son entrée apparaîtra comme entrée de state obsolète, qu'un "+
-					"`apply` suivant retirera sans rien écrire. Son entrée de state est "+
-					"gardée ; %s",
+				"failed to trash %s: an ancestor page of the database "+
+					"is already in the trash, and Notion refuses to write under it — the "+
+					"database is already going there with its parent page\n"+
+					"  → either restore the parent page in Notion, then rerun apply; "+
+					"or permanently delete the parent page from the Notion "+
+					"trash, then run `notion-seed plan` again: if Notion no longer knows the "+
+					"database, its entry will show up as a stale state entry, which a "+
+					"following `apply` will remove without writing anything. Its state entry is "+
+					"kept; %s",
 				c.Resource, acquired)
 		case apiErr.Status == 404:
-			// Le plan venait de la lire. Ce 404 n'est pas une preuve de
-			// disparition : seul le refresh du plan suivant en décide, par la même
-			// règle que pour toute orpheline. Aucune sonde d'existence ici : le cas
-			// de l'ancêtre à la corbeille est mesuré pour répondre 400 sur ce
-			// chemin, aucun 404 menteur n'y est mesuré, et le plan relit le réel.
+			// The plan had just read it. This 404 is no proof of disappearance:
+			// only the next plan's refresh decides, by the same rule as for any
+			// orphan. No existence probe here: the ancestor-in-the-trash case is
+			// measured to answer 400 on this path, no lying 404 is measured there,
+			// and the plan reads the actual state back.
 			return fmt.Errorf(
-				"mise à la corbeille de %s impossible : Notion ne trouve plus la database "+
-					"(404), alors que le plan venait de la lire\n"+
-					"  → lancez `notion-seed plan` : si elle a disparu, elle y ressort en "+
-					"entrée de state obsolète, qu'apply retirera sans rien écrire dans "+
-					"Notion. Son entrée de state est gardée : un 404 sur une écriture ne "+
-					"suffit pas à abandonner une identité ; %s",
+				"failed to trash %s: Notion no longer finds the database "+
+					"(404), while the plan had just read it\n"+
+					"  → run `notion-seed plan`: if it vanished, it comes out there as a "+
+					"stale state entry, which apply will remove without writing anything to "+
+					"Notion. Its state entry is kept: a 404 on a write is not "+
+					"enough to abandon an identity; %s",
 				c.Resource, acquired)
 		}
 	}
 
 	return fmt.Errorf(
-		"mise à la corbeille de %s impossible: %w\n"+
-			"  → corrigez la cause ci-dessus puis relancez apply ; rien n'est annulé, "+
-			"et son entrée de state est gardée ; %s",
+		"failed to trash %s: %w\n"+
+			"  → fix the cause above, then rerun apply; nothing is rolled back, "+
+			"and its state entry is kept; %s",
 		c.Resource, err, acquired)
 }
