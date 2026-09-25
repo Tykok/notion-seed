@@ -19,7 +19,7 @@ func (f transportFunc) Execute(ctx context.Context, req transport.APIRequest) (t
 	return f(ctx, req)
 }
 
-// pageOf fabrique une réponse de query avec n résultats et un curseur éventuel.
+// pageOf builds a query response with n results and an optional cursor.
 func pageOf(n int, next string) []byte {
 	results := make([]map[string]any, n)
 	for i := range results {
@@ -33,8 +33,8 @@ func pageOf(n int, next string) []byte {
 	return b
 }
 
-// La forme du filtre doit correspondre au type : mesuré le 2026-09-24, une
-// forme multi_select sur un select rend 400.
+// The filter shape must match the type: measured on 2026-09-24, a
+// multi_select shape on a select returns 400.
 func TestCountBuildsTheFilterMatchingThePropertyType(t *testing.T) {
 	tests := []struct {
 		propType string
@@ -63,7 +63,7 @@ func TestCountBuildsTheFilterMatchingThePropertyType(t *testing.T) {
 		}
 		cond, ok := filter[tt.wantKey].(map[string]any)
 		if !ok {
-			t.Fatalf("%s: filtre = %v, want une clé %q", tt.propType, filter, tt.wantKey)
+			t.Fatalf("%s: filter = %v, want a %q key", tt.propType, filter, tt.wantKey)
 		}
 		if cond[tt.wantOp] != "À faire" {
 			t.Errorf("%s: condition = %v, want %s", tt.propType, cond, tt.wantOp)
@@ -71,8 +71,8 @@ func TestCountBuildsTheFilterMatchingThePropertyType(t *testing.T) {
 	}
 }
 
-// Option vide = compter les valeurs non vides de la colonne, ce dont un
-// changement de type a besoin.
+// Empty Option = count the non-empty values of the column, which is what a
+// type change needs.
 func TestCountWithoutOptionCountsNonEmptyValues(t *testing.T) {
 	var sent map[string]any
 	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
@@ -86,7 +86,7 @@ func TestCountWithoutOptionCountsNonEmptyValues(t *testing.T) {
 		t.Fatalf("Count() error = %v", err)
 	}
 	if got.Count != 2 || got.Capped {
-		t.Errorf("Result = %+v, want 2 non plafonné", got)
+		t.Errorf("Result = %+v, want 2 uncapped", got)
 	}
 	cond := sent["filter"].(map[string]any)["multi_select"].(map[string]any)
 	if cond["is_not_empty"] != true {
@@ -94,12 +94,12 @@ func TestCountWithoutOptionCountsNonEmptyValues(t *testing.T) {
 	}
 }
 
-// Un type sans filtre connu ne doit pas fabriquer une requête au hasard : elle
-// rendrait 400, et un 400 se lit comme un échec alors que c'est une question
-// qu'on ne sait pas poser.
+// A type with no known filter must not make up a request: it would return
+// 400, and a 400 reads as a failure when it is a question notion-seed cannot
+// ask.
 func TestCountRefusesAPropertyTypeItCannotFilter(t *testing.T) {
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
-		t.Error("aucun appel ne devait être émis")
+		t.Error("no call should have been made")
 		return transport.APIResponse{}, nil
 	})
 	_, err := NewCounter(tr).Count(context.Background(), Request{
@@ -110,8 +110,8 @@ func TestCountRefusesAPropertyTypeItCannotFilter(t *testing.T) {
 	}
 }
 
-// La pagination est plafonnée : « plus de 300 » suffit à décider, et une
-// database de 40 000 lignes ne doit pas faire 400 appels pour rendre un plan.
+// Pagination is capped: "more than 300" is enough to decide, and a
+// 40,000-row database must not make 400 calls to render a plan.
 func TestCountStopsAtThePageCap(t *testing.T) {
 	calls := 0
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
@@ -125,15 +125,15 @@ func TestCountStopsAtThePageCap(t *testing.T) {
 		t.Fatalf("Count() error = %v", err)
 	}
 	if calls != MaxCountedPages {
-		t.Errorf("appels = %d, want %d", calls, MaxCountedPages)
+		t.Errorf("calls = %d, want %d", calls, MaxCountedPages)
 	}
 	if !got.Capped || got.Count != MaxCountedPages*CountPageSize {
-		t.Errorf("Result = %+v, want plafonné à %d", got, MaxCountedPages*CountPageSize)
+		t.Errorf("Result = %+v, want capped at %d", got, MaxCountedPages*CountPageSize)
 	}
 }
 
-// Le curseur de la page précédente doit être transmis, sinon on recompte la
-// première page indéfiniment.
+// The previous page's cursor must be passed on, otherwise the first page is
+// recounted forever.
 func TestCountPassesTheCursorToTheNextPage(t *testing.T) {
 	var cursors []string
 	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
@@ -153,10 +153,10 @@ func TestCountPassesTheCursorToTheNextPage(t *testing.T) {
 		t.Fatalf("Count() error = %v", err)
 	}
 	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "c2" {
-		t.Errorf("curseurs = %v, want [\"\", \"c2\"]", cursors)
+		t.Errorf("cursors = %v, want [\"\", \"c2\"]", cursors)
 	}
 	if got.Count != CountPageSize+5 || got.Capped {
-		t.Errorf("Result = %+v, want %d non plafonné", got, CountPageSize+5)
+		t.Errorf("Result = %+v, want %d uncapped", got, CountPageSize+5)
 	}
 }
 
@@ -168,23 +168,23 @@ func TestCountPropagatesTransportErrors(t *testing.T) {
 		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "X",
 	})
 	if err == nil {
-		t.Fatal("Count() error = nil, want l'erreur du transport")
+		t.Fatal("Count() error = nil, want the transport error")
 	}
 	if !strings.Contains(fmt.Sprint(err), "403") {
-		t.Errorf("error = %v, elle doit porter le statut", err)
+		t.Errorf("error = %v, it must carry the status", err)
 	}
 }
 
-// Une réponse 200 qui n'est PAS une liste doit être refusée.
+// A 200 response that is NOT a list must be rejected.
 //
-// Sans ce refus, n'importe quel objet JSON se décode sans erreur avec un
-// `results` absent, donc Count = 0, donc ClassifyOptionRemoval rend ClassSafe :
-// notion-seed affirmerait « 0 ligne concernée, rien à perdre » sur une réponse
-// dont il n'a rien compris. C'est exactement l'affirmation invérifiée que ce
-// produit existe pour rendre impossible.
+// Without this rejection, any JSON object decodes without error with a
+// missing `results`, hence Count = 0, hence ClassifyOptionRemoval returns
+// ClassSafe: notion-seed would claim "0 rows affected, nothing to lose" on a
+// response it understood nothing of. That is exactly the unverified claim this
+// product exists to make impossible.
 func TestCountRefusesAResponseThatIsNotAList(t *testing.T) {
-	// Le schéma d'un data source : ce que rendrait un ordre de routes erroné,
-	// côté serveur comme côté faux binaire de test.
+	// A data source's schema: what a wrong route order would return, on the
+	// server side as well as in the fake test binary.
 	body := []byte(`{"object":"data_source","id":"ds-1",` +
 		`"properties":{"Statut":{"id":"p-statut","type":"status"}}}`)
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
@@ -195,20 +195,20 @@ func TestCountRefusesAResponseThatIsNotAList(t *testing.T) {
 		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
 	})
 	if err == nil {
-		t.Fatalf("Count() error = nil (Count = %d), want le refus d'une réponse non comprise",
+		t.Fatalf("Count() error = nil (Count = %d), want a misunderstood response rejected",
 			res.Count)
 	}
 	if !errors.Is(err, ErrUnreadableCount) {
-		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+		t.Errorf("error = %v, want a %v error", err, ErrUnreadableCount)
 	}
 	if !strings.Contains(fmt.Sprint(err), "  → ") {
-		t.Errorf("error = %v, elle doit porter une action corrective", err)
+		t.Errorf("error = %v, it must carry a corrective action", err)
 	}
 }
 
-// Une réponse de type liste SANS champ `results` n'est pas une liste vide :
-// c'est une réponse qu'on n'a pas comprise. Les distinguer impose un pointeur
-// de tranche — une tranche nue confond « absent » et « vide ».
+// A list response WITHOUT a `results` field is not an empty list: it is a
+// response that was not understood. Telling them apart requires a slice
+// pointer — a bare slice confuses "missing" and "empty".
 func TestCountRefusesAListWithoutResults(t *testing.T) {
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 		return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list","has_more":false}`)}, nil
@@ -218,17 +218,17 @@ func TestCountRefusesAListWithoutResults(t *testing.T) {
 		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
 	})
 	if err == nil {
-		t.Fatalf("Count() error = nil (Count = %d), want le refus d'une liste sans results",
+		t.Fatalf("Count() error = nil (Count = %d), want a list without results rejected",
 			res.Count)
 	}
 	if !errors.Is(err, ErrUnreadableCount) {
-		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+		t.Errorf("error = %v, want a %v error", err, ErrUnreadableCount)
 	}
 }
 
-// Une liste VIDE, elle, est une réponse parfaitement légitime : personne
-// n'utilise l'option, et c'est le cas qui rend un retrait sûr. La confondre
-// avec une réponse incomprise ferait perdre tout l'intérêt de mesurer.
+// An EMPTY list, on the other hand, is a perfectly legitimate response: nobody
+// uses the option, and it is the case that makes a removal safe. Confusing it
+// with a misunderstood response would defeat the whole point of measuring.
 func TestCountAcceptsAnEmptyListAsZero(t *testing.T) {
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 		return transport.APIResponse{
@@ -241,21 +241,21 @@ func TestCountAcceptsAnEmptyListAsZero(t *testing.T) {
 		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
 	})
 	if err != nil {
-		t.Fatalf("Count() error = %v, want une liste vide acceptée", err)
+		t.Fatalf("Count() error = %v, want an empty list accepted", err)
 	}
 	if res.Count != 0 {
 		t.Errorf("Count = %d, want 0", res.Count)
 	}
 }
 
-// `has_more: true` avec un `next_cursor` vide est une réponse qu'on n'a pas
-// comprise : l'API annonce une page suivante et ne dit pas où la prendre.
+// `has_more: true` with an empty `next_cursor` is a response that was not
+// understood: the API announces a next page and does not say where to get it.
 //
-// Sans ce refus, la boucle repart sur la PREMIÈRE page et la recompte à chaque
-// tour : une page de 2 lignes ressort à {Count: 6, Capped: true}, et
-// l'utilisateur lit « plus de 6 lignes seront réassignées, sans trace » pour 2
-// lignes réelles. Pire qu'un compte faux : Capped le présente comme un
-// minorant, donc comme une garantie.
+// Without this rejection, the loop starts over on the FIRST page and recounts
+// it on every turn: a 2-row page comes out as {Count: 6, Capped: true}, and the
+// user reads "more than 6 rows will be reassigned, without a trace" for 2 real
+// rows. Worse than a wrong count: Capped presents it as a lower bound, hence as
+// a guarantee.
 func TestCountRefusesHasMoreWithoutACursor(t *testing.T) {
 	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 		return transport.APIResponse{Status: 200, Body: []byte(
@@ -267,20 +267,20 @@ func TestCountRefusesHasMoreWithoutACursor(t *testing.T) {
 		DataSourceID: "ds-1", Property: "Statut", PropertyType: "status", Option: "Fait",
 	})
 	if err == nil {
-		t.Fatalf("Count() error = nil (Count = %d, Capped = %v), want le refus d'un "+
-			"has_more sans curseur", res.Count, res.Capped)
+		t.Fatalf("Count() error = nil (Count = %d, Capped = %v), want a "+
+			"has_more without a cursor rejected", res.Count, res.Capped)
 	}
 	if !errors.Is(err, ErrUnreadableCount) {
-		t.Errorf("error = %v, want une erreur %v", err, ErrUnreadableCount)
+		t.Errorf("error = %v, want a %v error", err, ErrUnreadableCount)
 	}
 	if !strings.Contains(fmt.Sprint(err), "  → ") {
-		t.Errorf("error = %v, elle doit porter une action corrective", err)
+		t.Errorf("error = %v, it must carry a corrective action", err)
 	}
 }
 
-// AllRows compte TOUTES les lignes du data source : une database mise à la
-// corbeille les emporte toutes, avec ou sans valeur dans telle colonne. Aucun
-// filtre ne part, pas même vide.
+// AllRows counts ALL the rows of the data source: a database moved to the
+// trash takes them all with it, with or without a value in any given column.
+// No filter is sent, not even an empty one.
 func TestCountAllRowsSendsNoFilter(t *testing.T) {
 	var sent map[string]any
 	var path string
@@ -294,46 +294,46 @@ func TestCountAllRowsSendsNoFilter(t *testing.T) {
 		t.Fatalf("Count() error = %v", err)
 	}
 	if _, ok := sent["filter"]; ok {
-		t.Errorf("corps = %v, want aucun filtre", sent)
+		t.Errorf("body = %v, want no filter", sent)
 	}
 	if path != "/v1/data_sources/ds-1/query" {
-		t.Errorf("chemin = %q", path)
+		t.Errorf("path = %q", path)
 	}
 	if res.Count != 3 || res.Capped {
 		t.Errorf("Result = %+v, want {3 false}", res)
 	}
 }
 
-// Un comptage de destruction en échec ne rend pas la ligne « inconnue » : elle
-// reste destructive. Son message ne doit pas annoncer le contraire.
+// A failed destruction count does not make the line "unknown": it stays
+// destructive. Its message must not announce the opposite.
 func TestCountAllRowsFailureDoesNotPromiseAnUnknownImpact(t *testing.T) {
 	failures := map[string]transportFunc{
 		"transport": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 			return transport.APIResponse{}, errors.New("403")
 		},
-		"illisible": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
-			return transport.APIResponse{Status: 200, Body: []byte("pas du json")}, nil
+		"unreadable": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{Status: 200, Body: []byte("not json")}, nil
 		},
-		"pas une liste": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		"not a list": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"data_source"}`)}, nil
 		},
-		"sans results": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		"no results": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list"}`)}, nil
 		},
-		"sans curseur": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		"no cursor": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
 			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list","results":[],"has_more":true}`)}, nil
 		},
 	}
 	for name, tr := range failures {
 		_, err := NewCounter(tr).Count(context.Background(), Request{DataSourceID: "ds-1", AllRows: true})
 		if err == nil {
-			t.Fatalf("%s : Count() error = nil", name)
+			t.Fatalf("%s: Count() error = nil", name)
 		}
-		if strings.Contains(err.Error(), "inconnu") {
+		if strings.Contains(err.Error(), "unknown") {
 			t.Errorf("%s: message = %q, it announces an unknown impact", name, err.Error())
 		}
-		if !strings.Contains(err.Error(), "reste annoncée destructive, sans son nombre de lignes") {
-			t.Errorf("%s : message = %q, il doit dire que la destruction reste destructive", name, err.Error())
+		if !strings.Contains(err.Error(), "still announced as destructive, without its number of rows") {
+			t.Errorf("%s: message = %q, it must say the destruction stays destructive", name, err.Error())
 		}
 	}
 }

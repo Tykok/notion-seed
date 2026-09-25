@@ -16,9 +16,9 @@ func TestCheckNotInstalled(t *testing.T) {
 	if !errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("error = %v, want ErrNotInstalled", err)
 	}
-	// Le message doit dire quoi faire.
+	// The message must say what to do.
 	if !strings.Contains(err.Error(), "npm i -g ntn") {
-		t.Errorf("message = %q, il doit donner la commande d'installation", err.Error())
+		t.Errorf("message = %q, it must give the install command", err.Error())
 	}
 }
 
@@ -36,7 +36,7 @@ func TestCheckVersionTooOld(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{"0.19.0", MinNtnVersion, "ntn update"} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("message = %q, il doit contenir %q", msg, want)
+			t.Errorf("message = %q, it must contain %q", msg, want)
 		}
 	}
 }
@@ -70,13 +70,13 @@ func TestCheckNotAuthenticated(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNotAuthenticated", err)
 	}
 	if !strings.Contains(err.Error(), "notion-seed init") {
-		t.Errorf("message = %q, il doit renvoyer vers `notion-seed init`", err.Error())
+		t.Errorf("message = %q, it must point to `notion-seed init`", err.Error())
 	}
-	// La cause réelle doit survivre : sans elle, une panne réseau et un « pas
-	// connecté » produisent le même message, et l'utilisateur suit un conseil
-	// qui ne s'applique pas.
+	// The real cause must survive: without it, a network outage and a "not
+	// logged in" produce the same message, and the user follows advice that
+	// does not apply.
 	if !strings.Contains(err.Error(), "cause:") {
-		t.Errorf("message = %q, il doit conserver la cause remontée par ntn", err.Error())
+		t.Errorf("message = %q, it must keep the cause reported by ntn", err.Error())
 	}
 }
 
@@ -112,9 +112,9 @@ func TestVersionAtLeast(t *testing.T) {
 		{"0.22.10", "0.22.11", false},
 		{"0.19.0", "0.22.11", false},
 		{"0.9.0", "0.22.11", false},
-		// Forme canonique du piège : dans le MÊME champ, un nombre à un chiffre
-		// contre un à deux chiffres. Lexicographiquement "0.22.2" > "0.22.11",
-		// donc une comparaison de chaînes rendrait true ici.
+		// Canonical form of the trap: in the SAME field, a one-digit number
+		// against a two-digit one. Lexicographically "0.22.2" > "0.22.11", so a
+		// string comparison would return true here.
 		{"0.22.2", "0.22.11", false},
 	}
 	for _, tt := range tests {
@@ -124,27 +124,26 @@ func TestVersionAtLeast(t *testing.T) {
 	}
 }
 
-// Les chemins d'imprévu sont visibles par l'utilisateur autant que les chemins
-// nominaux : une sortie de ntn illisible doit dire quoi faire, pas seulement ce
-// qui n'a pas marché.
+// Unexpected paths are as visible to the user as nominal paths: an
+// unreadable ntn output must say what to do, not only what went wrong.
 func TestUnreadableNtnOutputNamesTheCorrectiveAction(t *testing.T) {
-	_, err := parseVersion([]byte("bonjour\n"))
+	_, err := parseVersion([]byte("hello\n"))
 	if err == nil {
-		t.Fatal("parseVersion() error = nil, want une erreur")
+		t.Fatal("parseVersion() error = nil, want an error")
 	}
 	for _, want := range []string{"→", MinNtnVersion} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("parseVersion: message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("parseVersion: message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 
-	_, err = parseWhoami([]byte("une seule colonne\n"))
+	_, err = parseWhoami([]byte("a single column\n"))
 	if err == nil {
-		t.Fatal("parseWhoami() error = nil, want une erreur")
+		t.Fatal("parseWhoami() error = nil, want an error")
 	}
 	for _, want := range []string{"→", MinNtnVersion} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("parseWhoami: message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("parseWhoami: message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }

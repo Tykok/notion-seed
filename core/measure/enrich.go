@@ -11,18 +11,18 @@ import (
 	"github.com/tykok/notion-seed/core/diff"
 )
 
-// Enrich exécute les demandes de mesure d'un plan et reclasse chaque détail.
+// Enrich runs a plan's measurement requests and reclassifies each detail.
 //
-// Ne rend JAMAIS d'erreur fatale : une mesure qui échoue laisse sa ligne en
-// « impact inconnu » et sa cause est rendue pour affichage. Ne pas savoir n'est
-// pas un échec de la commande — priver l'utilisateur du reste de son plan parce
-// qu'un comptage a échoué le serait.
+// It NEVER returns a fatal error: a measurement that fails leaves its line as
+// "unknown impact" and its cause is returned for display. Not knowing is not a
+// failure of the command — depriving the user of the rest of their plan
+// because a count failed would be.
 //
-// dataSourceIDs associe la key de configuration à l'id du data source À
-// INTERROGER. L'appelant le compose : l'id frais que le refresh vient de lire
-// l'emporte, celui du state ne sert que de repli — mesurer sur un id périmé
-// compterait les lignes d'un autre objet. Une ressource absente de cette table
-// n'est pas mesurable : rien, ni relu ni en state, ne dit quoi interroger.
+// dataSourceIDs maps the configuration key to the id of the data source TO
+// QUERY. The caller builds it: the fresh id the refresh just read wins, the
+// state's one is only a fallback — measuring on a stale id would count the
+// rows of another object. A resource missing from this table is not
+// measurable: nothing, neither read back nor in the state, says what to query.
 func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *diff.Plan) []string {
 	var failures []string
 
@@ -44,21 +44,21 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				AllRows:      d.Measure.AllRows,
 			})
 			if err != nil {
-				// La ligne reste inconnue, ce qu'elle était déjà. On ne dégrade
-				// jamais vers « sûr » sur un échec.
+				// The line stays unknown, which it already was. A failure never
+				// downgrades it to "safe".
 				//
-				// Un type non filtrable N'EST PAS une panne : c'est une question
-				// qu'on ne sait pas poser, et notion-seed le sait d'avance sans
-				// avoir rien tenté. Le verser dans la liste des échecs ferait
-				// apparaître « comptage impossible » à chaque plan portant un tel
-				// type, et apprendrait à ignorer une ligne qui signale par ailleurs
-				// de vrais incidents — 403, 429 épuisé, réponse incomprise.
-				// Le MÊME test tranche les deux conséquences : ne pas compter
-				// l'incident, et marquer la ligne comme non mesurable pour que le
-				// rendu cesse de promettre un remède inexistant. Relancer ne rendra
-				// pas rich_text filtrable.
+				// A non-filterable type IS NOT an outage: it is a question
+				// notion-seed cannot ask, and it knows so in advance without
+				// having tried anything. Adding it to the failure list would
+				// make "count failed" show up on every plan carrying such a
+				// type, and would teach users to ignore a line that otherwise
+				// reports real incidents — 403, exhausted 429, misunderstood
+				// response. The SAME test decides both consequences: do not
+				// count the incident, and mark the line as unmeasurable so the
+				// rendering stops promising a remedy that does not exist.
+				// Rerunning will not make rich_text filterable.
 				if !errors.Is(err, ErrUnsupportedFilter) {
-					failures = append(failures, fmt.Sprintf("%s : %v", ch.Resource, err))
+					failures = append(failures, fmt.Sprintf("%s: %v", ch.Resource, err))
 				} else {
 					d.Unmeasurable = true
 				}
@@ -70,52 +70,55 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 
 			switch {
 			case d.Measure.AllRows:
-				// Une destruction reste destructive, à 0 ligne comme à 10 000 : la
-				// database part à la corbeille dans les deux cas. Le compte dit ce
-				// qu'elle emporte, pas si elle part — et le laisser tomber dans le
-				// cas « 0 déclasse » ci-dessous annoncerait « sûr » une mise à la
-				// corbeille.
+				// A destruction stays destructive, at 0 rows as at 10,000: the
+				// database goes to the trash in both cases. The count says what
+				// it takes with it, not whether it goes — and letting it fall
+				// into the "zero downgrades" case below would announce a
+				// trashing as "safe".
 			case d.Class == change.ClassMigration:
-				// Un renommage ou une couleur d'option porte déjà ClassMigration
-				// AVANT toute mesure : le changement est inexprimable côté API,
-				// indépendamment du nombre de lignes concernées. Seul le COÛT du
-				// remède (retirer l'ancienne option) restait à mesurer, et c'est
-				// fait ci-dessus. Recalculer la classe ici la ferait retomber à
-				// ClassSafe/ClassDestructive/ClassSilentRewrite selon le compte, et
-				// `--fail-on=migration` cesserait de se déclencher sur un simple
-				// renommage.
+				// An option rename or color change already carries
+				// ClassMigration BEFORE any measurement: the change is not
+				// expressible in the API, regardless of the number of rows
+				// affected. Only the COST of the remedy (removing the old
+				// option) remained to be measured, and that is done above.
+				// Recomputing the class here would drop it back to
+				// ClassSafe/ClassDestructive/ClassSilentRewrite depending on the
+				// count, and `--fail-on=migration` would stop triggering on a
+				// plain rename.
 			case d.Measure.Option != "" && d.Measure.Retyped:
 				d.Class = change.ClassifyRetypedOptionRemoval(res.Count)
 			case d.Measure.Option != "":
 				d.Class = change.ClassifyOptionRemoval(d.Measure.PropertyType, res.Count)
 			case res.Count == 0:
-				// Le compte reclasse un changement de type DANS UN SEUL SENS, et
-				// l'asymétrie n'a rien d'évident :
+				// The count reclassifies a type change IN ONE DIRECTION ONLY,
+				// and the asymmetry is not obvious:
 				//
-				// Zéro déclasse. Un couple destructeur sur une colonne vide ne coûte
-				// rien — il n'y a aucune valeur à appauvrir. Sans ce déclassement la
-				// ligne se contredit elle-même, « réécriture silencieuse » suivi de
-				// « 0 ligne concernée », et --fail-on=silent-rewrite arrête une CI sur
-				// une colonne sans aucune donnée. C'est la même règle que pour le
-				// retrait d'option, où un compte nul rend ClassSafe.
+				// Zero downgrades. A destructive pair on an empty column costs
+				// nothing — there is no value to degrade. Without this
+				// downgrade the line contradicts itself, "silent rewrite"
+				// followed by "0 rows affected", and --fail-on=silent-rewrite
+				// stops a CI on a column with no data at all. It is the same
+				// rule as for option removal, where a zero count yields
+				// ClassSafe.
 				//
-				// Un compte non nul, lui, ne touche à rien : la classe vient de la
-				// table des couples de types, mesurée contre l'API. Le compte dit
-				// l'AMPLEUR, la table dit la NATURE, et rien dans « 12 lignes non
-				// vides » ne rend une réécriture silencieuse moins silencieuse.
+				// A non-zero count, on the other hand, changes nothing: the
+				// class comes from the table of type pairs, measured against
+				// the API. The count gives the SCALE, the table gives the
+				// NATURE, and nothing in "12 non-empty rows" makes a silent
+				// rewrite any less silent.
 				d.Class = change.ClassSafe
 			}
 		}
 
-		// La classe d'en-tête a été calculée par Compute, AVANT la mesure : elle
-		// est périmée dès qu'un détail change de classe. La recalculer ici est
-		// obligatoire, sinon l'en-tête d'une ressource annonce une gravité qui ne
-		// correspond plus à ses lignes — un « impact inconnu » sur une ressource
-		// dont toutes les lignes sont désormais mesurées sûres, ou l'inverse.
+		// The header class was computed by Compute, BEFORE the measurement: it
+		// is stale as soon as a detail changes class. Recomputing it here is
+		// mandatory, otherwise a resource's header announces a severity that
+		// no longer matches its lines — an "unknown impact" on a resource
+		// whose lines are now all measured safe, or the reverse.
 		//
-		// diff.WorstClass est la SEULE règle de gravité du dépôt : en écrire une
-		// seconde ici la ferait diverger de celle de Compute au premier ajout de
-		// classe.
+		// diff.WorstClass is the ONLY severity rule in the repository: writing
+		// a second one here would make it diverge from Compute's at the first
+		// new class.
 		ch.Class = diff.WorstClass(ch.Details)
 	}
 	return failures

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package measure compte, EN LECTURE, les lignes qu'un changement va toucher.
+// Package measure counts, READ-ONLY, the rows a change is going to touch.
 //
-// C'est ce qui permet au produit de cesser de refuser par principe : bloquer
-// était un substitut à la connaissance, et l'API sait répondre. notion-seed lit
-// les lignes pour dire ce qu'un changement coûte ; il n'en écrit jamais.
+// It is what lets the product stop refusing on principle: blocking was a
+// substitute for knowledge, and the API can answer. notion-seed reads the rows
+// to say what a change costs; it never writes any.
 package measure
 
 import (
@@ -16,39 +16,38 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
-// CountPageSize et MaxCountedPages plafonnent la pagination.
+// CountPageSize and MaxCountedPages cap the pagination.
 //
-// Le compte exact est ce qui fait décider — « 47 lignes » n'a rien à voir avec
-// « au moins une ». Mais une database de 40 000 lignes ne doit pas coûter 400
-// appels pour rendre un plan : au-delà du plafond, « plus de 300 » suffit
-// amplement à décider, et le Result le dit.
+// The exact count is what drives the decision — "47 rows" has nothing to do
+// with "at least one". But a 40,000-row database must not cost 400 calls to
+// render a plan: beyond the cap, "more than 300" is plenty to decide, and the
+// Result says so.
 const (
 	CountPageSize   = 100
 	MaxCountedPages = 3
 )
 
-// ErrUnsupportedFilter signale un type de propriété pour lequel on ne sait pas
-// construire de filtre. Mesuré le 2026-09-24 : une forme de filtre qui ne
-// correspond pas au type rend 400. Fabriquer une requête au hasard ferait donc
-// passer « je ne sais pas poser la question » pour « l'API a refusé ».
-var ErrUnsupportedFilter = errors.New("type de propriété non filtrable")
+// ErrUnsupportedFilter reports a property type notion-seed cannot build a
+// filter for. Measured on 2026-09-24: a filter shape that does not match the
+// type returns 400. Making up a request would therefore pass off "I cannot ask
+// the question" as "the API rejected it".
+var ErrUnsupportedFilter = errors.New("non-filterable property type")
 
-// ErrUnreadableCount signale une réponse de comptage qu'on n'a pas comprise.
+// ErrUnreadableCount reports a count response that was not understood.
 //
-// Elle existe parce que le défaut qu'elle ferme est silencieux : n'importe quel
-// objet JSON se décode dans la structure d'une liste avec un `results` absent,
-// donc un compte de 0, donc « aucune ligne concernée », donc « sûr ». Une
-// réponse incomprise doit rendre une ERREUR, jamais un compte — c'est
-// exactement l'affirmation invérifiée que notion-seed existe pour rendre
-// impossible.
-var ErrUnreadableCount = errors.New("réponse de comptage incomprise")
+// It exists because the defect it closes is silent: any JSON object decodes
+// into a list structure with a missing `results`, hence a count of 0, hence
+// "no rows affected", hence "safe". A misunderstood response must return an
+// ERROR, never a count — that is exactly the unverified claim notion-seed
+// exists to make impossible.
+var ErrUnreadableCount = errors.New("misunderstood count response")
 
-// Request décrit UNE mesure. Option vide signifie « compter les valeurs non
-// vides de la colonne », ce dont un changement de type a besoin.
+// Request describes ONE measurement. An empty Option means "count the
+// non-empty values of the column", which is what a type change needs.
 //
-// AllRows compte toutes les lignes du data source, sans filtre : c'est ce
-// qu'une destruction emporte. Property, PropertyType et Option sont alors
-// ignorés.
+// AllRows counts every row of the data source, without a filter: it is what a
+// destruction takes with it. Property, PropertyType and Option are then
+// ignored.
 type Request struct {
 	DataSourceID string
 	Property     string
@@ -57,38 +56,38 @@ type Request struct {
 	AllRows      bool
 }
 
-// fallback dit ce que le plan affichera faute de compte. Il diffère pour une
-// destruction : sa classe ne dépend pas du compte, elle reste destructive, et
-// l'annoncer « inconnue » serait faux.
+// fallback says what the plan will show without a count. It differs for a
+// destruction: its class does not depend on the count, it stays destructive,
+// and announcing it as "unknown" would be wrong.
 func (r Request) fallback() string {
 	if r.AllRows {
-		return "la destruction reste annoncée destructive, sans son nombre de lignes"
+		return "the destruction is still announced as destructive, without its number of rows"
 	}
-	return "l'impact de ce changement sera annoncé comme inconnu"
+	return "the impact of this change will be announced as unknown"
 }
 
-// subject nomme ce qu'on compte, pour les messages d'erreur.
+// subject names what is being counted, for error messages.
 func (r Request) subject() string {
 	if r.AllRows {
-		return "la database"
+		return "the database"
 	}
 	return fmt.Sprintf("%q", r.Property)
 }
 
-// Result porte le compte. Capped dit que le plafond de pagination a été atteint
-// et que Count est donc un minorant, pas un compte.
+// Result holds the count. Capped says the pagination cap was reached and that
+// Count is therefore a lower bound, not a count.
 type Result struct {
 	Count  int
 	Capped bool
 }
 
-// Counter est ce dont le plan a besoin. L'interface est déclarée ici, côté
-// consommateur, pour que les tests n'aient pas à monter une pile de transport.
+// Counter is what the plan needs. The interface is declared here, on the
+// consumer side, so the tests do not have to build a transport stack.
 type Counter interface {
 	Count(ctx context.Context, r Request) (Result, error)
 }
 
-// NotionCounter compte via l'API.
+// NotionCounter counts through the API.
 type NotionCounter struct {
 	tr transport.Transport
 }
@@ -99,10 +98,10 @@ func NewCounter(tr transport.Transport) *NotionCounter {
 
 var _ Counter = (*NotionCounter)(nil)
 
-// filterFor construit le filtre correspondant au type de la propriété.
+// filterFor builds the filter matching the property type.
 //
-// Mesuré le 2026-09-24 : select et status se filtrent par `equals`,
-// multi_select par `contains`. La forme DOIT correspondre au type, sinon 400.
+// Measured on 2026-09-24: select and status filter with `equals`, multi_select
+// with `contains`. The shape MUST match the type, otherwise 400.
 func filterFor(r Request) (map[string]any, error) {
 	var op string
 	switch r.PropertyType {
@@ -112,8 +111,8 @@ func filterFor(r Request) (map[string]any, error) {
 		op = "contains"
 	default:
 		return nil, fmt.Errorf("%w: %q\n"+
-			"  → notion-seed ne sait pas compter les lignes de ce type ; l'impact "+
-			"sera annoncé comme inconnu plutôt que deviné",
+			"  → notion-seed cannot count the rows of this type; the impact "+
+			"will be announced as unknown rather than guessed",
 			ErrUnsupportedFilter, r.PropertyType)
 	}
 
@@ -127,10 +126,10 @@ func filterFor(r Request) (map[string]any, error) {
 	}, nil
 }
 
-// Count rend le nombre de lignes concernées, plafonné.
+// Count returns the number of rows affected, capped.
 func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
-	// Pas de filtre du tout pour AllRows — pas même un filtre vide, dont l'API
-	// n'a pas été mesurée.
+	// No filter at all for AllRows — not even an empty filter, whose API
+	// behavior has not been measured.
 	var filter map[string]any
 	if !r.AllRows {
 		var err error
@@ -152,9 +151,9 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return Result{}, fmt.Errorf(
-				"construction de la requête de comptage impossible: %w\n"+
-					"  → c'est un bug de notion-seed, pas une erreur de configuration : "+
-					"signalez-le", err)
+				"failed to build the count query: %w\n"+
+					"  → this is a notion-seed bug, not a configuration error: "+
+					"report it", err)
 		}
 
 		resp, err := c.tr.Execute(ctx, transport.APIRequest{
@@ -164,16 +163,15 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf(
-				"comptage des lignes de %s impossible: %w\n"+
-					"  → %s ; réessayez "+
-					"pour obtenir le compte", r.subject(), err, r.fallback())
+				"failed to count the rows of %s: %w\n"+
+					"  → %s; retry "+
+					"to get the count", r.subject(), err, r.fallback())
 		}
 
-		// Results est un POINTEUR de tranche, délibérément : une tranche nue
-		// confond « results absent » (réponse incomprise) et « results vide »
-		// (personne n'utilise l'option), et ces deux cas doivent se terminer à
-		// l'opposé l'un de l'autre — une erreur pour le premier, un compte de 0
-		// pour le second.
+		// Results is a slice POINTER, deliberately: a bare slice confuses
+		// "results missing" (misunderstood response) with "results empty"
+		// (nobody uses the option), and these two cases must end at opposite
+		// ends — an error for the first, a count of 0 for the second.
 		var decoded struct {
 			Object     string             `json:"object"`
 			Results    *[]json.RawMessage `json:"results"`
@@ -182,28 +180,28 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		}
 		if err := json.Unmarshal(resp.Body, &decoded); err != nil {
 			return Result{}, fmt.Errorf(
-				"réponse de comptage illisible: %w\n"+
-					"  → réessayez ; si ça persiste, %s", err, r.fallback())
+				"unreadable count response: %w\n"+
+					"  → retry; if it persists, %s", err, r.fallback())
 		}
 
-		// Un 200 dont on ne reconnaît pas la forme ne vaut PAS zéro ligne.
-		// Sans ces deux gardes, le schéma d'un data source — ce que rend une
-		// route mal ordonnée — se décode sans erreur et fait annoncer « 0 ligne
-		// concernée, rien à perdre » sur une réponse dont rien n'a été compris.
+		// A 200 whose shape is not recognized is NOT worth zero rows. Without
+		// these two guards, a data source's schema — what a misordered route
+		// returns — decodes without error and makes the plan announce "0 rows
+		// affected, nothing to lose" on a response nothing was understood of.
 		if decoded.Object != "list" {
 			return Result{}, fmt.Errorf(
-				"%w pour %s: l'API a répondu un objet %q, pas une liste de lignes\n"+
-					"  → %s ; réessayez, "+
-					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
-					"réponse de l'API",
+				"%w for %s: the API answered a %q object, not a list of rows\n"+
+					"  → %s; retry, "+
+					"and if it persists report it: notion-seed no longer recognizes the "+
+					"API response",
 				ErrUnreadableCount, r.subject(), decoded.Object, r.fallback())
 		}
 		if decoded.Results == nil {
 			return Result{}, fmt.Errorf(
-				"%w pour %s: la liste rendue par l'API ne porte aucun champ results\n"+
-					"  → %s ; réessayez, "+
-					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
-					"réponse de l'API",
+				"%w for %s: the list returned by the API has no results field\n"+
+					"  → %s; retry, "+
+					"and if it persists report it: notion-seed no longer recognizes the "+
+					"API response",
 				ErrUnreadableCount, r.subject(), r.fallback())
 		}
 
@@ -211,18 +209,19 @@ func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 		if !decoded.HasMore {
 			return out, nil
 		}
-		// Une page suivante annoncée sans dire où la prendre est une réponse
-		// incomprise, au même titre qu'un `results` absent. Repartir sans curseur
-		// redemanderait la PREMIÈRE page et la recompterait à chaque tour : une
-		// page de 2 lignes ressortirait à « plus de 6 lignes », un chiffre fabriqué
-		// que Capped présente en plus comme un minorant — donc comme une garantie.
-		// Mieux vaut ne rien annoncer que garantir un nombre inventé.
+		// A next page announced without saying where to get it is a
+		// misunderstood response, just like a missing `results`. Starting over
+		// without a cursor would ask for the FIRST page again and recount it on
+		// every turn: a 2-row page would come out as "more than 6 rows", a
+		// made-up number that Capped moreover presents as a lower bound — hence
+		// as a guarantee. Better to announce nothing than to guarantee an
+		// invented number.
 		if decoded.NextCursor == "" {
 			return Result{}, fmt.Errorf(
-				"%w pour %s: l'API annonce une page suivante sans curseur pour l'atteindre\n"+
-					"  → %s ; réessayez, "+
-					"et si ça persiste signalez-le : notion-seed ne reconnaît plus la "+
-					"réponse de l'API",
+				"%w for %s: the API announces a next page without a cursor to reach it\n"+
+					"  → %s; retry, "+
+					"and if it persists report it: notion-seed no longer recognizes the "+
+					"API response",
 				ErrUnreadableCount, r.subject(), r.fallback())
 		}
 		cursor = decoded.NextCursor

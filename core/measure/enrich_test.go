@@ -31,14 +31,14 @@ func planWithRemoval(propType, option string) *diff.Plan {
 	}}}
 }
 
-// 0 ligne concernée : le retrait ne coûte rien, et la ligne devient sûre. C'est
-// tout l'intérêt de mesurer plutôt que de refuser.
+// 0 rows affected: the removal costs nothing, and the line becomes safe. That
+// is the whole point of measuring rather than refusing.
 func TestEnrichMakesARemovalSafeWhenNoRowUsesTheOption(t *testing.T) {
 	p := planWithRemoval("status", "Annulé")
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 0}, nil })
 
 	if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
-		t.Fatalf("échecs = %v, want aucun", fails)
+		t.Fatalf("failures = %v, want none", fails)
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != 0 || d.Class != change.ClassSafe {
@@ -46,7 +46,7 @@ func TestEnrichMakesARemovalSafeWhenNoRowUsesTheOption(t *testing.T) {
 	}
 }
 
-// 47 lignes sur un status : réécriture silencieuse, avec le chiffre.
+// 47 rows on a status: silent rewrite, with the number.
 func TestEnrichClassifiesAStatusRemovalWithRowsAsSilentRewrite(t *testing.T) {
 	p := planWithRemoval("status", "Annulé")
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 47}, nil })
@@ -58,8 +58,8 @@ func TestEnrichClassifiesAStatusRemovalWithRowsAsSilentRewrite(t *testing.T) {
 	}
 }
 
-// Une mesure en échec ne fait pas échouer le plan : la ligne reste inconnue, la
-// cause est rendue, et le reste du plan est rendu quand même.
+// A failed measurement does not fail the plan: the line stays unknown, the
+// cause is returned, and the rest of the plan is rendered anyway.
 func TestEnrichKeepsGoingWhenAMeasurementFails(t *testing.T) {
 	p := planWithRemoval("status", "Annulé")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
@@ -68,7 +68,7 @@ func TestEnrichKeepsGoingWhenAMeasurementFails(t *testing.T) {
 
 	fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if len(fails) != 1 || !strings.Contains(fails[0], "403") {
-		t.Errorf("échecs = %v, want la cause", fails)
+		t.Errorf("failures = %v, want the cause", fails)
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != -1 || d.Class != change.ClassUnknownImpact {
@@ -76,8 +76,8 @@ func TestEnrichKeepsGoingWhenAMeasurementFails(t *testing.T) {
 	}
 }
 
-// Un type non filtrable n'est pas un échec à signaler comme une panne : c'est
-// une question qu'on ne sait pas poser. La ligne reste inconnue.
+// A non-filterable type is not a failure to report as an outage: it is a
+// question notion-seed cannot ask. The line stays unknown.
 func TestEnrichLeavesUnfilterableTypesUnknown(t *testing.T) {
 	p := planWithRemoval("people", "Quelqu'un")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
@@ -90,34 +90,34 @@ func TestEnrichLeavesUnfilterableTypesUnknown(t *testing.T) {
 	}
 }
 
-// ... et il ne produit AUCUNE ligne d'échec : rien n'est en panne. Les verser
-// dans la même liste que les 403 et les timeouts ferait apparaître « comptage
-// impossible » à chaque plan portant un type non filtrable, et apprendrait à
-// ignorer une ligne qui, elle, signale de vrais incidents.
+// ... and it produces NO failure line: nothing is down. Adding them to the
+// same list as the 403s and the timeouts would make "count failed" show up on
+// every plan carrying a non-filterable type, and would teach users to ignore a
+// line that does report real incidents.
 func TestEnrichReportsNoFailureForAnUnfilterableType(t *testing.T) {
 	p := planWithRemoval("people", "Quelqu'un")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
-		// Enveloppée, comme filterFor l'enveloppe réellement : c'est errors.Is
-		// qui doit trancher, pas une comparaison d'égalité.
+		// Wrapped, as filterFor actually wraps it: errors.Is must decide, not an
+		// equality comparison.
 		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedFilter, "people")
 	})
 
 	if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
-		t.Errorf("échecs = %v, want aucun : ne pas savoir poser la question n'est pas une panne", fails)
+		t.Errorf("failures = %v, want none: not knowing how to ask the question is not an outage", fails)
 	}
-	// Le comportement de la ligne, lui, ne change pas : on ne sait toujours pas.
+	// The line's behavior, however, does not change: it is still unknown.
 	if d := p.Changes[0].Details[0]; d.Class != change.ClassUnknownImpact || d.Count != -1 {
 		t.Errorf("Detail = {Count:%d Class:%v}, want unknown", d.Count, d.Class)
 	}
 }
 
-// C'est la passe de mesure qui SAIT quels types elle peut filtrer, donc c'est
-// elle qui marque la ligne. Le rendu ne peut pas le déduire : la liste des
-// types filtrables vit ici, et core/measure importe core/diff — l'inverse
-// créerait un cycle, et recopier la table la ferait diverger.
+// The measurement pass is the one that KNOWS which types it can filter, so it
+// is the one that marks the line. The rendering cannot deduce it: the list of
+// filterable types lives here, and core/measure imports core/diff — the
+// reverse would create a cycle, and copying the table would make it diverge.
 //
-// Sans cette marque, le rendu promet « relancez en ligne pour l'obtenir » sur
-// une ligne qui ne se comptera jamais.
+// Without this mark, the rendering promises "rerun online to get it" on a line
+// that will never be counted.
 func TestEnrichMarksAnUnfilterableTypeAsUnmeasurable(t *testing.T) {
 	p := planWithRemoval("people", "Quelqu'un")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
@@ -126,13 +126,13 @@ func TestEnrichMarksAnUnfilterableTypeAsUnmeasurable(t *testing.T) {
 
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if d := p.Changes[0].Details[0]; !d.Unmeasurable {
-		t.Error("Unmeasurable = false : un type non filtrable ne le deviendra pas au prochain run")
+		t.Error("Unmeasurable = false: a non-filterable type will not become filterable on the next run")
 	}
 }
 
-// Une panne, elle, N'EST PAS une impossibilité : un 403 se répare, et la ligne
-// doit rester simplement non mesurée pour que le rendu garde son remède.
-// Confondre les deux ferait disparaître « relancez » là où relancer marche.
+// An outage, on the other hand, IS NOT an impossibility: a 403 can be fixed,
+// and the line must stay merely unmeasured so the rendering keeps its remedy.
+// Confusing the two would make "rerun" disappear where rerunning works.
 func TestEnrichDoesNotMarkAFailedMeasurementAsUnmeasurable(t *testing.T) {
 	p := planWithRemoval("status", "Annulé")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
@@ -141,31 +141,31 @@ func TestEnrichDoesNotMarkAFailedMeasurementAsUnmeasurable(t *testing.T) {
 
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if d := p.Changes[0].Details[0]; d.Unmeasurable {
-		t.Error("Unmeasurable = true sur une panne : un 403 se répare en relançant")
+		t.Error("Unmeasurable = true on an outage: a 403 is fixed by rerunning")
 	}
 }
 
-// Aucune demande de mesure : aucun appel. Ne pas payer d'appels pour rien est
-// une propriété, pas une optimisation.
+// No measurement request: no call. Not paying for calls for nothing is a
+// property, not an optimization.
 func TestEnrichEmitsNoCallWhenNothingNeedsMeasuring(t *testing.T) {
 	p := &diff.Plan{Changes: []diff.Change{{
 		Resource: "database.tasks", Key: "tasks",
 		Details: []resources.Detail{{Op: "+", Target: `property "X"`, Count: -1}},
 	}}}
 	c := counterFunc(func(context.Context, Request) (Result, error) {
-		t.Error("aucune mesure ne devait être demandée")
+		t.Error("no measurement should have been requested")
 		return Result{}, nil
 	})
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 }
 
-// Sans data source id (ressource jamais importée), aucune mesure n'est
-// possible : la ligne reste inconnue plutôt que de déclencher un appel sur un
-// id vide.
+// Without a data source id (resource never imported), no measurement is
+// possible: the line stays unknown rather than triggering a call on an empty
+// id.
 func TestEnrichSkipsResourcesWithoutADataSourceID(t *testing.T) {
 	p := planWithRemoval("status", "Annulé")
 	c := counterFunc(func(context.Context, Request) (Result, error) {
-		t.Error("aucun appel ne devait être émis sans data source id")
+		t.Error("no call should have been made without a data source id")
 		return Result{}, nil
 	})
 	Enrich(context.Background(), c, map[string]string{}, p)
@@ -174,16 +174,16 @@ func TestEnrichSkipsResourcesWithoutADataSourceID(t *testing.T) {
 	}
 }
 
-// planWithOptionMigration fabrique un renommage ou une couleur d'option : la
-// classe est ClassMigration AVANT toute mesure, et la ligne porte tout de
-// même une demande de mesure — celle du coût du remède (retirer l'ancienne
+// planWithOptionMigration builds an option rename or color change: the class
+// is ClassMigration BEFORE any measurement, and the line still carries a
+// measurement request — the one for the cost of the remedy (removing the old
 // option).
 func planWithOptionMigration() *diff.Plan {
 	return &diff.Plan{Changes: []diff.Change{{
 		Resource: "database.tasks", Key: "tasks",
 		Class: change.ClassMigration,
 		Details: []resources.Detail{{
-			Op: "~", Target: `option "Fait" → "Terminé" (propriété "Statut")`,
+			Op: "~", Target: `option "Fait" → "Terminé" (property "Statut")`,
 			Class: change.ClassMigration, Count: -1,
 			Measure: &resources.Measurement{
 				Property: "Statut", PropertyType: "status", Option: "Fait",
@@ -192,34 +192,34 @@ func planWithOptionMigration() *diff.Plan {
 	}}}
 }
 
-// Un renommage ou une couleur d'option est déjà inexprimable AVANT toute
-// mesure : ClassifyOptionRemoval ne doit donc jamais reclasser une ligne
-// ClassMigration, quel que soit le compte — seul le COÛT du remède doit être
-// rempli. Sans cette garde, un renommage sur une propriété portant des lignes
-// (compte non nul) retombait en ClassDestructive/ClassSilentRewrite, et un
-// renommage sur une colonne vide (compte nul) retombait en ClassSafe : dans
-// les deux cas, `--fail-on=migration` cessait de se déclencher.
+// An option rename or color change is already not expressible BEFORE any
+// measurement: ClassifyOptionRemoval must therefore never reclassify a
+// ClassMigration line, whatever the count — only the COST of the remedy must
+// be filled in. Without this guard, a rename on a property holding rows
+// (non-zero count) fell back to ClassDestructive/ClassSilentRewrite, and a
+// rename on an empty column (zero count) fell back to ClassSafe: in both
+// cases, `--fail-on=migration` stopped triggering.
 func TestEnrichKeepsMigrationClassAndFillsCount(t *testing.T) {
 	p := planWithOptionMigration()
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 12}, nil })
 
 	if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
-		t.Fatalf("échecs = %v, want aucun", fails)
+		t.Fatalf("failures = %v, want none", fails)
 	}
 	d := p.Changes[0].Details[0]
 	if d.Class != change.ClassMigration {
-		t.Errorf("Class = %v, want ClassMigration : la mesure ne reclasse pas une ligne déjà inexprimable", d.Class)
+		t.Errorf("Class = %v, want ClassMigration: the measurement does not reclassify a line that is already not expressible", d.Class)
 	}
 	if d.Count != 12 {
-		t.Errorf("Count = %d, want 12 : le coût du remède doit être rempli", d.Count)
+		t.Errorf("Count = %d, want 12: the cost of the remedy must be filled in", d.Count)
 	}
 	if got := p.Changes[0].Class; got != change.ClassMigration {
-		t.Errorf("Class d'en-tête = %v, want ClassMigration", got)
+		t.Errorf("header Class = %v, want ClassMigration", got)
 	}
 }
 
-// planWithTypeChange fabrique un changement de type : la mesure porte la
-// colonne entière (Option vide), pas une option.
+// planWithTypeChange builds a type change: the measurement covers the whole
+// column (empty Option), not an option.
 func planWithTypeChange() *diff.Plan {
 	return &diff.Plan{Changes: []diff.Change{{
 		Resource: "database.tasks", Key: "tasks",
@@ -232,11 +232,10 @@ func planWithTypeChange() *diff.Plan {
 	}}}
 }
 
-// Une colonne VIDE qui change de type ne coûte rien, exactement comme une
-// option que personne ne porte. Sans ce déclassement, la ligne se contredit
-// elle-même — « réécriture silencieuse » suivi de « 0 ligne concernée » — et
-// `plan --fail-on=silent-rewrite` sort en code non nul sur une colonne sans
-// aucune donnée à perdre.
+// An EMPTY column that changes type costs nothing, exactly like an option
+// nobody holds. Without this downgrade, the line contradicts itself — "silent
+// rewrite" followed by "0 rows affected" — and `plan --fail-on=silent-rewrite`
+// exits non-zero on a column with no data at all to lose.
 func TestEnrichMakesATypeChangeSafeWhenTheColumnIsEmpty(t *testing.T) {
 	p := planWithTypeChange()
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 0}, nil })
@@ -250,9 +249,9 @@ func TestEnrichMakesATypeChangeSafeWhenTheColumnIsEmpty(t *testing.T) {
 	}
 }
 
-// Un compte NON nul, lui, laisse la classe du changement de type intacte : le
-// compte dit l'ampleur, la table mesurée dit la nature. Rien dans « 12 lignes
-// non vides » ne rend une réécriture silencieuse moins silencieuse.
+// A NON-zero count, on the other hand, leaves the type change's class intact:
+// the count gives the scale, the measured table gives the nature. Nothing in
+// "12 non-empty rows" makes a silent rewrite any less silent.
 func TestEnrichKeepsTheTableClassWhenATypeChangeHasRows(t *testing.T) {
 	p := planWithTypeChange()
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 12}, nil })
@@ -263,9 +262,9 @@ func TestEnrichKeepsTheTableClassWhenATypeChangeHasRows(t *testing.T) {
 	}
 }
 
-// Sous un changement de type, une option de status non redéclarée disparaît et
-// ses lignes perdent leur valeur : c'est une perte, pas une réassignation. La
-// mesure la reclasse destructive, quel que soit l'ancien type.
+// Under a type change, a status option that is not redeclared disappears and
+// its rows lose their value: it is a loss, not a reassignment. The measurement
+// reclassifies it as destructive, whatever the old type.
 func TestEnrichClassifiesARetypedStatusOptionAsDestructive(t *testing.T) {
 	p := planWithRemoval("status", "Fait")
 	p.Changes[0].Details[0].Measure.Retyped = true
@@ -289,9 +288,9 @@ func planWithDestroy() *diff.Plan {
 	}}}
 }
 
-// Une destruction reste destructive quel que soit son compte : 0 ligne ne la
-// rend pas sûre (la database part quand même), et un compte n'en change pas la
-// nature. Le compte dit seulement ce qui part avec elle.
+// A destruction stays destructive whatever its count: 0 rows does not make it
+// safe (the database goes anyway), and a count does not change its nature. The
+// count only says what goes with it.
 func TestEnrichCountsTheRowsOfADestroyWithoutReclassifyingIt(t *testing.T) {
 	for _, n := range []int{0, 5} {
 		p := planWithDestroy()
@@ -301,10 +300,10 @@ func TestEnrichCountsTheRowsOfADestroyWithoutReclassifyingIt(t *testing.T) {
 			return Result{Count: n}, nil
 		})
 		if fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p); len(fails) != 0 {
-			t.Fatalf("échecs = %v", fails)
+			t.Fatalf("failures = %v", fails)
 		}
 		if !got.AllRows || got.DataSourceID != "ds-1" {
-			t.Errorf("requête = %+v, want AllRows sur ds-1", got)
+			t.Errorf("request = %+v, want AllRows on ds-1", got)
 		}
 		d := p.Changes[0].Details[0]
 		if d.Count != n || d.Class != change.ClassDestructive || p.Changes[0].Class != change.ClassDestructive {
@@ -314,14 +313,14 @@ func TestEnrichCountsTheRowsOfADestroyWithoutReclassifyingIt(t *testing.T) {
 	}
 }
 
-// Un comptage en échec laisse le compte inconnu, la classe intacte, et sa cause
-// rendue.
+// A failed count leaves the count unknown, the class intact, and its cause
+// returned.
 func TestEnrichKeepsADestroyDestructiveWhenCountingFails(t *testing.T) {
 	p := planWithDestroy()
 	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{}, errors.New("403") })
 	fails := Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if len(fails) != 1 {
-		t.Errorf("échecs = %v, want un", fails)
+		t.Errorf("failures = %v, want one", fails)
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != -1 || d.Class != change.ClassDestructive {
