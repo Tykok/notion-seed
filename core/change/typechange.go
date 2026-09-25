@@ -77,8 +77,10 @@ type TypeChange struct {
 const (
 	caveatBlank = "text made only of spaces or line breaks is not counted, " +
 		"and is lost too"
+	// Measured on 2026-09-25: rich_text `does_not_equal` ignores case and
+	// trailing spaces, while a conversion keeps only an exact match.
 	caveatCase = "a value that differs from a declared option only by case " +
-		"may not be counted"
+		"or trailing spaces is not counted, and does not survive either"
 	caveatParse     = "some values survive the conversion"
 	caveatUnchecked = "unchecked rows are emptied too, which loses nothing they held"
 	caveatEveryRow  = "every row, empty ones included"
@@ -424,7 +426,12 @@ func countFor(tc *TypeChange, from, to string, declared []string) {
 
 // exceptFor keeps the declared names a value of the source type can match.
 // A number converts to its shortest decimal writing ('7', '-3.5', '1000000'),
-// so only a name written that way can hold it.
+// so only a name written that way can hold it. Measured on 2026-09-25: "7"
+// keeps 7, "7.0" keeps nothing, and 7.5 or 70 are emptied under ["7"]. A
+// non-canonical name therefore saves no row and is not excluded: the count
+// stays exact. That exactness assumes FormatFloat's shortest writing is the
+// API's for every number — measured on integers, negatives and short
+// decimals, not on very large or very long ones.
 func exceptFor(from string, declared []string) []string {
 	if from != "number" {
 		return declared
