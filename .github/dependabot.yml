@@ -5,8 +5,8 @@ updates:
     schedule:
       interval: weekly
     groups:
-      # Une PR par semaine plutôt qu'une par module : sur un dépôt à six
-      # dépendances, le bruit coûte plus cher que la granularité.
+      # One PR per week rather than one per module: on a repository with six
+      # dependencies, the noise costs more than the granularity.
       go:
         patterns: ["*"]
 

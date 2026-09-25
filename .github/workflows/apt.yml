@@ -1,20 +1,20 @@
-name: Dépôt apt
+name: apt repository
 
 on:
-  # Surtout pas `release: published` : GoReleaser crée la release avec
-  # GITHUB_TOKEN, et GitHub ne déclenche aucun workflow depuis un événement
-  # produit par ce jeton. Le dépôt apt ne serait jamais publié. release.yml
-  # appelle donc ce workflow directement.
+  # Above all not `release: published`: GoReleaser creates the release with
+  # GITHUB_TOKEN, and GitHub triggers no workflow from an event produced by
+  # this token. The apt repository would never be published. release.yml
+  # therefore calls this workflow directly.
   workflow_call:
     inputs:
       tag:
-        description: Tag de la release à publier
+        description: Tag of the release to publish
         required: true
         type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag de la release à (re)publier
+        description: Tag of the release to (re)publish
         required: true
         type: string
 
@@ -22,9 +22,9 @@ permissions:
   contents: write
 
 concurrency:
-  # Deux releases publiées coup sur coup réécriraient le même index apt :
-  # la seconde partirait d'un gh-pages que la première n'a pas encore poussé,
-  # et perdrait ses paquets. Une seule à la fois, sans annuler la précédente.
+  # Two releases published back to back would rewrite the same apt index: the
+  # second would start from a gh-pages the first has not pushed yet, and would
+  # lose its packages. One at a time, without cancelling the previous one.
   group: apt-repo
   cancel-in-progress: false
 
@@ -36,10 +36,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Outils Debian
+      - name: Debian tools
         run: sudo apt-get update -qq && sudo apt-get install -y dpkg-dev apt-utils
 
-      - name: Télécharger les .deb de la release
+      - name: Download the release .deb files
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
@@ -47,22 +47,22 @@ jobs:
           mkdir -p incoming
           gh release download "$TAG" --pattern '*.deb' --dir incoming
 
-      - name: Importer la clé de signature
+      - name: Import the signing key
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
         run: |
           if [ -z "$APT_GPG_PRIVATE_KEY" ]; then
-            echo "::error::secret APT_GPG_PRIVATE_KEY absent — un dépôt apt non signé est refusé par apt"
+            echo "::error::secret APT_GPG_PRIVATE_KEY missing — apt rejects an unsigned apt repository"
             exit 1
           fi
           printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
           gpg --list-secret-keys --keyid-format=long
 
-      - name: Reprendre les paquets déjà publiés
+      - name: Carry over the packages already published
         run: |
-          # Sans cette étape, publier une version rendrait toutes les
-          # précédentes introuvables : le dépôt est reconstruit en entier à
-          # chaque fois, donc il doit repartir de ce qui est déjà en ligne.
+          # Without this step, publishing a version would make all the
+          # previous ones unfindable: the repository is rebuilt in full every
+          # time, so it must start again from what is already online.
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
             git fetch --depth 1 origin gh-pages
             mkdir -p pages
@@ -71,12 +71,12 @@ jobs:
           fi
           ls -1 incoming/
 
-      - name: Construire le dépôt
+      - name: Build the repository
         env:
           APT_GPG_KEY: ${{ secrets.APT_GPG_KEY_ID }}
         run: ./scripts/build-apt-repo.sh incoming apt-repo
 
-      - name: Publier sur gh-pages
+      - name: Publish to gh-pages
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -88,11 +88,12 @@ jobs:
           fi
           rm -rf apt
           cp -r ../apt-repo apt
-          # GitHub Pages passe le contenu par Jekyll sans ça, qui ignore les
-          # dossiers commençant par un underscore et réécrit certains fichiers.
+          # Without this, GitHub Pages runs the content through Jekyll, which
+          # ignores directories starting with an underscore and rewrites some
+          # files.
           touch .nojekyll
           git add -A
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -q -m "apt: publier $TAG" || { echo "rien à publier"; exit 0; }
+              commit -q -m "apt: publier $TAG" || { echo "nothing to publish"; exit 0; }
           git push -q origin gh-pages

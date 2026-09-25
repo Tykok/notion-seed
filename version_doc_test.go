@@ -11,17 +11,17 @@ import (
 	"github.com/tykok/notion-seed/core/preflight"
 )
 
-// La version de ntn exigée est écrite dans le code, dans le README et dans le
-// pied de page des releases. Elle y est répétée à la main, donc elle dérive :
-// ce test fait échouer la dérive au lieu de la laisser arriver jusqu'à un
-// utilisateur qui installe la mauvaise version parce que le README le lui a dit.
-func TestDocsAnnoncentLaVersionDeNtnDuCode(t *testing.T) {
+// The required ntn version is written in the code, in the README and in the
+// release footer. It is repeated by hand, so it drifts: this test fails on the
+// drift instead of letting it reach a user who installs the wrong version
+// because the README told them to.
+func TestDocsAnnounceTheNtnVersionOfTheCode(t *testing.T) {
 	semver := regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 
 	for _, path := range []string{"README.md", ".goreleaser.yaml"} {
 		content, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("%s illisible: %v", path, err)
+			t.Fatalf("%s unreadable: %v", path, err)
 		}
 
 		var found int
@@ -32,15 +32,15 @@ func TestDocsAnnoncentLaVersionDeNtnDuCode(t *testing.T) {
 			for _, version := range semver.FindAllString(line, -1) {
 				found++
 				if version != preflight.MinNtnVersion {
-					t.Errorf("%s:%d annonce ntn %s, le code exige %s\n  %s",
+					t.Errorf("%s:%d announces ntn %s, the code requires %s\n  %s",
 						path, i+1, version, preflight.MinNtnVersion, strings.TrimSpace(line))
 				}
 			}
 		}
 
 		if found == 0 {
-			t.Errorf("%s ne mentionne aucune version de ntn : l'utilisateur ne sait pas "+
-				"laquelle installer, alors que notion-seed refuse de tourner en dessous de %s",
+			t.Errorf("%s mentions no ntn version: the user does not know "+
+				"which one to install, while notion-seed refuses to run below %s",
 				path, preflight.MinNtnVersion)
 		}
 	}

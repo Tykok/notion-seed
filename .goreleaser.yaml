@@ -8,15 +8,15 @@ builds:
   - id: notion-seed
     main: .
     binary: notion-seed
-    # Aucune dépendance C : un binaire statique s'exécute sur une image
-    # distroless ou une Alpine, là où la CI des utilisateurs tourne.
+    # No C dependency: a static binary runs on a distroless or Alpine image,
+    # where users' CI runs.
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags:
-      # cli.Version vaut "0.0.0-dev" par défaut : sans cette injection, un
-      # binaire publié annoncerait une version qui n'existe pas.
+      # cli.Version is "0.0.0-dev" by default: without this injection, a
+      # published binary would announce a version that does not exist.
       - -s -w -X github.com/tykok/notion-seed/cli.Version={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
@@ -35,25 +35,25 @@ homebrew_casks:
       owner: tykok
       name: homebrew-tap
       branch: main
-      # GITHUB_TOKEN ne vaut que pour le dépôt courant : pousser la formule
-      # dans le tap demande un jeton qui porte sur l'autre dépôt.
+      # GITHUB_TOKEN is valid only for the current repository: pushing the
+      # formula to the tap needs a token that covers the other repository.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/tykok/notion-seed
-    description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
-    # custom_block plutôt que `hooks`, qui émet `postflight` : Homebrew le
-    # déprécie et avertit à chaque installation, deux fois, en invitant
-    # l'utilisateur à ouvrir un ticket ici.
+    description: Declares the structure of a Notion workspace and refuses destructive changes
+    # custom_block rather than `hooks`, which emits `postflight`: Homebrew
+    # deprecates it and warns on every install, twice, inviting the user to
+    # open an issue here.
     #
-    # postflight_steps n'est pas un renommage : c'est un DSL déclaratif
-    # restreint, sans system_command. D'où `run`, et `chdir: "."` — sa base de
-    # chemin par défaut est déjà staged_path, alors que `chdir: :staged_path`
-    # est pris pour un chemin littéral.
+    # postflight_steps is not a rename: it is a restricted declarative DSL,
+    # without system_command. Hence `run`, and `chdir: "."` — its default base
+    # path is already staged_path, whereas `chdir: :staged_path` is taken as a
+    # literal path.
     custom_block: |
       postflight_steps do
         on_macos do
-          # Le binaire n'est pas notarié : sans ça macOS le met en quarantaine
-          # et refuse de l'exécuter, avec un message qui parle de développeur
-          # non vérifié plutôt que de quarantaine.
+          # The binary is not notarized: without this macOS quarantines it and
+          # refuses to run it, with a message about an unverified developer
+          # rather than about quarantine.
           run "/usr/bin/xattr",
               args:  ["-dr", "com.apple.quarantine", "notion-seed"],
               chdir: "."
@@ -65,12 +65,12 @@ nfpms:
     package_name: notion-seed
     formats: [deb, rpm, apk]
     maintainer: Tykok <treportelie12@gmail.com>
-    description: Déclare la structure d'un workspace Notion et refuse les changements destructifs
+    description: Declares the structure of a Notion workspace and refuses destructive changes
     homepage: https://github.com/tykok/notion-seed
     license: GPL-3.0-or-later
-    # /usr/bin et non /usr/local/bin : un paquet géré par le gestionnaire de
-    # paquets appartient à la hiérarchie de la distribution, /usr/local étant
-    # réservé à ce que l'administrateur installe hors paquet.
+    # /usr/bin and not /usr/local/bin: a package managed by the package
+    # manager belongs to the distribution's hierarchy, /usr/local being
+    # reserved for what the administrator installs outside packages.
     bindir: /usr/bin
 
 checksum:
@@ -87,5 +87,5 @@ changelog:
 
 release:
   footer: |
-    `notion-seed` délègue les appels à `ntn`, qui n'est pas embarqué :
+    `notion-seed` delegates the calls to `ntn`, which is not bundled:
     `npm i -g ntn@0.22.11 && ntn login`.
