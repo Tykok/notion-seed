@@ -83,9 +83,11 @@ func reviewedPlanRefusal(path string, drifts []planfile.Drift) error {
 		onlyCounts = onlyCounts && d.CountFailed
 	}
 	if onlyCounts {
+		// Not `notion-seed apply <path>`: that would drop --dir and every other
+		// flag the first run used. "the same command" says to rerun it as typed.
 		fmt.Fprintf(&b, "  → a count failed (its cause is printed above): rerun "+
-			"`notion-seed apply %s`; if it keeps failing, rerun `notion-seed plan --out` "+
-			"and have the new plan reviewed", path)
+			"the same command to apply %s; if it keeps failing, rerun "+
+			"`notion-seed plan --out` and have the new plan reviewed", path)
 	} else {
 		b.WriteString("  → rerun `notion-seed plan --out` and have the new plan reviewed")
 	}
