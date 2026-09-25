@@ -26,16 +26,17 @@ type Change struct {
 	// besoin pour indexer le state ; Resource est fait pour l'affichage.
 	Key string
 	// Kind dit s'il s'agit d'une création, d'une modification ou d'une
-	// destruction. apply n'écrit aujourd'hui que les créations, et doit pouvoir
-	// le décider sans relire le texte des lignes.
+	// destruction. apply choisit son écriture sur lui, sans relire le texte des
+	// lignes.
 	Kind resources.ChangeKind
-	// Target est la cible résolue, non nulle sur une création et sur un
-	// update. Voir Result.Target : l'autorisation d'écrire est portée par
-	// Withheld, pas par Target seul — Target == nil ne suffit plus à la
-	// déduire.
+	// Target est ce qu'on écrit : non nulle sur une création ou une mise à jour
+	// autorisées, toujours nulle sur une destruction, qui n'a pas d'état après.
+	// L'autorisation d'écrire est Withheld == "", jamais Target : voir
+	// Result.Target.
 	Target *state.Database
 	// Withheld dit pourquoi cette ressource ne sera pas écrite, ou "" si elle
-	// peut l'être. Voir diff.Result.Withheld.
+	// peut l'être — Withheld == "" est l'autorisation. Voir
+	// diff.Result.Withheld.
 	Withheld string
 
 	// Acknowledged nomme les clés de lifecycle qui couvrent cette ressource.

@@ -1409,3 +1409,20 @@ func TestUpdateShowsTheAttributesOfANewOption(t *testing.T) {
 		t.Errorf("option écrite = %+v, want color orange", sent)
 	}
 }
+
+// L'autorisation d'écrire est Withheld == "" pour les trois natures de
+// changement. Une destruction l'obtient SANS cible : il n'y a pas d'état après.
+func TestCompareDatabaseAuthorizesADestroyWithoutATarget(t *testing.T) {
+	applied := state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Tasks"}
+	actual := applied
+	res := CompareDatabase("tasks", nil, &applied, &actual)
+	if res.Changeset.Kind != resources.KindDestroy {
+		t.Fatalf("Kind = %v, want KindDestroy", res.Changeset.Kind)
+	}
+	if res.Withheld != "" {
+		t.Errorf("Withheld = %q, want vide : une destruction est autorisée", res.Withheld)
+	}
+	if res.Target != nil {
+		t.Errorf("Target = %+v, want nil : une destruction n'a pas d'état après", res.Target)
+	}
+}
