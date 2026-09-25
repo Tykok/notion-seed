@@ -557,6 +557,74 @@ func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
 	}
 }
 
+// Une ligne de migration retient sa ressource : rien n'est écrit. Son compte
+// est le coût du remède — les lignes à déplacer à la main —, jamais une perte.
+// La rendre comme un retrait annoncerait une réassignation qui n'aura pas lieu.
+func TestRenderStatesAMigrationCountAsTheRemedyCost(t *testing.T) {
+	for _, tc := range []struct {
+		name, propType string
+	}{
+		{"renommage de status", "status"},
+		{"couleur de select", "select"},
+		{"couleur de multi_select", "multi_select"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Plan{ToChange: 1, Changes: []Change{{
+				Resource: "database.tasks", Kind: resources.KindUpdate,
+				Class: ClassMigration,
+				Details: []resources.Detail{{
+					Op: "~", Target: `option "Fait" → "Terminé" (propriété "Statut")`,
+					Class: ClassMigration, Count: 2,
+					Measure: &resources.Measurement{
+						Property: "Statut", PropertyType: tc.propType, Option: "Fait",
+					},
+				}},
+			}}}
+			var b bytes.Buffer
+			if err := Render(&b, p); err != nil {
+				t.Fatal(err)
+			}
+			got := b.String()
+			want := `→ 2 lignes portent "Fait" : à migrer à la main avant d'appliquer.`
+			if !strings.Contains(got, want) {
+				t.Errorf("sortie:\n%s\nil manque %q", got, want)
+			}
+			for _, lie := range []string{"réassignées", "passeront à vide", "perdront", "Impact :"} {
+				if strings.Contains(got, lie) {
+					t.Errorf("sortie:\n%s\n%q annonce une perte qu'une ressource retenue ne cause pas",
+						got, lie)
+				}
+			}
+		})
+	}
+}
+
+// L'agrégat ne compte que ce qui sera écrit : une migration retenue n'y entre
+// pas, même à côté d'un retrait réel qu'elle ne doit pas gonfler.
+func TestImpactExcludesMigrationLines(t *testing.T) {
+	p := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details: []resources.Detail{
+			{Op: "~", Class: ClassMigration, Count: 2,
+				Measure: &resources.Measurement{PropertyType: "status", Option: "Fait"}},
+			{Op: "~", Class: ClassMigration, Count: 5,
+				Measure: &resources.Measurement{PropertyType: "select", Option: "Haute"}},
+			{Op: "-", Class: ClassSilentRewrite, Count: 3,
+				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
+		},
+	}}}
+	if got, want := Impact(p), "Impact : 3 valeurs réassignées sans trace."; got != want {
+		t.Errorf("Impact = %q, want %q", got, want)
+	}
+	only := &Plan{Changes: []Change{{
+		Resource: "database.tasks",
+		Details:  p.Changes[0].Details[:2],
+	}}}
+	if got := Impact(only); got != "" {
+		t.Errorf("Impact = %q, want vide : une migration retenue ne perd rien", got)
+	}
+}
+
 func TestImpactIsEmptyWhenNothingIsAtStake(t *testing.T) {
 	p := &Plan{Changes: []Change{{
 		Resource: "database.tasks",
@@ -785,9 +853,8 @@ func TestImpactNeverBoundsACappedTypeChangeFromAbove(t *testing.T) {
 	}
 }
 
-// apply n'écrit que les créations : lui faire afficher la ligne d'agrégat du
-// plan complet lui ferait annoncer des destructions et des modifications qu'il
-// ne fera pas — démenties quatre lignes plus bas par sa propre section « Non
+// apply n'écrit pas les destructions : lui faire afficher la ligne d'agrégat du
+// plan complet lui ferait annoncer des destructions qu'il ne fera pas — démenties quatre lignes plus bas par sa propre section « Non
 // appliqué ». La ligne la plus lue du produit ne peut pas mentir sur la
 // commande qui écrit.
 func TestRenderWithoutImpactOmitsTheAggregateLine(t *testing.T) {

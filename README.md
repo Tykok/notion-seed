@@ -97,7 +97,7 @@ nommée, avec le nombre de lignes à migrer :
 ```
   ~ database.tasks  [migration requise]
       ~ option "Fait" → "Terminé" (propriété "Statut") — l'API répond 200 sans rien changer : créer, migrer les lignes, puis retirer  [migration requise]
-          → 2 lignes seront réassignées à une autre option, sans trace.
+          → 2 lignes portent "Fait" : à migrer à la main avant d'appliquer.
 
 Retenu — migration requise
 
