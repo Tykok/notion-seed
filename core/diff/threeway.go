@@ -406,6 +406,7 @@ func typeChangeLines(name string, want, have state.Property) []resources.Detail 
 	}
 	d := resources.NewDetail("~", fmt.Sprintf("property %q", name), tc.Class)
 	d.Property = name
+	d.FromType = have.Type
 	d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
 	if tc.Note != "" {
 		d.Note += ": " + tc.Note

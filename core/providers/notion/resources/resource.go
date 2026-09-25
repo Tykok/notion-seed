@@ -99,6 +99,12 @@ type Detail struct {
 	// Field are exclusive: a detail concerns one or the other, never both.
 	Field string
 
+	// FromType is the property's type before a type change, "" on every other
+	// detail. It is set even when the pair is safe and Measure stays nil: Note
+	// is the only other place that carries it, and Note is free text, not
+	// compared by a plan file (core/planfile).
+	FromType string
+
 	// Measure is the measurement request, nil when the detail costs nothing.
 	Measure *Measurement
 	// Count is the number of rows affected. -1 as long as nothing has been
