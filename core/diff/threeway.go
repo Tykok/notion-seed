@@ -179,8 +179,8 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 		}
 		if want.Type != have.Type {
 			// Mesuré le 2026-09-24 : un changement de type recrée les options et
-			// ignore les ids transmis. planLines s'arrête de la même façon sur ce
-			// cas, sans émettre de ligne d'option : les deux restent alignés.
+			// ignore les ids transmis. planLines annonce ces mêmes options, toutes
+			// en `+`, depuis le même newProperty : les deux restent alignés.
 			p := newProperty(want)
 			p.ID = have.ID
 			target.Properties[name] = p
@@ -263,15 +263,26 @@ func createLines(target *state.Database) []resources.Detail {
 			fmt.Sprintf("property %q (%s)", name, p.Type), change.ClassSafe)
 		d.Property = name
 		out = append(out, d)
-		// L'ordre des options est celui du YAML : il est visible dans Notion,
-		// le trier le rendrait faux.
-		for _, o := range p.Options {
-			od := resources.NewDetail("+",
-				fmt.Sprintf("option %q (propriété %q)", o.Name, name), change.ClassSafe)
-			od.Property = name
-			od.Note = optionAttrNote(o)
-			out = append(out, od)
-		}
+		out = append(out, newOptionLines(name, p.Options)...)
+	}
+	return out
+}
+
+// newOptionLines annonce les options d'une propriété écrite sans aucune
+// identité distante : à la création, sous une propriété neuve, ou sous un
+// changement de type. Toutes partent, avec leur couleur et leur groupe : les
+// taire serait écrire ce que le plan n'a jamais montré.
+//
+// L'ordre des options est celui du YAML : il est visible dans Notion, le trier
+// le rendrait faux.
+func newOptionLines(propName string, opts []state.Option) []resources.Detail {
+	var out []resources.Detail
+	for _, o := range opts {
+		d := resources.NewDetail("+",
+			fmt.Sprintf("option %q (propriété %q)", o.Name, propName), change.ClassSafe)
+		d.Property = propName
+		d.Note = optionAttrNote(o)
+		out = append(out, d)
 	}
 	return out
 }
@@ -332,6 +343,9 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			d.Property = name
 			d.Note = note
 			out = append(out, d)
+			// Mêmes options que celles que la cible écrit : newProperty est la
+			// seule source des deux.
+			out = append(out, newOptionLines(name, newProperty(want).Options)...)
 			continue
 		}
 
@@ -355,6 +369,9 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 				}
 			}
 			out = append(out, d)
+			// Un changement de type recrée les options : toutes celles du YAML
+			// partent neuves, sans id, exactement comme sous une propriété neuve.
+			out = append(out, newOptionLines(name, newProperty(want).Options)...)
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {

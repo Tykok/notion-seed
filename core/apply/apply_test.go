@@ -632,6 +632,51 @@ func TestWriteSetCoversEveryDetail(t *testing.T) {
 	}
 }
 
+// Les lignes d'option sous une propriété neuve ou changée de type disent ce qui
+// part ; elles n'ajoutent AUCUNE écriture : le jeu d'écriture est celui des
+// seules lignes de propriété.
+func TestOptionLinesOfANewPropertyAddNoWrite(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Name": {ID: "title", Type: "title"},
+			"Prio": {ID: "p1", Type: "status", Options: []state.Option{
+				{ID: "o-haute", Name: "Haute"},
+			}},
+		},
+	}
+	applied := actual
+	desired := state.Database{Properties: map[string]state.Property{
+		"Name": {Type: "title"},
+		"Prio": {Type: "select", Options: []state.Option{{Name: "Haute", Color: "red"}}},
+		"Etat": {Type: "select", Options: []state.Option{
+			{Name: "Ouvert", Color: "green"}, {Name: "Clos"},
+		}},
+	}}
+	res := diff.CompareDatabase("tasks", &desired, &applied, &actual)
+
+	var withoutOptions []resources.Detail
+	optionLines := 0
+	for _, d := range res.Changeset.Details {
+		if strings.HasPrefix(d.Target, "option ") {
+			optionLines++
+			continue
+		}
+		withoutOptions = append(withoutOptions, d)
+	}
+	if optionLines != 3 {
+		t.Fatalf("%d lignes d'option, want 3 :\n%v", optionLines, res.Changeset.Details)
+	}
+	_, got := writeSet(res.Changeset.Details)
+	_, want := writeSet(withoutOptions)
+	if !slices.Equal(got, want) {
+		t.Errorf("jeu d'écriture = %v, want %v : les lignes d'option n'écrivent rien de plus", got, want)
+	}
+	if !slices.Equal(got, []string{"Etat", "Prio"}) {
+		t.Errorf("jeu d'écriture = %v, want [Etat Prio]", got)
+	}
+}
+
 func TestRunSkipsAWithheldResourceWithoutCallingTheAPI(t *testing.T) {
 	dir := t.TempDir()
 	up := &fakeUpdater{}
