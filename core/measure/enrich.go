@@ -41,6 +41,7 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				Property:     d.Measure.Property,
 				PropertyType: d.Measure.PropertyType,
 				Option:       d.Measure.Option,
+				AllRows:      d.Measure.AllRows,
 			})
 			if err != nil {
 				// La ligne reste inconnue, ce qu'elle était déjà. On ne dégrade
@@ -68,6 +69,12 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 			d.Capped = res.Capped
 
 			switch {
+			case d.Measure.AllRows:
+				// Une destruction reste destructive, à 0 ligne comme à 10 000 : la
+				// database part à la corbeille dans les deux cas. Le compte dit ce
+				// qu'elle emporte, pas si elle part — et le laisser tomber dans le
+				// cas « 0 déclasse » ci-dessous annoncerait « sûr » une mise à la
+				// corbeille.
 			case d.Class == change.ClassMigration:
 				// Un renommage ou une couleur d'option porte déjà ClassMigration
 				// AVANT toute mesure : le changement est inexprimable côté API,

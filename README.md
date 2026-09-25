@@ -58,6 +58,10 @@ Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
 Un **retrait d'option** est donc toujours chiffré : les options n'existent que
 sur ces trois types.
 
+Une **destruction** l'est aussi, sans filtre : le compte porte sur toutes les
+lignes du data source que le state ancre, celles qui partent à la corbeille
+avec la database. Elle reste `destructif` quel que soit ce compte, 0 compris.
+
 Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
 d'eux. Des trois couples dangereux mesurés plus haut, un seul l'est :
 
@@ -292,9 +296,10 @@ Plan: 0 to add, 0 to change, 1 to destroy
 
   - database.tasks  [destructif]
       - database.tasks — présente dans le state, absente de la configuration  [destructif]
+          → 12 ligne(s) partent à la corbeille avec elle.
       → déclarée dans lifecycle.prevent_destroy.
 
-Impact : 1 database(s) à la corbeille.
+Impact : 1 database(s) à la corbeille avec 12 ligne(s).
 ```
 
 Elles disent « je sais ce que cette ressource porte », et rien de plus. `apply`
@@ -410,6 +415,8 @@ plus et que Notion porte encore est mise à la corbeille par un seul appel,
 `PATCH /v1/databases/{id}` avec `{"in_trash":true}`, puis son entrée est retirée
 du state. L'entrée n'est retirée que si la réponse de l'API confirme la
 corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
+`plan` et `apply` disent avant combien de lignes partent avec elle ; si le
+comptage échoue, la ligne dit que ce nombre n'est pas mesuré, jamais 0.
 `lifecycle.prevent_destroy` n'y change rien — voir
 [lifecycle](#lifecycle--des-accusés-de-lecture). Une database mise à la corbeille
 se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
@@ -452,7 +459,7 @@ pas ce qu'elle coûterait. Sans ressource retenue, elle est identique à celle d
 `plan`.
 
 ```
-Impact : 1 database(s) à la corbeille.
+Impact : 1 database(s) à la corbeille avec 12 ligne(s).
 
 1 database(s) vont être mises à la corbeille dans Notion.
 Confirmez en tapant « apply » :
@@ -605,7 +612,9 @@ Cinq choses à savoir :
   donc un `--fail-on=destructive,silent-rewrite` ne l'attrape plus et sort en
   `0`. Ajoutez `unknown` à votre liste si vous voulez que le garde-fou tienne
   même quand l'API refuse de compter — sans quoi une CI se croit protégée
-  précisément le jour où elle ne l'est pas.
+  précisément le jour où elle ne l'est pas. Seule exception : une destruction
+  dont le comptage de lignes échoue reste `destructif`, puisque la database
+  part à la corbeille quel qu'en soit le compte.
 
 `--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
 Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne

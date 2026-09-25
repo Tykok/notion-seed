@@ -1426,3 +1426,18 @@ func TestCompareDatabaseAuthorizesADestroyWithoutATarget(t *testing.T) {
 		t.Errorf("Target = %+v, want nil : une destruction n'a pas d'état après", res.Target)
 	}
 }
+
+// Une destruction demande le compte de TOUTES les lignes : c'est ce qui part à
+// la corbeille avec la database. Non mesurée, elle reste à -1, jamais à 0.
+func TestCompareDatabaseAsksToCountTheRowsOfADestroy(t *testing.T) {
+	applied := state.Database{ID: "db-1", DataSourceID: "ds-1", Name: "Tasks"}
+	actual := applied
+	res := CompareDatabase("tasks", nil, &applied, &actual)
+	if len(res.Changeset.Details) != 1 {
+		t.Fatalf("Details = %+v, want une ligne", res.Changeset.Details)
+	}
+	d := res.Changeset.Details[0]
+	if d.Measure == nil || !d.Measure.AllRows || d.Count != -1 || d.Class != ClassDestructive {
+		t.Errorf("Detail = %+v, want une demande AllRows, Count -1, destructif", d)
+	}
+}

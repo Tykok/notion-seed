@@ -85,8 +85,12 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 		// config, et c'est voulu — garder un id « géré mais non déclaré » le
 		// rendrait invisible.
 		res.Changeset.Kind = resources.KindDestroy
+		//
+		// La classe reste destructive quel que soit le compte : il dit ce qui
+		// part à la corbeille avec la database, pas si elle y part.
 		d := resources.NewDetail("-", "database."+key, change.ClassDestructive)
 		d.Note = "présente dans le state, absente de la configuration"
+		d.Measure = &resources.Measurement{AllRows: true}
 		res.Changeset.Details = []resources.Detail{d}
 		return res
 
