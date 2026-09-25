@@ -90,10 +90,9 @@ Two changes are not expressible, measured on 2026-09-24:
 | Change an option's color | Returns `400`, whether the option is designated by its id or by its name, and the whole PATCH of the property fails |
 
 `notion-seed` therefore does not write them, and withholds the whole database
-as long as they are declared. The other databases of the plan are applied. The
-procedure is named, with the number of rows to migrate:
-
-The procedure is detailed in [What it withholds](/commands#what-it-withholds).
+as long as they are declared. The other databases of the plan are applied. See
+[What it withholds](/commands#what-it-withholds) for the migration procedure
+and the number of rows it names.
 
 ## Current status
 
