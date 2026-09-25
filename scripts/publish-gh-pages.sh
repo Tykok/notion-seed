@@ -6,9 +6,21 @@
 # documentation site at the root, rebuilt by docs.yml. Each workflow replaces
 # its own part only.
 #
+# The two workflows no longer share a concurrency group (see apt.yml and
+# docs.yml), so their pushes can now race each other. A rejected push — the
+# other section landed first — is not a failure: this script re-fetches,
+# reapplies its section on top, and pushes again, up to a few attempts. It
+# never force-pushes: a rejection it cannot outlive after retrying is reported
+# as an error, and gh-pages is left exactly as the other side wrote it.
+#
 # Usage: publish-gh-pages.sh apt|site <source-dir> <commit-message>
 # Env:   PAGES_REMOTE — URL of the repository to push to.
 set -euo pipefail
+
+# Attempts at the fetch -> checkout -> apply -> commit -> push cycle before
+# giving up. One extra retry covers the case where both sections publish at
+# almost the same time; a third guards against a third, unlikely, racer.
+max_attempts=3
 
 if [ "$#" -ne 3 ]; then
   echo "usage: $0 apt|site <source-dir> <commit-message>" >&2
@@ -32,38 +44,60 @@ if [ "$section" = site ] && [ -e "$source/apt" ]; then
   exit 1
 fi
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-cd "$work"
+workdirs=()
+cleanup() {
+  local d
+  for d in "${workdirs[@]}"; do
+    rm -rf "$d"
+  done
+}
+trap cleanup EXIT
 
-git init -q -b gh-pages
-git remote add origin "$PAGES_REMOTE"
-if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-  # A real checkout, not `reset --soft` into an empty directory: the working
-  # tree must hold the other section, otherwise `git add -A` records it as
-  # deleted.
-  git fetch -q --depth 1 origin gh-pages
-  git checkout -q -B gh-pages FETCH_HEAD
-fi
+attempt=1
+while :; do
+  work=$(mktemp -d)
+  workdirs+=("$work")
+  cd "$work"
 
-if [ "$section" = apt ]; then
-  rm -rf apt
-  cp -R "$source" apt
-else
-  find . -mindepth 1 -maxdepth 1 ! -name .git ! -name apt -exec rm -rf {} +
-  cp -R "$source"/. .
-fi
+  git init -q -b gh-pages
+  git remote add origin "$PAGES_REMOTE"
+  if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+    # A real checkout, not `reset --soft` into an empty directory: the working
+    # tree must hold the other section, otherwise `git add -A` records it as
+    # deleted.
+    git fetch -q --depth 1 origin gh-pages
+    git checkout -q -B gh-pages FETCH_HEAD
+  fi
 
-# Without this, GitHub Pages runs the content through Jekyll, which ignores
-# directories starting with an underscore and rewrites some files.
-touch .nojekyll
+  if [ "$section" = apt ]; then
+    rm -rf apt
+    cp -R "$source" apt
+  else
+    find . -mindepth 1 -maxdepth 1 ! -name .git ! -name apt -exec rm -rf {} +
+    cp -R "$source"/. .
+  fi
 
-git add -A
-if git diff --cached --quiet; then
-  echo "nothing to publish"
-  exit 0
-fi
-git -c user.name="github-actions[bot]" \
-    -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-    commit -q -m "$message"
-git push -q origin gh-pages
+  # Without this, GitHub Pages runs the content through Jekyll, which ignores
+  # directories starting with an underscore and rewrites some files.
+  touch .nojekyll
+
+  git add -A
+  if git diff --cached --quiet; then
+    echo "nothing to publish"
+    exit 0
+  fi
+  git -c user.name="github-actions[bot]" \
+      -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+      commit -q -m "$message"
+
+  if git push -q origin gh-pages; then
+    exit 0
+  fi
+
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "push to gh-pages rejected after $attempt attempt(s): giving up (never force-pushing)" >&2
+    exit 1
+  fi
+  echo "push to gh-pages rejected (attempt $attempt/$max_attempts) — another publication likely landed first: refetching and retrying" >&2
+  attempt=$((attempt + 1))
+done
