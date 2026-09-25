@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// scriptedTransport rejoue une suite de réponses prédéfinies et compte les
-// appels reçus.
+// scriptedTransport replays a sequence of predefined responses and counts the
+// calls received.
 type scriptedTransport struct {
 	calls  int
 	script []struct {
@@ -66,7 +66,7 @@ func TestRetryingRetriesOn5xxThenSucceeds(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if inner.calls != 2 {
-		t.Errorf("appels = %d, want 2", inner.calls)
+		t.Errorf("calls = %d, want 2", inner.calls)
 	}
 	if resp.Status != 200 {
 		t.Errorf("Status = %d, want 200", resp.Status)
@@ -86,13 +86,13 @@ func TestRetryingDoesNotRetryOn4xx(t *testing.T) {
 		t.Fatalf("error = %v, want *APIError 404", err)
 	}
 	if inner.calls != 1 {
-		t.Errorf("appels = %d, want 1 — un 4xx ne doit jamais être rejoué", inner.calls)
+		t.Errorf("calls = %d, want 1 — a 4xx must never be replayed", inner.calls)
 	}
 }
 
-// Retry-After garde la priorité sur le backoff calculé, et la borne est
-// EXACTE : une borne inférieure seule laisserait passer un code qui dort plus
-// que demandé.
+// Retry-After keeps priority over the computed backoff, and the bound is
+// EXACT: a lower bound alone would let through code that sleeps longer than
+// requested.
 func TestRetryingHonoursRetryAfterOverBackoff(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -107,19 +107,19 @@ func TestRetryingHonoursRetryAfterOverBackoff(t *testing.T) {
 	if _, err := r.Execute(context.Background(), APIRequest{Path: "/v1/x"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	// Le backoff de base est de 500 ms ; Retry-After: 7 doit gagner, à
-	// l'identique puisque 7s reste sous le plafond.
+	// The base backoff is 500 ms; Retry-After: 7 must win, unchanged since 7s
+	// stays under the cap.
 	if got := clock.totalSlept(); got != 7*time.Second {
-		t.Errorf("sommeil = %v, want exactement 7s (Retry-After prioritaire sur le backoff)", got)
+		t.Errorf("sleep = %v, want exactly 7s (Retry-After takes priority over the backoff)", got)
 	}
 }
 
-// Ce test épinglait délibérément l'ABSENCE de plafond sur Retry-After. Il
-// épingle désormais les deux moitiés de la règle : le header garde la priorité
-// sur le backoff calculé, mais reste borné par un plafond absolu. Sans ce
-// plafond, `retry-after: 60` — parfaitement plausible d'un vrai limiteur —
-// bloquerait un `plan` en lecture seule trois minutes en CI, et une valeur
-// hostile bloquerait indéfiniment.
+// This test deliberately pinned the ABSENCE of a cap on Retry-After. It now
+// pins both halves of the rule: the header keeps priority over the computed
+// backoff, but stays bounded by an absolute cap. Without this cap,
+// `retry-after: 60` — perfectly plausible from a real limiter — would block a
+// read-only `plan` for three minutes in CI, and a hostile value would block
+// forever.
 func TestRetryingCapsRetryAfterButKeepsItsPriority(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -135,18 +135,18 @@ func TestRetryingCapsRetryAfterButKeepsItsPriority(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := clock.totalSlept(); got != MaxRetryAfterWait {
-		t.Errorf("sommeil = %v, want %v — Retry-After doit être plafonné", got, MaxRetryAfterWait)
+		t.Errorf("sleep = %v, want %v — Retry-After must be capped", got, MaxRetryAfterWait)
 	}
-	// La priorité, elle, reste : le backoff calculé de la première tentative
-	// vaut 500 ms, et c'est bien le plafond de Retry-After qui a été appliqué.
+	// The priority, however, remains: the computed backoff of the first attempt
+	// is 500 ms, and it is indeed the Retry-After cap that was applied.
 	if MaxRetryAfterWait <= DefaultRetryPolicy().Base {
-		t.Fatal("le montage du test est faux : le plafond doit être au-dessus du backoff de base")
+		t.Fatal("the test setup is wrong: the cap must be above the base backoff")
 	}
 }
 
-// Les valeurs qu'aucun serveur sain n'émet ne doivent pas devenir des attentes.
-// "-5" se parsait en -5s (donc en rejeu immédiat en rafale) et "5m" en 5
-// millisecondes, tous deux avec ok=true.
+// Values no sane server emits must not become waits. "-5" parsed into -5s
+// (hence an immediate burst of replays) and "5m" into 5 milliseconds, both
+// with ok=true.
 func TestRetryAfterRejectsNonPositiveAndUnitSuffixes(t *testing.T) {
 	tests := []struct {
 		header string
@@ -167,13 +167,13 @@ func TestRetryAfterRejectsNonPositiveAndUnitSuffixes(t *testing.T) {
 		resp := APIResponse{Headers: map[string][]string{"retry-after": {tt.header}}}
 		got, ok := resp.RetryAfter()
 		if ok != tt.wantOK || got != tt.want {
-			t.Errorf("RetryAfter(%q) = %v, %v ; want %v, %v", tt.header, got, ok, tt.want, tt.wantOK)
+			t.Errorf("RetryAfter(%q) = %v, %v; want %v, %v", tt.header, got, ok, tt.want, tt.wantOK)
 		}
 	}
 }
 
-// Une attente muette est indistinguable d'un blocage : mesuré sur le vrai
-// binaire, un `retry-after: 3` produisait 9,35 s de silence total.
+// A silent wait is indistinguishable from a hang: measured on the real
+// binary, a `retry-after: 3` produced 9.35 s of total silence.
 func TestRetryingAnnouncesEveryWait(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -191,13 +191,13 @@ func TestRetryingAnnouncesEveryWait(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if len(lines) != 2 {
-		t.Fatalf("lignes = %v, want une ligne par attente (2)", lines)
+		t.Fatalf("lines = %v, want one line per wait (2)", lines)
 	}
 	if !strings.Contains(lines[0], "7s") || !strings.Contains(lines[0], "Retry-After") {
-		t.Errorf("première ligne = %q, elle doit dire combien de temps et pourquoi", lines[0])
+		t.Errorf("first line = %q, it must say how long and why", lines[0])
 	}
 	if !strings.Contains(lines[1], "backoff") {
-		t.Errorf("deuxième ligne = %q, elle doit nommer la source de l'attente", lines[1])
+		t.Errorf("second line = %q, it must name the source of the wait", lines[1])
 	}
 }
 
@@ -214,7 +214,7 @@ func TestRetryingNeverRetriesOutcomeUnknown(t *testing.T) {
 		t.Fatalf("error = %v, want *OutcomeUnknownError", err)
 	}
 	if inner.calls != 1 {
-		t.Errorf("appels = %d, want 1 — rejouer une issue inconnue risque de dupliquer la mutation", inner.calls)
+		t.Errorf("calls = %d, want 1 — replaying an unknown outcome risks duplicating the mutation", inner.calls)
 	}
 }
 
@@ -229,13 +229,13 @@ func TestRetryingNeverRetriesUsageError(t *testing.T) {
 		t.Fatalf("error = %v, want *UsageError", err)
 	}
 	if inner.calls != 1 {
-		t.Errorf("appels = %d, want 1", inner.calls)
+		t.Errorf("calls = %d, want 1", inner.calls)
 	}
 }
 
-// Un 5xx sur une requête MUTANTE ne se rejoue pas : une passerelle peut rendre
-// 502 alors que Notion a déjà créé la ressource, et le rejeu la dupliquerait.
-// C'est la même ambiguïté qu'un timeout, donc la même issue : inconnue.
+// A 5xx on a MUTATING request is not replayed: a gateway can return 502 while
+// Notion has already created the resource, and the replay would duplicate it.
+// It is the same ambiguity as a timeout, hence the same outcome: unknown.
 func TestRetryingDoesNotReplayServerErrorOnMutatingRequest(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -246,22 +246,22 @@ func TestRetryingDoesNotReplayServerErrorOnMutatingRequest(t *testing.T) {
 
 	_, err := r.Execute(context.Background(), APIRequest{Method: "POST", Path: "/v1/databases"})
 	if inner.calls != 1 {
-		t.Errorf("appels = %d, want 1 : une mutation ne se rejoue pas sur 5xx", inner.calls)
+		t.Errorf("calls = %d, want 1: a mutation is not replayed on 5xx", inner.calls)
 	}
 	var unknown *OutcomeUnknownError
 	if !errors.As(err, &unknown) {
-		t.Fatalf("error = %v (%T), want un OutcomeUnknownError", err, err)
+		t.Fatalf("error = %v (%T), want an OutcomeUnknownError", err, err)
 	}
-	// L'erreur d'origine doit rester lisible : c'est elle qui dit ce qui s'est
-	// passé côté API.
+	// The original error must stay readable: it is what says what happened on
+	// the API side.
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != 502 {
-		t.Errorf("error = %v, elle doit continuer d'envelopper le 502", err)
+		t.Errorf("error = %v, it must keep wrapping the 502", err)
 	}
 }
 
-// Un 429 se rejoue même sur une mutation : l'API dit explicitement qu'elle n'a
-// rien traité, il n'y a aucune ambiguïté à lever.
+// A 429 is replayed even on a mutation: the API explicitly says it processed
+// nothing, there is no ambiguity to clear.
 func TestRetryingStillReplaysRateLimitOnMutatingRequest(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -271,14 +271,14 @@ func TestRetryingStillReplaysRateLimitOnMutatingRequest(t *testing.T) {
 	r := newTestRetrying(inner, clock)
 
 	if _, err := r.Execute(context.Background(), APIRequest{Method: "POST", Path: "/v1/databases"}); err != nil {
-		t.Fatalf("Execute() error = %v, want nil après rejeu", err)
+		t.Fatalf("Execute() error = %v, want nil after replay", err)
 	}
 	if inner.calls != 2 {
-		t.Errorf("appels = %d, want 2", inner.calls)
+		t.Errorf("calls = %d, want 2", inner.calls)
 	}
 }
 
-// Une lecture reste rejouée sur 5xx : la rejouer ne peut rien dupliquer.
+// A read is still replayed on 5xx: replaying it cannot duplicate anything.
 func TestRetryingStillReplaysServerErrorOnRead(t *testing.T) {
 	clock := newFakeClock()
 	inner := scripted(
@@ -288,10 +288,10 @@ func TestRetryingStillReplaysServerErrorOnRead(t *testing.T) {
 	r := newTestRetrying(inner, clock)
 
 	if _, err := r.Execute(context.Background(), APIRequest{Method: "GET", Path: "/v1/databases/db1"}); err != nil {
-		t.Fatalf("Execute() error = %v, want nil après rejeu", err)
+		t.Fatalf("Execute() error = %v, want nil after replay", err)
 	}
 	if inner.calls != 2 {
-		t.Errorf("appels = %d, want 2", inner.calls)
+		t.Errorf("calls = %d, want 2", inner.calls)
 	}
 }
 
@@ -307,9 +307,9 @@ func TestRetryingGivesUpAfterMaxAttempts(t *testing.T) {
 	r := newTestRetrying(inner, clock)
 
 	if _, err := r.Execute(context.Background(), APIRequest{Path: "/v1/x"}); err == nil {
-		t.Fatal("Execute() error = nil, want une erreur après épuisement des tentatives")
+		t.Fatal("Execute() error = nil, want an error after the attempts are exhausted")
 	}
 	if inner.calls != DefaultRetryPolicy().MaxAttempts {
-		t.Errorf("appels = %d, want %d", inner.calls, DefaultRetryPolicy().MaxAttempts)
+		t.Errorf("calls = %d, want %d", inner.calls, DefaultRetryPolicy().MaxAttempts)
 	}
 }

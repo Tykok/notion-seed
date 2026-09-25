@@ -11,22 +11,22 @@ import (
 	"strings"
 )
 
-// statusLine matche la ligne de statut du stderr verbeux de ntn : "< 200 OK".
+// statusLine matches the status line of ntn's verbose stderr: "< 200 OK".
 var statusLine = regexp.MustCompile(`^< (\d{3}) `)
 
-// apiErrorLine matche le message d'erreur de ntn :
+// apiErrorLine matches ntn's error message:
 // error: Public API request failed (404 Not Found object_not_found): message
 var apiErrorLine = regexp.MustCompile(
 	`^error: Public API request failed \((\d{3}) [^)]*? ([a-z_]+)\): (.*)$`)
 
-// ParseStatusAndHeaders extrait le statut HTTP et les headers de réponse du
-// stderr verbeux. Les noms de headers sont normalisés en minuscules. ok vaut
-// false si aucune ligne de statut n'est présente (ntn n'a pas atteint l'API).
+// ParseStatusAndHeaders extracts the HTTP status and the response headers
+// from the verbose stderr. Header names are normalized to lowercase. ok is
+// false if no status line is present (ntn did not reach the API).
 //
-// L'erreur du scanner est rendue, jamais avalée : une ligne au-delà du plafond
-// de 1 MiB tronque la trace, donc un header peut manquer sans que rien ne le
-// signale — `retry-after` notamment. Un statut lu avant la troncature n'est pas
-// rendu comme valide : on ne sait pas ce qui a été perdu après lui.
+// The scanner's error is returned, never swallowed: a line beyond the 1 MiB
+// cap truncates the trace, so a header can be missing without anything
+// reporting it — `retry-after` in particular. A status read before the
+// truncation is not returned as valid: what was lost after it is unknown.
 func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool, error) {
 	var status int
 	headers := make(map[string][]string)
@@ -53,7 +53,7 @@ func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool, error
 	}
 	if err := sc.Err(); err != nil {
 		return 0, headers, false, fmt.Errorf(
-			"trace -v de ntn illisible (%d octets lus): %w", len(stderr), err)
+			"unreadable ntn -v trace (%d bytes read): %w", len(stderr), err)
 	}
 	if status == 0 {
 		return 0, headers, false, nil
@@ -61,9 +61,9 @@ func ParseStatusAndHeaders(stderr []byte) (int, map[string][]string, bool, error
 	return status, headers, true, nil
 }
 
-// ParseAPIError extrait l'erreur API du stderr. Le message peut s'étendre sur
-// plusieurs lignes (cas des validation_error) : tout ce qui suit la ligne
-// d'erreur et ne commence pas par "> " ou "< " en fait partie.
+// ParseAPIError extracts the API error from stderr. The message can span
+// several lines (the validation_error case): everything that follows the
+// error line and does not start with "> " or "< " is part of it.
 func ParseAPIError(stderr []byte) (*APIError, bool) {
 	lines := strings.Split(string(stderr), "\n")
 	for i, line := range lines {

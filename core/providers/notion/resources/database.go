@@ -14,10 +14,9 @@ import (
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
-// RemoteOption est une option de select/status/multi_select telle qu'elle
-// existe dans Notion. L'ID est la seule ancre d'identité : ré-ajouter une
-// option par son nom après l'avoir détruite en crée une nouvelle, avec un
-// nouvel ID.
+// RemoteOption is a select/status/multi_select option as it exists in Notion.
+// The ID is the only identity anchor: re-adding an option by its name after
+// destroying it creates a new one, with a new ID.
 type RemoteOption struct {
 	ID    string
 	Name  string
@@ -25,7 +24,7 @@ type RemoteOption struct {
 	Group string
 }
 
-// RemoteProperty est une propriété telle qu'elle existe dans Notion.
+// RemoteProperty is a property as it exists in Notion.
 type RemoteProperty struct {
 	ID           string
 	Type         string
@@ -33,36 +32,37 @@ type RemoteProperty struct {
 	Options      []RemoteOption
 }
 
-// RemoteDatabase est l'état distant d'une database et de son data source par
-// défaut. Les deux sont modélisés ensemble au MVP 0, qui ne gère qu'un data
-// source par database, mais les identités restent distinctes.
+// RemoteDatabase is the remote state of a database and its default data
+// source. Both are modeled together in MVP 0, which handles only one data
+// source per database, but the identities stay distinct.
 type RemoteDatabase struct {
 	ID           string
 	DataSourceID string
 	Name         string
 	Description  string
-	// Icon est l'emoji de la database, ou "" pour toute autre forme d'icône.
-	// Le YAML ne déclare qu'un emoji : décoder un fichier ou une URL ici
-	// produirait une différence que le plan afficherait à chaque run sans
-	// jamais pouvoir la résoudre.
+	// Icon is the database's emoji, or "" for any other form of icon. The
+	// YAML only declares an emoji: decoding a file or a URL here would produce
+	// a difference the plan would show on every run without ever being able
+	// to resolve it.
 	//
-	// Mesuré le 2026-09-24 : l'icône n'est PAS partagée entre la database et son
-	// data source. PATCH sur la database met les deux à jour, PATCH sur le data
-	// source ne touche que lui. notion-seed lit et écrit celle de la database.
+	// Measured on 2026-09-24: the icon is NOT shared between the database and
+	// its data source. PATCH on the database updates both, PATCH on the data
+	// source touches only the latter. notion-seed reads and writes the
+	// database's one.
 	Icon       string
 	Properties map[string]RemoteProperty
 	Archived   bool
 	Found      bool
-	// DataSourceCount est le nombre de data sources que la database porte. Le
-	// MVP n'en lit qu'un, DataSourceID, mais une mise à la corbeille les emporte
-	// tous : sans ce nombre, le compte de lignes d'une destruction se lirait
-	// comme complet alors qu'il ne couvre qu'un data source.
+	// DataSourceCount is the number of data sources the database holds. The
+	// MVP reads only one, DataSourceID, but a trashing takes them all: without
+	// this number, a destruction's row count would read as complete while it
+	// covers only one data source.
 	DataSourceCount int
 }
 
 func (d RemoteDatabase) Exists() bool { return d.Found }
 
-// DatabaseResource lit et compare des databases Notion.
+// DatabaseResource reads and compares Notion databases.
 type DatabaseResource struct {
 	tr     transport.Transport
 	decode func(dbBody, dsBody []byte) (RemoteDatabase, error)
@@ -70,8 +70,8 @@ type DatabaseResource struct {
 
 var _ Resource = (*DatabaseResource)(nil)
 
-// NewDatabaseResource construit la ressource. Le décodeur est injecté pour
-// éviter un cycle d'import entre resources et mapper.
+// NewDatabaseResource builds the resource. The decoder is injected to avoid
+// an import cycle between resources and mapper.
 func NewDatabaseResource(
 	tr transport.Transport,
 	decode func(dbBody, dsBody []byte) (RemoteDatabase, error),
@@ -81,12 +81,12 @@ func NewDatabaseResource(
 
 func (r *DatabaseResource) Type() string { return "database" }
 
-// Read lit une database et son data source par défaut. Deux appels sont
-// nécessaires : la database porte l'identité et l'archivage, le data source
-// porte le titre et le schéma.
+// Read reads a database and its default data source. Two calls are needed:
+// the database holds the identity and the archiving, the data source holds
+// the title and the schema.
 //
-// Non appelée par `plan` au MVP 0 (aucune ressource n'est mise en
-// correspondance sans state) ; c'est le seam du refresh MVP 1 et d'`import`.
+// Not called by `plan` in MVP 0 (no resource is matched without a state); it
+// is the seam of the MVP 1 refresh and of `import`.
 func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, error) {
 	dbResp, err := r.tr.Execute(ctx, transport.APIRequest{
 		Method: "GET",
@@ -95,14 +95,14 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	if err != nil {
 		return RemoteDatabase{}, err
 	}
-	// Ce parsing minimal duplique un champ que le décodeur relira. C'est
-	// structurel, pas accidentel : on a besoin de l'id du data source AVANT de
-	// pouvoir faire le second appel, alors que le décodeur a besoin des deux
-	// corps — il ne peut donc pas tourner en premier. Exporter un helper depuis
-	// mapper recréerait le cycle d'import que l'injection brise, et injecter une
-	// seconde fonction pour un seul champ coûterait plus que la duplication.
-	// TestProbeAndDecoderAgreeOnDataSourceID, dans le paquet mapper, garde les
-	// deux formes synchronisées en faisant tourner le vrai décodeur.
+	// This minimal parsing duplicates a field the decoder will read again. It
+	// is structural, not accidental: the data source id is needed BEFORE the
+	// second call can be made, while the decoder needs both bodies — so it
+	// cannot run first. Exporting a helper from mapper would recreate the
+	// import cycle the injection breaks, and injecting a second function for a
+	// single field would cost more than the duplication.
+	// TestProbeAndDecoderAgreeOnDataSourceID, in the mapper package, keeps the
+	// two shapes in sync by running the real decoder.
 	var probe struct {
 		DataSources []struct {
 			ID string `json:"id"`
@@ -110,16 +110,16 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	}
 	if err := json.Unmarshal(dbResp.Body, &probe); err != nil {
 		return RemoteDatabase{}, fmt.Errorf(
-			"réponse de GET /v1/databases/%s illisible: %w\n"+
-				"  → réessayez ; si ça persiste, vérifiez que `ntn` parle bien la version "+
-				"d'API 2025-09-03 (`ntn --version`)", id, err)
+			"unreadable response from GET /v1/databases/%s: %w\n"+
+				"  → retry; if it persists, check that `ntn` speaks API version "+
+				"2025-09-03 (`ntn --version`)", id, err)
 	}
 	if len(probe.DataSources) == 0 {
 		return RemoteDatabase{}, fmt.Errorf(
-			"database %s n'expose aucun data source, ce qui ne devrait pas arriver\n"+
-				"  → vérifiez que l'id désigne bien une database (et non une page) dans "+
-				"l'URL Notion ; si c'est le cas, rapportez le cas : notion-seed ne sait "+
-				"pas lire cette forme de réponse", id)
+			"database %s exposes no data source, which should not happen\n"+
+				"  → check that the id designates a database (and not a page) in "+
+				"the Notion URL; if it does, report it: notion-seed cannot "+
+				"read this response shape", id)
 	}
 
 	dsResp, err := r.tr.Execute(ctx, transport.APIRequest{
@@ -132,13 +132,14 @@ func (r *DatabaseResource) Read(ctx context.Context, id string) (RemoteState, er
 	return r.decode(dbResp.Body, dsResp.Body)
 }
 
-// DatabaseExists sonde l'EXISTENCE d'une database, sans rien lire d'autre.
+// DatabaseExists probes the EXISTENCE of a database, without reading anything
+// else.
 //
-// Contrairement à Read, elle n'atteint PAS le data source : Task 8 s'en sert
-// pour diagnostiquer un ancêtre archivé après l'échec du PATCH du data source
-// avec un 404. Sous un ancêtre à la corbeille, GET database répond 200 alors
-// que le data source, lui, est inatteignable — un Read complet échouerait ici
-// et cacherait le diagnostic derrière l'échec de la seconde requête.
+// Unlike Read, it does NOT reach the data source: Task 8 uses it to diagnose
+// an archived ancestor after the data source PATCH failed with a 404. Under an
+// ancestor in the trash, GET database answers 200 while the data source is
+// unreachable — a full Read would fail here and hide the diagnosis behind the
+// failure of the second request.
 func (r *DatabaseResource) DatabaseExists(ctx context.Context, id string) (bool, error) {
 	_, err := r.tr.Execute(ctx, transport.APIRequest{
 		Method: "GET",
@@ -154,14 +155,14 @@ func (r *DatabaseResource) DatabaseExists(ctx context.Context, id string) (bool,
 	return false, err
 }
 
-// CreatedDatabase porte le résultat d'une création.
+// CreatedDatabase holds the result of a creation.
 //
-// ID et DataSourceID sont renseignés dès que le POST a répondu, MÊME si la
-// relecture échoue ensuite : une identité perdue coûte une database recréée en
-// double au prochain apply, alors qu'un instantané incomplet ne coûte qu'une
-// dérive non détectable sur les options. ReadErr porte l'échec de relecture,
-// qui n'est pas un échec de création — les confondre ferait croire que rien
-// n'a été écrit.
+// ID and DataSourceID are filled in as soon as the POST has answered, EVEN if
+// the read-back fails afterwards: a lost identity costs a database re-created
+// as a duplicate on the next apply, while an incomplete snapshot only costs
+// an undetectable drift on the options. ReadErr holds the read-back failure,
+// which is not a creation failure — confusing the two would suggest nothing
+// was written.
 type CreatedDatabase struct {
 	ID           string
 	DataSourceID string
@@ -169,16 +170,16 @@ type CreatedDatabase struct {
 	ReadErr      error
 }
 
-// Create crée une database, puis relit le résultat.
+// Create creates a database, then reads back the result.
 //
-// Le corps arrive déjà sérialisé : `resources` ne peut pas importer
-// `core/state`, qui l'importe déjà, donc la cible résolue est traduite en
-// payload par `mapper`, en amont.
+// The body arrives already serialized: `resources` cannot import
+// `core/state`, which already imports it, so the resolved target is
+// translated into a payload by `mapper`, upstream.
 //
-// La relecture n'est pas du zèle. Elle rapporte les ids d'options, sans
-// lesquels le state est aveugle à la dérive, et elle permet à l'appelant de
-// confronter le réel à ce que le plan avait annoncé — sur notre propre
-// écriture.
+// The read-back is not overzealous. It brings back the option ids, without
+// which the state is blind to drift, and it lets the caller confront the
+// actual state with what the plan had announced — on notion-seed's own
+// write.
 func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedDatabase, error) {
 	resp, err := r.tr.Execute(ctx, transport.APIRequest{
 		Method: "POST",
@@ -197,15 +198,15 @@ func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedData
 	}
 	if err := json.Unmarshal(resp.Body, &probe); err != nil {
 		return CreatedDatabase{}, fmt.Errorf(
-			"réponse de POST /v1/databases illisible: %w\n"+
-				"  → la database a peut-être été créée : ouvrez la page parente dans "+
-				"Notion pour vérifier avant de relancer", err)
+			"unreadable response from POST /v1/databases: %w\n"+
+				"  → the database may have been created: open the parent page in "+
+				"Notion to check before rerunning", err)
 	}
 	if probe.ID == "" {
 		return CreatedDatabase{}, fmt.Errorf(
-			"POST /v1/databases n'a rendu aucun identifiant\n" +
-				"  → la database a peut-être été créée : ouvrez la page parente dans " +
-				"Notion pour vérifier avant de relancer")
+			"POST /v1/databases returned no identifier\n" +
+				"  → the database may have been created: open the parent page in " +
+				"Notion to check before rerunning")
 	}
 
 	out := CreatedDatabase{ID: probe.ID}
@@ -230,36 +231,36 @@ func (r *DatabaseResource) Create(ctx context.Context, body []byte) (CreatedData
 	return out, nil
 }
 
-// UpdatedDatabase porte le résultat d'une mise à jour.
+// UpdatedDatabase holds the result of an update.
 //
-// DatabaseWritten dit si le PATCH de la database est passé. Sans lui, un échec
-// du PATCH du data source ne saurait pas dire que le nom, lui, est écrit — et
-// l'utilisateur ne saurait pas ce qui reste à faire.
+// DatabaseWritten says whether the database PATCH went through. Without it, a
+// failure of the data source PATCH could not say that the name, at least, is
+// written — and the user would not know what is left to do.
 type UpdatedDatabase struct {
 	DatabaseWritten bool
 	Remote          RemoteDatabase
 	ReadErr         error
 }
 
-// Update écrit une database existante, puis relit le résultat.
+// Update writes an existing database, then reads back the result.
 //
-// ORDRE : la database d'abord, le data source ensuite. Un échec du second laisse
-// alors un nom et une icône à jour et AUCUNE donnée touchée — l'échec le moins
-// coûteux. L'ordre inverse écrirait le schéma, donc les lignes, avant de rater
-// le cosmétique.
+// ORDER: the database first, the data source second. A failure of the second
+// then leaves a name and an icon up to date and NO data touched — the
+// cheapest failure. The reverse order would write the schema, hence the rows,
+// before failing on the cosmetics.
 //
-// Mesuré le 2026-09-24, et c'est une seconde raison de cet ordre : sur une
-// database dont la page ancêtre est à la corbeille, le PATCH de la database rend
-// un 400 qui NOMME la cause (« archived ancestor »), là où le PATCH du data
-// source rend un 404 qui accuse le partage avec l'intégration. L'ordre fait
-// donc tomber l'utilisateur sur le message juste.
+// Measured on 2026-09-24, and it is a second reason for this order: on a
+// database whose ancestor page is in the trash, the database PATCH returns a
+// 400 that NAMES the cause ("archived ancestor"), whereas the data source
+// PATCH returns a 404 that blames the sharing with the integration. The order
+// therefore lands the user on the right message.
 //
-// Un corps vide saute son endpoint : une mise à jour qui ne touche que des
-// propriétés n'a rien à écrire sur la database.
+// An empty body skips its endpoint: an update that touches only properties
+// has nothing to write on the database.
 //
-// La relecture rapporte les ids des options neuves, sans lesquels le state est
-// aveugle à la dérive, et permet à l'appelant de confronter le réel à ce que le
-// plan avait annoncé.
+// The read-back brings back the ids of new options, without which the state
+// is blind to drift, and lets the caller confront the actual state with what
+// the plan had announced.
 func (r *DatabaseResource) Update(
 	ctx context.Context, id, dsID string, dbBody, dsBody []byte,
 ) (UpdatedDatabase, error) {
@@ -300,25 +301,26 @@ func (r *DatabaseResource) Update(
 	return out, nil
 }
 
-// trashBody est le corps qui met une database à la corbeille. Mesuré le
-// 2026-09-24 : il suffit, et la réponse porte archived=true, in_trash=true.
+// trashBody is the body that moves a database to the trash. Measured on
+// 2026-09-24: it is enough, and the response carries archived=true,
+// in_trash=true.
 const trashBody = `{"in_trash":true}`
 
-// Trash met une database à la corbeille : un seul PATCH, sur la database.
+// Trash moves a database to the trash: a single PATCH, on the database.
 //
-// Le booléen dit si la RÉPONSE confirme la corbeille, selon une règle locale
-// (archived || in_trash) qui DOIT rester la même que celle du décodeur
-// (mapper.RemoteDatabaseFromJSON) — celle-là même par laquelle le plan suivant
-// classerait la database. La dupliquer ici, plutôt que d'appeler le décodeur,
-// est structurel : le décodeur veut aussi le corps du data source, qu'un PATCH
-// corbeille ne relit jamais. TestTrashLocalRuleAgreesWithDecoderRule, dans le
-// paquet mapper, garde les deux règles synchronisées en faisant tourner le
-// vrai décodeur. Un 200 qui ne confirme pas la corbeille n'est pas une
-// destruction : l'appelant garde alors l'identité, car l'abandonner rendrait
-// invisible une database qui existe peut-être encore.
+// The boolean says whether the RESPONSE confirms the trashing, according to a
+// local rule (archived || in_trash) that MUST stay the same as the decoder's
+// (mapper.RemoteDatabaseFromJSON) — the very one by which the next plan would
+// classify the database. Duplicating it here, rather than calling the
+// decoder, is structural: the decoder also wants the data source body, which
+// a trash PATCH never reads back. TestTrashLocalRuleAgreesWithDecoderRule, in
+// the mapper package, keeps both rules in sync by running the real decoder. A
+// 200 that does not confirm the trashing is not a destruction: the caller
+// then keeps the identity, because dropping it would make invisible a
+// database that may still exist.
 //
-// Une réponse illisible rend une issue inconnue : l'appel a répondu 200, donc la
-// mutation a peut-être eu lieu, et rien ne permet de le dire.
+// An unreadable response returns an unknown outcome: the call answered 200,
+// so the mutation may have happened, and nothing can tell.
 func (r *DatabaseResource) Trash(ctx context.Context, id string) (bool, error) {
 	resp, err := r.tr.Execute(ctx, transport.APIRequest{
 		Method: "PATCH",
@@ -334,50 +336,49 @@ func (r *DatabaseResource) Trash(ctx context.Context, id string) (bool, error) {
 	}
 	if err := json.Unmarshal(resp.Body, &probe); err != nil {
 		return false, &transport.OutcomeUnknownError{Cause: fmt.Errorf(
-			"réponse de PATCH /v1/databases/%s illisible: %w\n"+
-				"  → réessayez ; si ça persiste, vérifiez que `ntn` parle bien la version "+
-				"d'API 2025-09-03 (`ntn --version`)", id, err)}
+			"unreadable response from PATCH /v1/databases/%s: %w\n"+
+				"  → retry; if it persists, check that `ntn` speaks API version "+
+				"2025-09-03 (`ntn --version`)", id, err)}
 	}
 	return probe.Archived || probe.InTrash, nil
 }
 
-// asRemoteDatabase ramène la relecture d'une database à son type concret. Read
-// ne rend jamais autre chose : un autre type ne peut venir que d'un défaut de
-// notion-seed, et le message le dit plutôt que de laisser chercher du côté de
-// Notion.
+// asRemoteDatabase brings a database read-back down to its concrete type.
+// Read never returns anything else: another type can only come from a
+// notion-seed bug, and the message says so rather than letting the user look
+// on the Notion side.
 func asRemoteDatabase(id string, remote RemoteState) (RemoteDatabase, error) {
 	rd, ok := remote.(RemoteDatabase)
 	if !ok {
 		return RemoteDatabase{}, fmt.Errorf(
-			"relecture de %s : type inattendu %T\n"+
-				"  → c'est un défaut interne de notion-seed : signalez-le avec la "+
-				"sortie de `notion-seed plan`", id, remote)
+			"read-back of %s: unexpected type %T\n"+
+				"  → this is a notion-seed bug: report it with the "+
+				"output of `notion-seed plan`", id, remote)
 	}
 	return rd, nil
 }
 
-// Diff compare une database désirée à son état distant. Au MVP 0, l'état
-// distant est toujours absent : tout ressort en création.
+// Diff compares a desired database with its remote state. In MVP 0, the
+// remote state is always absent: everything comes out as a creation.
 func (r *DatabaseResource) Diff(desired any, remote RemoteState) (Changeset, error) {
 	db, ok := desired.(config.Database)
 	if !ok {
-		return Changeset{}, fmt.Errorf("desired doit être une config.Database, got %T", desired)
+		return Changeset{}, fmt.Errorf("desired must be a config.Database, got %T", desired)
 	}
 	return DatabaseChangeset(db, remote), nil
 }
 
-// DatabaseChangeset est le diff d'une database, sans transport ni décodeur.
+// DatabaseChangeset is the diff of a database, without transport or decoder.
 //
-// C'est une FONCTION de paquet, et la méthode Diff y délègue : l'exiger sur un
-// receiver forçait le moteur de diff à construire un
-// NewDatabaseResource(nil, nil) juste pour appeler une méthode pure — une mine
-// qui n'attendait qu'un appel réseau ajouté dans ce chemin, et un commentaire
-// d'invariant à maintenir.
+// It is a package FUNCTION, and the Diff method delegates to it: requiring it
+// on a receiver forced the diff engine to build a NewDatabaseResource(nil,
+// nil) just to call a pure method — a mine waiting only for a network call to
+// be added on this path, and an invariant comment to maintain.
 func DatabaseChangeset(db config.Database, remote RemoteState) Changeset {
 	cs := Changeset{Resource: "database." + db.Key}
 
-	// Le typed-nil compte : un RemoteState non-nil dont Exists() est false doit
-	// mener à une création comme un nil.
+	// The typed nil counts: a non-nil RemoteState whose Exists() is false must
+	// lead to a creation just like a nil.
 	if remote == nil || !remote.Exists() {
 		cs.Kind = KindCreate
 		names := make([]string, 0, len(db.Properties))
@@ -393,9 +394,9 @@ func DatabaseChangeset(db config.Database, remote RemoteState) Changeset {
 		return cs
 	}
 
-	// Le diff fin sur une database existante arrive au MVP 2, avec le refresh
-	// et la détection de dérive. Sans state, on ne met aucune ressource en
-	// correspondance, donc ce chemin est inatteignable au MVP 0.
+	// The fine-grained diff on an existing database arrives in MVP 2, with the
+	// refresh and drift detection. Without a state, no resource is matched, so
+	// this path is unreachable in MVP 0.
 	cs.Kind = KindNone
 	return cs
 }

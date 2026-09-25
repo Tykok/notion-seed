@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package resources porte les types de ressources Notion gérés par
-// notion-seed. Le moteur de diff est écrit contre l'interface Resource :
-// ajouter un type ne doit pas le modifier.
+// Package resources holds the Notion resource types managed by notion-seed.
+// The diff engine is written against the Resource interface: adding a type
+// must not change it.
 package resources
 
 import (
@@ -11,137 +11,138 @@ import (
 	"github.com/tykok/notion-seed/core/change"
 )
 
-// RemoteState est l'état réel d'une ressource, lu depuis l'API.
+// RemoteState is the actual state of a resource, read from the API.
 type RemoteState interface {
 	Exists() bool
 }
 
-// ChangeKind classe un changeset au niveau de la ressource.
+// ChangeKind classifies a changeset at the resource level.
 type ChangeKind int
 
 const (
 	KindNone ChangeKind = iota
 	KindCreate
 	KindUpdate
-	// KindDestroy : la ressource est dans le state mais plus dans la config.
-	// Son identité n'a plus d'ancre déclarée.
+	// KindDestroy: the resource is in the state but no longer in the config.
+	// Its identity no longer has a declared anchor.
 	KindDestroy
 )
 
-// Measurement décrit ce qu'il faut compter pour savoir ce qu'un détail coûte.
+// Measurement describes what has to be counted to know what a detail costs.
 //
-// Le comparateur l'ÉMET sans l'exécuter : il reste pur, sans réseau ni horloge,
-// et c'est ce qui permet de le couvrir en table sur des triplets. Une passe
-// séparée exécute les demandes et reclasse.
+// The comparator EMITS it without running it: it stays pure, with no network
+// and no clock, and that is what makes it coverable as a table over triples.
+// A separate pass runs the requests and reclassifies.
 //
-// Option vide signifie « compter les valeurs non vides de la colonne », ce dont
-// un changement de type a besoin.
+// An empty Option means "count the non-empty values of the column", which is
+// what a type change needs.
 //
-// Retyped dit que l'option disparaît parce que sa propriété change de type, et
-// non parce qu'on la retire d'une liste qui reste. Le sort des lignes n'est pas
-// le même : mesuré le 2026-09-25 sur select → multi_select, la ligne perd sa
-// valeur faute d'option de même nom dans le payload, là où un simple retrait
-// d'option de status l'aurait réassignée. PropertyType reste l'ANCIEN type :
-// c'est lui qui filtre les lignes, puisqu'on compte avant d'écrire.
+// Retyped says the option disappears because its property changes type, and
+// not because it is removed from a list that stays. The fate of the rows is
+// not the same: measured on 2026-09-25 on select → multi_select, the row loses
+// its value for lack of an option with the same name in the payload, where a
+// plain status option removal would have reassigned it. PropertyType stays the
+// OLD type: it is the one that filters the rows, since counting happens before
+// writing.
 //
-// AllRows demande de compter TOUTES les lignes du data source, sans filtre :
-// c'est ce qu'une database mise à la corbeille emporte avec elle. Property,
-// PropertyType et Option restent alors vides.
+// AllRows asks to count ALL the rows of the data source, without a filter: it
+// is what a database moved to the trash takes with it. Property, PropertyType
+// and Option then stay empty.
 type Measurement struct {
 	Property     string
 	PropertyType string
 	Option       string
 	Retyped      bool
 	AllRows      bool
-	// UncountedDataSources, avec AllRows, est le nombre de data sources de la
-	// database que le comptage n'interroge pas : il n'en compte qu'un, la mise
-	// à la corbeille les emporte tous. Non nul, le compte est un minorant.
+	// UncountedDataSources, with AllRows, is the number of the database's data
+	// sources the count does not query: it counts only one, the trashing takes
+	// them all. When non-zero, the count is a lower bound.
 	UncountedDataSources int
 }
 
-// Detail décrit un changement élémentaire à l'intérieur d'une ressource.
+// Detail describes an elementary change inside a resource.
 type Detail struct {
 	Op     string // "+", "~", "-"
 	Target string // `property "Estimate" (number)`
-	Note   string // précision optionnelle
+	Note   string // optional precision
 	Class  change.Class
 
-	// Property nomme la propriété que ce détail concerne. Vide sur un détail de
-	// niveau database.
+	// Property names the property this detail concerns. Empty on a
+	// database-level detail.
 	//
-	// C'est ce champ qui fait le JEU D'ÉCRITURE : apply n'envoie que les
-	// propriétés qui portent au moins un détail, donc ce qui est écrit est
-	// exactement ce qui est affiché. Sans lui, apply devrait relire le texte des
-	// lignes ou recalculer un diff en parallèle — un second chemin capable de
-	// diverger du plan en silence.
+	// This field is what makes the WRITE SET: apply sends only the properties
+	// that carry at least one detail, so what is written is exactly what is
+	// shown. Without it, apply would have to re-read the text of the lines or
+	// recompute a diff in parallel — a second path able to diverge from the
+	// plan silently.
 	Property string
 
-	// Field nomme l'attribut de database que ce détail concerne : "name",
-	// "description" ou "icon". Vide sur un détail de niveau propriété. Property
-	// et Field sont exclusifs : un détail concerne l'un ou l'autre, jamais les
-	// deux.
+	// Field names the database attribute this detail concerns: "name",
+	// "description" or "icon". Empty on a property-level detail. Property and
+	// Field are exclusive: a detail concerns one or the other, never both.
 	Field string
 
-	// Measure est la demande de mesure, nil quand le détail ne coûte rien.
+	// Measure is the measurement request, nil when the detail costs nothing.
 	Measure *Measurement
-	// Count est le nombre de lignes concernées. -1 tant que rien n'a été
-	// mesuré : ni 0 ni un compte, mais « on ne sait pas ».
+	// Count is the number of rows affected. -1 as long as nothing has been
+	// measured: neither 0 nor a count, but "unknown".
 	Count int
-	// Capped dit que le plafond de pagination a été atteint et que Count est
-	// donc un minorant.
+	// Capped says the pagination cap was reached and that Count is therefore a
+	// lower bound.
 	Capped bool
 
-	// Unmeasurable dit que notion-seed ne sait pas POSER la question : le type
-	// de la propriété n'est pas filtrable, et il ne le deviendra pas au prochain
-	// run. C'est une impossibilité, pas une panne.
+	// Unmeasurable says notion-seed cannot ASK the question: the property's
+	// type is not filterable, and it will not become so on the next run. It
+	// is an impossibility, not an outage.
 	//
-	// La distinction existe pour le rendu, et elle est de fond : une mesure
-	// simplement pas faite (--skip-preflight, 403, 429) se répare en relançant,
-	// et le rendu peut le promettre ; une mesure impossible ne se répare pas, et
-	// le promettre annoncerait une action corrective qui n'arrivera jamais.
+	// The distinction exists for the rendering, and it is substantive: a
+	// measurement that simply was not made (--skip-preflight, 403, 429) is
+	// fixed by rerunning, and the rendering can promise it; an impossible
+	// measurement cannot be fixed, and promising it would announce a
+	// corrective action that will never come.
 	//
-	// Seul core/measure pose ce champ : c'est lui qui connaît les types
-	// filtrables, et lui seul. Le rendu ne peut pas le déduire sans recopier
-	// cette table ni créer un cycle d'import.
+	// Only core/measure sets this field: it is the one that knows the
+	// filterable types, and it alone. The rendering cannot deduce it without
+	// copying that table or creating an import cycle.
 	//
-	// La valeur par défaut, false, signifie « mesurable » — le cas majoritaire,
-	// et le cas PRUDENT : un détail laissé à false par erreur retombe sur
-	// « non mesuré », qui propose de relancer, au pire une promesse vaine. Un
-	// détail marqué true à tort ferait au contraire disparaître un remède qui
-	// marche. Le défaut penche donc du bon côté.
+	// The default value, false, means "measurable" — the majority case, and
+	// the CAUTIOUS one: a detail left at false by mistake falls back to "not
+	// measured", which offers to rerun, at worst an empty promise. A detail
+	// wrongly marked true would instead make a working remedy disappear. So
+	// the default leans the right way.
 	Unmeasurable bool
 }
 
-// NewDetail construit un détail non mesuré. À utiliser SYSTÉMATIQUEMENT : un
-// Detail composé à la main porte Count = 0, donc « aucune ligne concernée »,
-// donc « sûr » — une affirmation que personne n'a vérifiée.
+// NewDetail builds an unmeasured detail. Use it SYSTEMATICALLY: a Detail
+// composed by hand carries Count = 0, hence "no rows affected", hence "safe"
+// — a claim nobody verified.
 //
-// Exportée parce que le comparateur, dans le paquet diff, produit l'essentiel
-// des détails du dépôt : une fonction non exportée l'aurait laissé sans
-// garde-fou, seul endroit où il en faut vraiment un.
+// Exported because the comparator, in the diff package, produces most of the
+// repository's details: an unexported function would have left it without a
+// safeguard, the one place where one is really needed.
 //
-// Elle ne prend PAS Note ni les trois champs de mesure : un constructeur à six
-// arguments serait moins lisible que le littéral qu'il remplace. Les détails
-// qui portent une mesure restent donc des littéraux, avec Count: -1 écrit
-// explicitement. Le filet qui rattrape un oubli n'est pas ce constructeur mais
-// TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount, dans core/diff.
+// It does NOT take Note nor the three measurement fields: a six-argument
+// constructor would be less readable than the literal it replaces. Details
+// that carry a measurement therefore stay literals, with Count: -1 written
+// explicitly. The net that catches an oversight is not this constructor but
+// TestCompareDatabaseNeverEmitsAnUnmeasuredZeroCount, in core/diff.
 func NewDetail(op, target string, class change.Class) Detail {
 	return Detail{Op: op, Target: target, Class: class, Count: -1}
 }
 
-// Changeset regroupe les changements d'une ressource.
+// Changeset groups the changes of a resource.
 type Changeset struct {
 	Resource string // "database.projects"
 	Kind     ChangeKind
 	Details  []Detail
 }
 
-// Resource est le contrat que remplit chaque type de ressource Notion.
+// Resource is the contract each Notion resource type fulfills.
 //
-// Apply et Destroy sont absentes au MVP 0 : le read-modify-write imposé par
-// l'API contraint leur signature, et on ne la connaîtra qu'en écrivant
-// réellement. ID(state) est absente aussi : elle dépend du modèle de state,
-// hors périmètre MVP 0.
+// Apply and Destroy are absent in MVP 0: the read-modify-write the API
+// imposes constrains their signature, and it will only be known by actually
+// writing. ID(state) is absent too: it depends on the state model, out of
+// MVP 0 scope.
 type Resource interface {
 	Type() string
 	Read(ctx context.Context, id string) (RemoteState, error)

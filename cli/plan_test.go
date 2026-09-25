@@ -494,7 +494,7 @@ func TestPlanReportsExhaustedRateLimitWithAnAction(t *testing.T) {
 	}
 	// Une attente muette est indistinguable d'un blocage : chaque attente est
 	// annoncée, et sur stderr pour ne pas polluer le plan.
-	if !strings.Contains(errOut.String(), "en attente") {
+	if !strings.Contains(errOut.String(), "waiting") {
 		t.Errorf("stderr = %q, chaque attente de retry doit être annoncée", errOut.String())
 	}
 }
