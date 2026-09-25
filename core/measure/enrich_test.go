@@ -145,6 +145,38 @@ func TestEnrichDoesNotMarkAFailedMeasurementAsUnmeasurable(t *testing.T) {
 	}
 }
 
+// A count that failed is the one case where rerunning may give a figure: the
+// line says so, for a plan file comparison to tell a retryable drift from one
+// that needs a new review.
+func TestEnrichMarksOnlyAFailedCountAsFailed(t *testing.T) {
+	failing := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, errors.New("429 rate_limited")
+	})
+	unfilterable := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedFilter, "people")
+	})
+	counted := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{Count: 3}, nil
+	})
+	for _, tc := range []struct {
+		name string
+		c    Counter
+		ids  map[string]string
+		want bool
+	}{
+		{"failed count", failing, map[string]string{"tasks": "ds-1"}, true},
+		{"unfilterable type", unfilterable, map[string]string{"tasks": "ds-1"}, false},
+		{"no data source id", failing, map[string]string{}, false},
+		{"successful count", counted, map[string]string{"tasks": "ds-1"}, false},
+	} {
+		p := planWithRemoval("status", "Annulé")
+		Enrich(context.Background(), tc.c, tc.ids, p)
+		if got := p.Changes[0].Details[0].CountFailed; got != tc.want {
+			t.Errorf("%s: CountFailed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // No measurement request: no call. Not paying for calls for nothing is a
 // property, not an optimization.
 func TestEnrichEmitsNoCallWhenNothingNeedsMeasuring(t *testing.T) {
