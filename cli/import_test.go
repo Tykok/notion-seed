@@ -11,7 +11,7 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// Review Focus 2 : l'utilisateur a une URL Notion sous la main, pas un UUID.
+// Review Focus 2: the user has a Notion URL at hand, not a UUID.
 func TestParseNotionID(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -21,20 +21,20 @@ func TestParseNotionID(t *testing.T) {
 		{"1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d", "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
 		{"https://www.notion.so/space/Tasks-1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d?v=abc",
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
-		// Le cas qui compte : une vraie URL de database porte un id de VUE en
-		// query, lui aussi sur 32 hexadécimaux. Le prendre ferait adopter la vue.
+		// The case that matters: a real database URL carries a VIEW id in the
+		// query, also 32 hex digits. Taking it would adopt the view.
 		{"https://www.notion.so/space/Tasks-1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d?v=99887766554433221100ffeeddccbbaa&pvs=4",
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
 		{"https://www.notion.so/1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d",
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
-		// Ronde de correction 1 : « copier le lien vers ce bloc » ajoute un
-		// fragment `#<id de bloc>`, lui aussi sur 32 hexadécimaux, APRÈS l'id de
-		// la database dans le chemin. Sans coupe sur le fragment, c'est lui que
-		// ramasse le dernier groupe hex — la même classe de piège que `?v=`.
+		// Review round 1: "copy link to block" adds a `#<block id>` fragment,
+		// also 32 hex digits, AFTER the database id in the path. Without cutting
+		// the fragment, it is what the last hex group picks up — the same class
+		// of trap as `?v=`.
 		{"https://www.notion.so/space/Tasks-1b2c3d4e5f604a1b8c2d3e4f5a6b7c8d#99887766554433221100ffeeddccbbaa",
 			"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
-		// Un id en majuscules, tel que Notion peut le rendre : le code le gère
-		// déjà (dashed() force ToLower), mais rien ne l'épinglait.
+		// An uppercase id, as Notion may return it: the code already handles it
+		// (dashed() forces ToLower), but nothing pinned it.
 		{"1B2C3D4E-5F60-4A1B-8C2D-3E4F5A6B7C8D", "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"},
 	}
 	for _, tc := range cases {
@@ -50,8 +50,8 @@ func TestParseNotionID(t *testing.T) {
 }
 
 func TestParseNotionIDRejectsGarbage(t *testing.T) {
-	if _, err := parseNotionID("pas-un-id"); err == nil {
-		t.Fatal("un identifiant illisible doit être refusé")
+	if _, err := parseNotionID("not-an-id"); err == nil {
+		t.Fatal("an unreadable identifier must be rejected")
 	}
 }
 
@@ -96,7 +96,7 @@ func TestImportWritesStateAndJoinsKeys(t *testing.T) {
 	}
 	db, ok := snap.Databases["tasks"]
 	if !ok {
-		t.Fatal("database tasks absente du state")
+		t.Fatal("database tasks missing from the state")
 	}
 	if db.ID != "db-1" || db.DataSourceID != "ds-1" {
 		t.Errorf("ids = %q / %q, want db-1 / ds-1", db.ID, db.DataSourceID)
@@ -115,13 +115,13 @@ func TestImportWritesStateAndJoinsKeys(t *testing.T) {
 		}
 	}
 	if todo.Key != "todo" {
-		t.Errorf("la key doit être jointe sur le nom: %+v", todo)
+		t.Errorf("the key must be joined on the name: %+v", todo)
 	}
 	if fait.Key != "" {
-		t.Errorf("sans déclaration, pas de key inventée: %+v", fait)
+		t.Errorf("without a declaration, no invented key: %+v", fait)
 	}
 	if !strings.Contains(out, "1 option") {
-		t.Errorf("la sortie doit compter les options sans key:\n%s", out)
+		t.Errorf("the output must count the options without a key:\n%s", out)
 	}
 }
 
@@ -132,10 +132,10 @@ func TestImportRefusesUnknownKey(t *testing.T) {
 	out, err := runCmd(t, "import", "database.inconnue",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
 	if err == nil {
-		t.Fatalf("une key non déclarée doit être refusée\n%s", out)
+		t.Fatalf("an undeclared key must be rejected\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "tasks") {
-		t.Errorf("le message doit nommer les keys déclarées: %v", err)
+		t.Errorf("the message must name the declared keys: %v", err)
 	}
 }
 
@@ -145,14 +145,14 @@ func TestImportRefusesAlreadyImportedKey(t *testing.T) {
 	id := "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"
 
 	if out, err := runCmd(t, "import", "database.tasks", id, "--dir", dir); err != nil {
-		t.Fatalf("premier import: %v\n%s", err, out)
+		t.Fatalf("first import: %v\n%s", err, out)
 	}
 	_, err := runCmd(t, "import", "database.tasks", id, "--dir", dir)
 	if err == nil {
-		t.Fatal("un ré-import doit être refusé")
+		t.Fatal("a re-import must be rejected")
 	}
 	if !strings.Contains(err.Error(), state.FileName) {
-		t.Errorf("le message doit dire quoi retirer: %v", err)
+		t.Errorf("the message must say what to remove: %v", err)
 	}
 }
 
@@ -168,10 +168,10 @@ func TestImportRefusesForeignWorkspaceState(t *testing.T) {
 	_, err := runCmd(t, "import", "database.tasks",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
 	if err == nil {
-		t.Fatal("un state d'un autre workspace doit être refusé")
+		t.Fatal("a state from another workspace must be rejected")
 	}
 	if !strings.Contains(err.Error(), "44444444") {
-		t.Errorf("le message doit nommer le workspace du state: %v", err)
+		t.Errorf("the message must name the state's workspace: %v", err)
 	}
 }
 
@@ -180,16 +180,16 @@ func TestImportRefusesNonDatabaseAddress(t *testing.T) {
 	_, err := runCmd(t, "import", "page.accueil",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
 	if err == nil {
-		t.Fatal("seules les databases sont importables au MVP 0")
+		t.Fatal("only databases can be imported in MVP 0")
 	}
 	if !strings.Contains(err.Error(), "database.") {
-		t.Errorf("le message doit montrer la forme attendue: %v", err)
+		t.Errorf("the message must show the expected form: %v", err)
 	}
 }
 
-// Ronde de correction 1 : seul des cinq refus d'import sans couverture. Il
-// protège contre l'inscription dans le state d'une identité qui pointe vers
-// une ressource en corbeille, dans la seule commande qui écrit ce fichier.
+// Review round 1: the only one of the five import refusals without coverage.
+// It protects against recording in the state an identity that points to a
+// resource in the trash, in the only command that writes this file.
 func TestImportRefusesArchivedDatabase(t *testing.T) {
 	withFakeNtn(t, "archived_database")
 	dir := writeImportFixture(t)
@@ -197,10 +197,10 @@ func TestImportRefusesArchivedDatabase(t *testing.T) {
 	out, err := runCmd(t, "import", "database.tasks",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir)
 	if err == nil {
-		t.Fatalf("une database archivée doit être refusée\n%s", out)
+		t.Fatalf("an archived database must be rejected\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "archivée") {
-		t.Errorf("le message doit dire que la database est archivée: %v", err)
+	if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("the message must say the database is archived: %v", err)
 	}
 
 	snap, err := state.Load(dir)
@@ -208,44 +208,43 @@ func TestImportRefusesArchivedDatabase(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if _, ok := snap.Databases["tasks"]; ok {
-		t.Error("une database archivée ne doit pas être inscrite dans le state")
+		t.Error("an archived database must not be recorded in the state")
 	}
 }
 
-// Ronde de correction 1, point mineur : le refus de --skip-preflight n'avait
-// aucun test, alors qu'un refactor pourrait le faire régresser vers « masqué
-// mais accepté », ce qui ferait croire à un import hors ligne qui a en fait
-// appelé l'API.
+// Review round 1, minor point: the --skip-preflight refusal had no test, while
+// a refactor could regress it to "hidden but accepted", which would suggest an
+// offline import that actually called the API.
 func TestImportRefusesSkipPreflight(t *testing.T) {
 	dir := writeImportFixture(t)
 
 	out, err := runCmd(t, "import", "database.tasks",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir, "--skip-preflight")
 	if err == nil {
-		t.Fatalf("--skip-preflight doit être refusé par import\n%s", out)
+		t.Fatalf("--skip-preflight must be rejected by import\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "skip-preflight") {
-		t.Errorf("le message doit nommer le flag refusé: %v", err)
+		t.Errorf("the message must name the rejected flag: %v", err)
 	}
 }
 
-// import partage planOptions avec plan, mais il ne calcule aucun plan : il n'a
-// aucune classe à confronter à --fail-on. Le flag doit donc être refusé, pour
-// la même raison que --skip-preflight — l'accepter puis l'ignorer ferait croire
-// à une CI qu'elle est protégée sur la commande qui écrit le state.
+// import shares planOptions with plan, but it computes no plan: it has no class
+// to check against --fail-on. The flag must therefore be rejected, for the same
+// reason as --skip-preflight — accepting it then ignoring it would make a CI
+// believe it is protected on the command that writes the state.
 func TestImportRefusesFailOn(t *testing.T) {
 	dir := writeImportFixture(t)
 
 	out, err := runCmd(t, "import", "database.tasks",
 		"1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d", "--dir", dir, "--fail-on=destructive")
 	if err == nil {
-		t.Fatalf("--fail-on doit être refusé par import\n%s", out)
+		t.Fatalf("--fail-on must be rejected by import\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "fail-on") {
-		t.Errorf("le message doit nommer le flag refusé: %v", err)
+		t.Errorf("the message must name the rejected flag: %v", err)
 	}
-	// L'action corrective doit dire où le flag sert vraiment.
+	// The corrective action must say where the flag actually applies.
 	if !strings.Contains(err.Error(), "  → ") {
-		t.Errorf("le message doit porter une action corrective: %v", err)
+		t.Errorf("the message must carry a corrective action: %v", err)
 	}
 }

@@ -16,31 +16,31 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// hex32 reconnaît un id Notion sans tirets, tel qu'il apparaît dans les URL.
+// hex32 matches a Notion id without dashes, as it appears in URLs.
 var hex32 = regexp.MustCompile(`[0-9a-fA-F]{32}`)
 
 func newImportCmd() *cobra.Command {
 	opts := &planOptions{}
 	cmd := &cobra.Command{
-		Use:   "import database.<key> <id-ou-url>",
-		Short: "Adopte une database Notion existante sous une key déclarée",
-		Long: "import écrit l'identité et l'état actuel d'une database existante\n" +
-			"dans le fichier de state, pour que plan puisse la reconnaître au lieu\n" +
-			"de proposer de la recréer.\n\n" +
-			"import adopte le réel tel qu'il est : il n'exige pas que la database\n" +
-			"corresponde déjà au YAML. C'est le plan qui révélera l'écart ensuite.",
+		Use:   "import database.<key> <id-or-url>",
+		Short: "Adopt an existing Notion database under a declared key",
+		Long: "import writes the identity and current state of an existing database\n" +
+			"to the state file, so that plan can recognize it instead of\n" +
+			"proposing to recreate it.\n\n" +
+			"import adopts the actual state as it is: it does not require the database\n" +
+			"to already match the YAML. The plan will reveal the mismatch afterwards.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runImport(cmd, opts, args[0], args[1])
 		},
 	}
 	opts.bind(cmd)
-	// import n'a aucun sens hors ligne : il lit l'état réel. Le flag est masqué
-	// de l'aide ET refusé s'il est passé — un flag accepté puis ignoré ferait
-	// croire à un import hors ligne qui a en fait appelé l'API.
+	// import makes no sense offline: it reads the actual state. The flag is
+	// hidden from the help AND rejected if passed — a flag accepted then ignored
+	// would suggest an offline import that actually called the API.
 	_ = cmd.Flags().MarkHidden("skip-preflight")
-	// Même traitement pour --fail-on : import ne calcule aucun plan, donc il n'a
-	// aucune classe à lui confronter. Masqué de l'aide ET refusé s'il est passé.
+	// Same treatment for --fail-on: import computes no plan, so it has no class
+	// to check against. Hidden from the help AND rejected if passed.
 	_ = cmd.Flags().MarkHidden("fail-on")
 	return cmd
 }
@@ -53,16 +53,16 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 	}
 	if cmd.Flags().Changed("skip-preflight") {
 		return fmt.Errorf(
-			"import n'accepte pas --skip-preflight\n" +
-				"  → la commande lit l'état réel de la database pour l'inscrire dans le " +
-				"state : elle n'a rien à faire hors ligne")
+			"import does not accept --skip-preflight\n" +
+				"  → the command reads the actual state of the database to record it in the " +
+				"state: it has nothing to do offline")
 	}
 	if cmd.Flags().Changed("fail-on") {
 		return fmt.Errorf(
-			"import n'accepte pas --fail-on\n" +
-				"  → import adopte le réel tel qu'il est, il ne calcule aucun plan et " +
-				"n'a donc aucune classe à refuser. Utilisez `notion-seed diff " +
-				"--fail-on=...` pour garder la CI sur l'écart qui suit")
+			"import does not accept --fail-on\n" +
+				"  → import adopts the actual state as it is, it computes no plan and " +
+				"so has no class to reject. Use `notion-seed diff " +
+				"--fail-on=...` to keep the CI on the mismatch that follows")
 	}
 	key, err := parseResourceAddress(addr)
 	if err != nil {
@@ -88,9 +88,9 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 	}
 	if _, exists := snap.Databases[key]; exists {
 		return fmt.Errorf(
-			"database.%s est déjà dans %s\n"+
-				"  → retirez son entrée de %s pour la ré-importer ; ré-importer sans "+
-				"cela écraserait une identité existante",
+			"database.%s is already in %s\n"+
+				"  → remove its entry from %s to re-import it; re-importing without "+
+				"that would overwrite an existing identity",
 			key, state.FileName, state.FileName)
 	}
 
@@ -106,22 +106,22 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 	remote, err := resources.NewDatabaseResource(tr, mapper.RemoteDatabaseFromJSON).Read(ctx, id)
 	if err != nil {
 		return fmt.Errorf(
-			"lecture de la database %s impossible: %w\n"+
-				"  → vérifiez que l'id désigne bien une database (ouvrez-la en pleine "+
-				"page dans Notion : son id est dans l'URL)", id, err)
+			"failed to read database %s: %w\n"+
+				"  → check that the id does point to a database (open it as a full "+
+				"page in Notion: its id is in the URL)", id, err)
 	}
 	rd, ok := remote.(resources.RemoteDatabase)
 	if !ok || !rd.Found {
 		return fmt.Errorf(
-			"database %s introuvable\n"+
-				"  → vérifiez l'id ; le jeton de ntn voit tout le workspace sans partage "+
-				"préalable, donc ce n'est pas un problème de permissions", id)
+			"database %s not found\n"+
+				"  → check the id; ntn's token sees the whole workspace without prior "+
+				"sharing, so this is not a permissions problem", id)
 	}
 	if rd.Archived {
 		return fmt.Errorf(
-			"database %s est archivée ou en corbeille\n"+
-				"  → restaurez-la dans Notion avant de l'importer : planifier contre une "+
-				"ressource en corbeille produit des écritures qui échoueront", id)
+			"database %s is archived or in the trash\n"+
+				"  → restore it in Notion before importing it: planning against a "+
+				"resource in the trash produces writes that will fail", id)
 	}
 
 	adopted, orphans := state.JoinOptionKeys(state.FromRemote(rd), state.FromConfig(*desired))
@@ -136,27 +136,27 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 		return err
 	}
 
-	cmd.Printf("database.%s importée — id %s (%d propriétés, %d options sans key de config)\n",
+	cmd.Printf("database.%s imported — id %s (%d properties, %d options without a config key)\n",
 		key, rd.ID, len(adopted.Properties), orphans)
 	return nil
 }
 
-// parseResourceAddress lit une adresse `database.<key>`. Seules les databases
-// sont importables au MVP 0 ; le message le dit plutôt que de laisser
-// l'utilisateur deviner la forme attendue.
+// parseResourceAddress reads a `database.<key>` address. Only databases can be
+// imported in MVP 0; the message says so rather than leaving the user to guess
+// the expected form.
 func parseResourceAddress(addr string) (string, error) {
 	kind, key, found := strings.Cut(addr, ".")
 	if !found || kind != "database" || key == "" {
 		return "", fmt.Errorf(
-			"adresse %q non reconnue\n"+
-				"  → la forme attendue est `database.<key>`, par exemple `database.tasks` ; "+
-				"seules les databases sont importables aujourd'hui", addr)
+			"address %q not recognized\n"+
+				"  → the expected form is `database.<key>`, for example `database.tasks`; "+
+				"only databases can be imported today", addr)
 	}
 	return key, nil
 }
 
-// parseNotionID accepte un UUID, un id sans tirets, ou une URL Notion — c'est
-// l'URL que l'utilisateur a réellement sous la main.
+// parseNotionID accepts a UUID, an id without dashes, or a Notion URL — the URL
+// is what the user actually has at hand.
 func parseNotionID(s string) (string, error) {
 	s = strings.TrimSpace(s)
 
@@ -165,27 +165,26 @@ func parseNotionID(s string) (string, error) {
 		return dashed(m), nil
 	}
 
-	// La query string ET le fragment sont retirés AVANT de chercher : une URL de
-	// database finit par `?v=<32 hexadécimaux>`, l'id de la VUE, et un lien
-	// « copier le lien vers ce bloc » finit par `#<32 hexadécimaux>`, l'id du
-	// BLOC. L'un comme l'autre ferait adopter la mauvaise ressource, avec un id
-	// parfaitement bien formé — donc un échec incompréhensible à la lecture, et
-	// non au parsing.
+	// The query string AND the fragment are stripped BEFORE searching: a
+	// database URL ends with `?v=<32 hex digits>`, the id of the VIEW, and a
+	// "copy link to block" link ends with `#<32 hex digits>`, the id of the
+	// BLOCK. Either would adopt the wrong resource, with a perfectly well-formed
+	// id — hence a baffling failure at read time, not at parse time.
 	path := s
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
 	}
 
-	// Dans ce qui reste, l'id est le dernier groupe de 32 hexadécimaux : le
-	// titre le précède (`.../Mes-taches-<id>`).
+	// In what remains, the id is the last group of 32 hex digits: the title
+	// precedes it (`.../Mes-taches-<id>`).
 	all := hex32.FindAllString(strings.ReplaceAll(path, "-", ""), -1)
 	if len(all) > 0 {
 		return dashed(all[len(all)-1]), nil
 	}
 	return "", fmt.Errorf(
-		"identifiant %q non reconnu\n"+
-			"  → attendu : un UUID, ou l'URL de la database (ouvrez-la en pleine page "+
-			"dans Notion et copiez le lien)", s)
+		"identifier %q not recognized\n"+
+			"  → expected: a UUID, or the URL of the database (open it as a full page "+
+			"in Notion and copy the link)", s)
 }
 
 func dashed(h string) string {
@@ -193,9 +192,9 @@ func dashed(h string) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// findDatabase retrouve une database déclarée, et nomme les keys existantes
-// quand elle n'existe pas : chercher soi-même le nom exact dans ses fichiers
-// est un travail que la commande peut faire.
+// findDatabase finds a declared database, and names the existing keys when it
+// does not exist: looking up the exact name in one's own files is work the
+// command can do.
 func findDatabase(cfg *config.Config, key string) (*config.Database, error) {
 	keys := make([]string, 0, len(cfg.Databases))
 	for i := range cfg.Databases {
@@ -206,8 +205,8 @@ func findDatabase(cfg *config.Config, key string) (*config.Database, error) {
 	}
 	sort.Strings(keys)
 	return nil, fmt.Errorf(
-		"aucune database de key %q dans la configuration\n"+
-			"  → keys déclarées : %s. Déclarez la database dans databases/ avant de "+
-			"l'importer : sans déclaration, il n'y a rien à planifier contre elle",
+		"no database with key %q in the configuration\n"+
+			"  → declared keys: %s. Declare the database in databases/ before "+
+			"importing it: without a declaration, there is nothing to plan against it",
 		key, strings.Join(keys, ", "))
 }

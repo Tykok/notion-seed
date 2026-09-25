@@ -8,10 +8,10 @@ func newDiffCmd() *cobra.Command {
 	opts := &planOptions{}
 	cmd := &cobra.Command{
 		Use:   "diff",
-		Short: "Équivalent lecture seule de plan, sans toucher au state",
-		Long: "diff est identique à plan au MVP 0, puisque plan n'écrit pas encore\n" +
-			"de state. Les deux commandes restent distinctes pour que l'usage en CI\n" +
-			"soit stable quand plan touchera le state.",
+		Short: "Read-only equivalent of plan, without touching the state",
+		Long: "diff is identical to plan in MVP 0, since plan does not write the\n" +
+			"state yet. The two commands stay separate so that CI usage stays\n" +
+			"stable once plan touches the state.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPlan(cmd, opts)

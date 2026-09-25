@@ -35,8 +35,8 @@ func writeConfigDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// runCmd exécute une commande racine et rend sa sortie, pour les tests qui
-// n'épinglent pas un golden.
+// runCmd runs a root command and returns its output, for the tests that do not
+// pin a golden.
 func runCmd(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	cmd := NewRootCmd()
@@ -48,12 +48,12 @@ func runCmd(t *testing.T, args ...string) (string, error) {
 	return b.String(), err
 }
 
-// testParentPageID est un UUID bien formé : le schéma impose ce motif sur
-// parent_page_id, pour que la config soit rejetée avant l'appel plutôt que par
-// un 400 de l'API.
+// testParentPageID is a well-formed UUID: the schema enforces this pattern on
+// parent_page_id, so that the config is rejected before the call rather than by
+// a 400 from the API.
 const testParentPageID = "44444444-4444-4444-8444-444444444444"
 
-// workspaceYAML est le workspace.yaml minimal des tests de plan.
+// workspaceYAML is the minimal workspace.yaml of the plan tests.
 const workspaceYAML = "version: 1\nworkspace:\n  parent_page_id: \"" + testParentPageID + "\"\n"
 
 const twoDatabases = `
@@ -72,15 +72,15 @@ databases:
         type: number
 `
 
-// Ce test tourne EN LIGNE, sans --skip-preflight : le faux ntn est réellement
-// invoqué. Avant, les trois tests du chemin plan posaient le faux binaire sur le
-// PATH puis passaient --skip-preflight, donc ni l'assemblage de la pile de
-// transport, ni l'en-tête de workspace, ni checkParentPage n'étaient exécutés.
+// This test runs ONLINE, without --skip-preflight: the fake ntn is actually
+// invoked. Before, the three tests of the plan path put the fake binary on the
+// PATH then passed --skip-preflight, so neither the assembly of the transport
+// stack, nor the workspace header, nor checkParentPage were executed.
 //
-// La comparaison se fait sur un fichier golden : toutes les assertions sur la
-// sortie réelle du produit étaient des strings.Contains, donc l'indentation, les
-// lignes vides, l'en-tête et la précédence des marqueurs pouvaient changer avec
-// la suite verte. Le golden épingle aussi le déterminisme, contrainte liante.
+// The comparison is against a golden file: every assertion on the product's
+// real output was a strings.Contains, so indentation, blank lines, the header
+// and the precedence of markers could change with the suite green. The golden
+// also pins determinism, a binding constraint.
 func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
 	withFakeNtn(t, "authenticated")
 	dir := writeConfigDir(t, map[string]string{
@@ -98,13 +98,13 @@ func TestPlanRendersCreationsForTwoDatabases(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s\n%s", err, out.String(), errOut.String())
 	}
 	if errOut.Len() != 0 {
-		t.Errorf("stderr non vide sur un plan qui réussit: %q", errOut.String())
+		t.Errorf("non-empty stderr on a successful plan: %q", errOut.String())
 	}
 	assertGolden(t, "plan_two_databases.golden", out.String())
 }
 
-// La sortie doit être identique d'un run à l'autre : plan est fait pour être lu
-// en CI et comparé.
+// The output must be identical from one run to the next: plan is meant to be
+// read in CI and compared.
 func TestPlanOutputIsStableAcrossRuns(t *testing.T) {
 	withFakeNtn(t, "authenticated")
 	dir := writeConfigDir(t, map[string]string{
@@ -126,13 +126,13 @@ func TestPlanOutputIsStableAcrossRuns(t *testing.T) {
 	first := run()
 	for i := 0; i < 5; i++ {
 		if got := run(); got != first {
-			t.Fatalf("run %d diffère du premier:\n%s", i, lineDiff(first, got))
+			t.Fatalf("run %d differs from the first:\n%s", i, lineDiff(first, got))
 		}
 	}
 }
 
-// La branche 404 de checkParentPage et son message n'étaient couverts par aucun
-// test : les trois tests du chemin plan sautaient le preflight.
+// The 404 branch of checkParentPage and its message were covered by no test:
+// the three tests of the plan path skipped the preflight.
 func TestPlanReportsUnreachableParentPage(t *testing.T) {
 	withFakeNtn(t, "authenticated_page_404")
 	dir := writeConfigDir(t, map[string]string{
@@ -148,30 +148,29 @@ func TestPlanReportsUnreachableParentPage(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un échec sur la page parente\n%s", out.String())
+		t.Fatalf("Execute() error = nil, want a failure on the parent page\n%s", out.String())
 	}
 	for _, want := range []string{
 		testParentPageID,
-		"introuvable",
+		"not found",
 		"parent_page_id",
-		// Le jeton de ntn voit tout le workspace : un 404 n'est pas un défaut de
-		// partage, et le message ne doit pas envoyer sur cette piste.
-		"pas un problème de permissions",
+		// ntn's token sees the whole workspace: a 404 is not a sharing defect,
+		// and the message must not send the user down that trail.
+		"not a permissions problem",
 	} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
-	// Le plan ne doit pas être rendu quand la page parente est illisible.
+	// The plan must not be rendered when the parent page is unreadable.
 	if strings.Contains(out.String(), "Plan:") {
-		t.Errorf("un plan a été affiché malgré une page parente illisible:\n%s", out.String())
+		t.Errorf("a plan was shown despite an unreadable parent page:\n%s", out.String())
 	}
 }
 
-// Mesuré le 2026-09-25 : avec une page parente à la corbeille, plan disait
-// « Aucun changement » et sortait en 0, alors que toute écriture sous elle est
-// refusée (400 « archived ancestor »). La page se lit en 200 : seul son champ
-// in_trash le dit.
+// Measured on 2026-09-25: with a parent page in the trash, plan said "No
+// changes" and exited 0, while every write under it is refused (400 "archived
+// ancestor"). The page reads as 200: only its in_trash field says so.
 func TestPlanRefusesATrashedParentPage(t *testing.T) {
 	withFakeNtn(t, "authenticated_page_in_trash")
 	dir := writeConfigDir(t, map[string]string{
@@ -181,20 +180,20 @@ func TestPlanRefusesATrashedParentPage(t *testing.T) {
 
 	out, err := runCmd(t, "plan", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus sur la page parente à la corbeille\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal on the parent page in the trash\n%s", out)
 	}
-	for _, want := range []string{testParentPageID, "corbeille", "restaurez", "parent_page_id", "  → "} {
+	for _, want := range []string{testParentPageID, "trash", "restore", "parent_page_id", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 	if strings.Contains(out, "Plan:") || strings.Contains(out, "No changes") {
-		t.Errorf("un plan a été rendu malgré une page parente à la corbeille:\n%s", out)
+		t.Errorf("a plan was rendered despite a parent page in the trash:\n%s", out)
 	}
 }
 
-// apply partage le preflight de plan : il refuse avant le prompt, donc avant
-// toute écriture.
+// apply shares plan's preflight: it refuses before the prompt, hence before any
+// write.
 func TestApplyRefusesATrashedParentPageBeforeWriting(t *testing.T) {
 	withFakeNtn(t, "authenticated_page_in_trash")
 	dir := writeConfigDir(t, map[string]string{
@@ -203,48 +202,48 @@ func TestApplyRefusesATrashedParentPageBeforeWriting(t *testing.T) {
 	})
 
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
-	if err == nil || !strings.Contains(err.Error(), "corbeille") {
-		t.Fatalf("Execute() error = %v, want le refus de la page parente à la corbeille\n%s", err, out)
+	if err == nil || !strings.Contains(err.Error(), "trash") {
+		t.Fatalf("Execute() error = %v, want the refusal of the parent page in the trash\n%s", err, out)
 	}
 	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit sous une page parente à la corbeille")
+		t.Error("a state was written under a parent page in the trash")
 	}
 }
 
-// La forme mesurée le 2026-09-25 (API 2025-09-03) : in_trash seul, sans
-// archived. C'est in_trash, et lui seul, qui doit décider.
+// The shape measured on 2026-09-25 (API 2025-09-03): in_trash alone, without
+// archived. in_trash, and it alone, must decide.
 func TestCheckParentPageReadsInTrashAlone(t *testing.T) {
 	if err := checkParentPage(context.Background(), fixedTransport{body: `{"object":"page","in_trash":true}`},
-		testParentPageID, 3); err == nil || !strings.Contains(err.Error(), "corbeille") {
-		t.Errorf(`{"in_trash":true} seul : err = %v, want un refus`, err)
+		testParentPageID, 3); err == nil || !strings.Contains(err.Error(), "trash") {
+		t.Errorf(`{"in_trash":true} alone: err = %v, want a refusal`, err)
 	}
 	if err := checkParentPage(context.Background(), fixedTransport{body: `{"object":"page","in_trash":false}`},
 		testParentPageID, 3); err != nil {
-		t.Errorf(`{"in_trash":false} seul : err = %v, want nil`, err)
+		t.Errorf(`{"in_trash":false} alone: err = %v, want nil`, err)
 	}
 }
 
-// Une réponse qui ne dit pas si la page est à la corbeille ne vaut pas « page
-// vivante » : le silence de l'API n'est pas une mesure.
+// A response that does not say whether the page is in the trash does not mean
+// "live page": the API's silence is not a measurement.
 func TestCheckParentPageRefusesAnAnswerWithoutTrashFields(t *testing.T) {
 	for name, body := range map[string]string{
-		"sans champ": `{"object":"page","id":"p"}`,
-		"illisible":  `pas du json`,
+		"no field":   `{"object":"page","id":"p"}`,
+		"unreadable": `not json`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := fixedTransport{body: body}
 			err := checkParentPage(context.Background(), tr, testParentPageID, 3)
 			if err == nil {
-				t.Fatal("checkParentPage() = nil, want un refus")
+				t.Fatal("checkParentPage() = nil, want a refusal")
 			}
 			if !strings.Contains(err.Error(), "  → ") {
-				t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+				t.Errorf("message = %q, it must carry a corrective action", err.Error())
 			}
 		})
 	}
 }
 
-// fixedTransport rend toujours le même corps en 200.
+// fixedTransport always returns the same body with a 200.
 type fixedTransport struct{ body string }
 
 func (f fixedTransport) Execute(context.Context, transport.APIRequest) (transport.APIResponse, error) {
@@ -266,20 +265,20 @@ func TestPlanFailsOnDuplicateKeyNamingBothFiles(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("Execute() error = nil, want une erreur de key dupliquée")
+		t.Fatal("Execute() error = nil, want a duplicate key error")
 	}
 	for _, want := range []string{"a.yaml", "b.yaml", "projects"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// plan n'écrit rien au MVP 0 : ni state, ni mutation. Le test garde cette
-// propriété, qui est la promesse de la commande.
+// plan writes nothing in MVP 0: neither state nor mutation. The test guards this
+// property, which is the command's promise.
 func TestPlanWritesNothingToDisk(t *testing.T) {
-	// En ligne, sans --skip-preflight : « plan n'écrit rien » doit tenir aussi
-	// quand la commande parle réellement à ntn.
+	// Online, without --skip-preflight: "plan writes nothing" must also hold
+	// when the command actually talks to ntn.
 	withFakeNtn(t, "authenticated")
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml":     workspaceYAML,
@@ -301,25 +300,25 @@ func TestPlanWritesNothingToDisk(t *testing.T) {
 	for path, sum := range before {
 		got, ok := after[path]
 		if !ok {
-			t.Errorf("plan a supprimé %s", path)
+			t.Errorf("plan deleted %s", path)
 			continue
 		}
 		if got != sum {
-			t.Errorf("plan a modifié le contenu de %s", path)
+			t.Errorf("plan modified the content of %s", path)
 		}
 	}
 	for path := range after {
 		if _, ok := before[path]; !ok {
-			t.Errorf("plan a créé %s", path)
+			t.Errorf("plan created %s", path)
 		}
 	}
 }
 
-// snapshot parcourt l'arborescence RÉCURSIVEMENT et retient une empreinte du
-// contenu de chaque fichier. Compter les entrées à la racine ne verrait ni une
-// écriture dans databases/, ni une mutation de contenu en place, ni un fichier
-// créé puis supprimé — or « plan n'écrit rien » est la promesse centrale de la
-// commande, elle mérite d'être épinglée pour de vrai.
+// snapshot walks the tree RECURSIVELY and keeps a fingerprint of each file's
+// content. Counting the entries at the root would see neither a write in
+// databases/, nor an in-place content mutation, nor a file created then
+// deleted — yet "plan writes nothing" is the command's central promise, it
+// deserves to be pinned for real.
 func snapshot(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -358,9 +357,9 @@ func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"rate nul", []string{"--rate", "0"}, "--rate"},
-		{"rate négatif", []string{"--rate", "-1"}, "--rate"},
-		{"burst nul", []string{"--burst", "0"}, "--burst"},
+		{"zero rate", []string{"--rate", "0"}, "--rate"},
+		{"negative rate", []string{"--rate", "-1"}, "--rate"},
+		{"zero burst", []string{"--burst", "0"}, "--burst"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -372,19 +371,19 @@ func TestPlanRejectsNonPositiveRateAndBurst(t *testing.T) {
 
 			err := cmd.Execute()
 			if err == nil {
-				t.Fatalf("Execute() error = nil, want un rejet de %v", tt.args)
+				t.Fatalf("Execute() error = nil, want a rejection of %v", tt.args)
 			}
 			if !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("message = %q, il doit nommer %q", err.Error(), tt.want)
+				t.Errorf("message = %q, it must name %q", err.Error(), tt.want)
 			}
 		})
 	}
 }
 
-// ATTENTION, vérité temporaire : cette égalité ne tient qu'au MVP 0, parce que
-// plan n'écrit pas encore de state. Au MVP 1 plan divergera de diff par
-// construction — c'est la raison même de garder deux commandes. Ce test devra
-// alors être desserré ou remplacé, pas « réparé ».
+// CAUTION, temporary truth: this equality holds only in MVP 0, because plan
+// does not write the state yet. In MVP 1 plan will diverge from diff by
+// construction — the very reason to keep two commands. This test will then
+// have to be loosened or replaced, not "fixed".
 func TestDiffProducesSameOutputAsPlan(t *testing.T) {
 	withFakeNtn(t, "ok")
 	dir := writeConfigDir(t, map[string]string{
@@ -404,18 +403,18 @@ func TestDiffProducesSameOutputAsPlan(t *testing.T) {
 		return out.String()
 	}
 	if run("plan") != run("diff") {
-		t.Error("plan et diff doivent produire la même sortie au MVP 0")
+		t.Error("plan and diff must produce the same output in MVP 0")
 	}
 }
 
-// updateGolden réécrit les fichiers golden au lieu de les comparer :
+// updateGolden rewrites the golden files instead of comparing them:
 //
 //	go test ./cli/ -run TestPlan -update
-var updateGolden = flag.Bool("update", false, "réécrit les fichiers golden de testdata/")
+var updateGolden = flag.Bool("update", false, "rewrite the golden files in testdata/")
 
-// assertGolden compare une sortie au fichier golden correspondant. En cas
-// d'écart, l'échec affiche un diff ligne à ligne : « sortie différente » sans le
-// détail obligerait à relancer à la main pour savoir quoi.
+// assertGolden compares an output with the matching golden file. On a
+// mismatch, the failure prints a line-by-line diff: "different output" without
+// the detail would force a manual rerun to find out what.
 func assertGolden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name)
@@ -426,20 +425,20 @@ func assertGolden(t *testing.T, name, got string) {
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("golden réécrit: %s", path)
+		t.Logf("golden rewritten: %s", path)
 		return
 	}
 	want, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("golden illisible: %v — relancez avec -update pour le créer", err)
+		t.Fatalf("golden unreadable: %v — rerun with -update to create it", err)
 	}
 	if got != string(want) {
-		t.Errorf("la sortie de plan diffère de %s :\n%s", path, lineDiff(string(want), got))
+		t.Errorf("the plan output differs from %s:\n%s", path, lineDiff(string(want), got))
 	}
 }
 
-// lineDiff rend un diff ligne à ligne, aligné sur les numéros de ligne : "-"
-// pour la ligne attendue, "+" pour celle obtenue.
+// lineDiff returns a line-by-line diff, aligned on line numbers: "-" for the
+// expected line, "+" for the one obtained.
 func lineDiff(want, got string) string {
 	wantLines := strings.Split(want, "\n")
 	gotLines := strings.Split(got, "\n")
@@ -466,10 +465,10 @@ func lineDiff(want, got string) string {
 	return b.String()
 }
 
-// Démontré avant correction : un 429 épuisé rendait « page parente X illisible:
-// notion api 429 rate_limited: Rate limited. » sans aucune action corrective, sur
-// l'échec non-404 le plus probable. Et les attentes de retry étaient totalement
-// muettes — mesuré, 9,35 s de silence.
+// Shown before the fix: an exhausted 429 returned "parent page X unreadable:
+// notion api 429 rate_limited: Rate limited." without any corrective action, on
+// the most likely non-404 failure. And retry waits were completely silent —
+// measured, 9.35 s of silence.
 func TestPlanReportsExhaustedRateLimitWithAnAction(t *testing.T) {
 	withFakeNtn(t, "authenticated_rate_limited")
 	dir := writeConfigDir(t, map[string]string{
@@ -485,23 +484,23 @@ func TestPlanReportsExhaustedRateLimitWithAnAction(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un échec après épuisement des tentatives\n%s", out.String())
+		t.Fatalf("Execute() error = nil, want a failure after the attempts are exhausted\n%s", out.String())
 	}
-	for _, want := range []string{"429", "--rate", "réessayez"} {
+	for _, want := range []string{"429", "--rate", "retry"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
-	// Une attente muette est indistinguable d'un blocage : chaque attente est
-	// annoncée, et sur stderr pour ne pas polluer le plan.
+	// A silent wait is indistinguishable from a hang: each wait is announced,
+	// and on stderr so as not to pollute the plan.
 	if !strings.Contains(errOut.String(), "waiting") {
-		t.Errorf("stderr = %q, chaque attente de retry doit être annoncée", errOut.String())
+		t.Errorf("stderr = %q, each retry wait must be announced", errOut.String())
 	}
 }
 
-// Le state ancre database.tasks sur db-1 : le refresh la lit, le comparateur
-// la retrouve identique au désiré, donc aucun changement ne ressort — alors
-// que sans state, la même config produirait une création.
+// The state anchors database.tasks on db-1: the refresh reads it, the
+// comparator finds it identical to the desired one, so no change comes out —
+// whereas without a state, the same config would produce a creation.
 func TestPlanWithStateReportsNoChange(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -553,15 +552,15 @@ databases:
 		t.Fatalf("plan error = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "No changes") {
-		t.Errorf("le state doit faire reconnaître la database:\n%s", out)
+		t.Errorf("the state must make the database recognized:\n%s", out)
 	}
 }
 
-// tasksWorkspaceYAML, tasksConfigYAML et tasksStateJSON décrivent une
-// configuration à une seule database "tasks", dont le state ancre l'id
-// "db-1" — celui que sert le scénario fakentn "authenticated_database".
-// Partagés par les tests ci-dessous, qui vérifient le comportement de plan
-// avec un state qui fait réellement lire une ressource distante.
+// tasksWorkspaceYAML, tasksConfigYAML and tasksStateJSON describe a
+// configuration with a single database "tasks", whose state anchors the id
+// "db-1" — the one served by the fakentn scenario "authenticated_database".
+// Shared by the tests below, which check plan's behavior with a state that
+// actually reads a remote resource.
 const tasksWorkspaceYAML = `
 version: 1
 workspace:
@@ -606,13 +605,13 @@ const tasksStateJSON = `{
 }
 `
 
-// Ronde de correction 1 : TestPlanWritesNothingToDisk ne verrouille
-// l'invariant « plan n'écrit rien » QUE sur le chemin sans state — sans
-// entrée dans snap.Databases, refreshManaged sort à son premier garde et sa
-// boucle de lecture n'est jamais exercée. Ce test rejoue le même verrou avec
-// un state peuplé qui fait réellement lire une database (id "db-1", servie
-// par le scénario fakentn "authenticated_database") : le refresh doit
-// accomplir ses appels GET sans jamais écrire sur disque.
+// Review round 1: TestPlanWritesNothingToDisk locks the "plan writes nothing"
+// invariant ONLY on the path without a state — with no entry in
+// snap.Databases, refreshManaged returns at its first guard and its read loop
+// is never exercised. This test replays the same lock with a populated state
+// that actually reads a database (id "db-1", served by the fakentn scenario
+// "authenticated_database"): the refresh must make its GET calls without ever
+// writing to disk.
 func TestPlanWithPopulatedStateWritesNothingToDisk(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -627,36 +626,36 @@ func TestPlanWithPopulatedStateWritesNothingToDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plan error = %v\n%s", err, out)
 	}
-	// La preuve que le refresh a réellement tourné, et pas seulement traversé
-	// le garde « state vide » : la comparaison à trois voies ne peut rendre
-	// « Aucun changement » que si `actual` a été lu avec succès depuis l'API.
+	// The proof that the refresh actually ran, and did not just pass the
+	// "empty state" guard: the three-way comparison can return "No changes"
+	// only if `actual` was successfully read from the API.
 	if !strings.Contains(out, "No changes") {
-		t.Fatalf("le refresh n'a pas produit la comparaison attendue:\n%s", out)
+		t.Fatalf("the refresh did not produce the expected comparison:\n%s", out)
 	}
 
 	after := snapshot(t, dir)
 	for path, sum := range before {
 		got, ok := after[path]
 		if !ok {
-			t.Errorf("plan a supprimé %s", path)
+			t.Errorf("plan deleted %s", path)
 			continue
 		}
 		if got != sum {
-			t.Errorf("plan a modifié le contenu de %s", path)
+			t.Errorf("plan modified the content of %s", path)
 		}
 	}
 	for path := range after {
 		if _, ok := before[path]; !ok {
-			t.Errorf("plan a créé %s", path)
+			t.Errorf("plan created %s", path)
 		}
 	}
 }
 
-// Ronde de correction 1 : une entrée de state sans id (state écrit ou
-// fusionné à la main) ne doit pas atteindre l'API. Sans ce garde,
-// refreshManaged appellerait GET /v1/databases/ (chemin vide), qui rendrait
-// soit un faux « disparue », soit un message qui parle de suppression alors
-// que le vrai problème est un state abîmé.
+// Review round 1: a state entry without an id (state written or merged by
+// hand) must not reach the API. Without this guard, refreshManaged would call
+// GET /v1/databases/ (empty path), which would return either a false
+// "vanished", or a message about deletion while the real problem is a damaged
+// state.
 func TestPlanRejectsStateEntryWithoutID(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -677,19 +676,19 @@ func TestPlanRejectsStateEntryWithoutID(t *testing.T) {
 
 	out, err := runCmd(t, "plan", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus d'entrée sans id\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal of the entry without an id\n%s", out)
 	}
-	for _, want := range []string{"database.tasks", "n'a pas d'identifiant", state.FileName} {
+	for _, want := range []string{"database.tasks", "has no identifier", state.FileName} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// C1 : une database gérée disparue (404) doit bloquer le plan ET le dire sur
-// stdout. Avant correction, Render sortait « Aucun changement. La
-// configuration correspond à l'état réel. » alors même que la commande
-// rendait un code d'erreur — stdout affirmait l'inverse de stderr.
+// C1: a vanished managed database (404) must block the plan AND say so on
+// stdout. Before the fix, Render printed "No changes. The configuration
+// matches the actual state." even though the command returned an error code —
+// stdout asserted the opposite of stderr.
 func TestPlanBlocksAndSaysSoWhenStateDatabaseIs404(t *testing.T) {
 	withFakeNtn(t, "authenticated_database_404")
 	dir := writeConfigDir(t, map[string]string{
@@ -700,20 +699,20 @@ func TestPlanBlocksAndSaysSoWhenStateDatabaseIs404(t *testing.T) {
 
 	out, err := runCmd(t, "plan", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un blocage sur une database introuvable\n%s", out)
+		t.Fatalf("Execute() error = nil, want a block on a database that is not found\n%s", out)
 	}
 	if strings.Contains(out, "No changes") {
-		t.Errorf("stdout affirme la conformité alors que la database a disparu:\n%s", out)
+		t.Errorf("stdout asserts conformity while the database vanished:\n%s", out)
 	}
-	for _, want := range []string{"Plan blocked", "introuvable", "database.tasks"} {
+	for _, want := range []string{"Plan blocked", "not found", "database.tasks"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
+			t.Errorf("output = %q, it must contain %q", out, want)
 		}
 	}
 }
 
-// C1 : même défaut, côté archivage — jusqu'ici la seule branche de
-// refreshManaged sans aucun test de bout en bout.
+// C1: same defect, on the archiving side — until now the only branch of
+// refreshManaged without any end-to-end test.
 func TestPlanBlocksAndSaysSoWhenStateDatabaseIsArchived(t *testing.T) {
 	withFakeNtn(t, "archived_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -724,22 +723,21 @@ func TestPlanBlocksAndSaysSoWhenStateDatabaseIsArchived(t *testing.T) {
 
 	out, err := runCmd(t, "plan", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un blocage sur une database archivée\n%s", out)
+		t.Fatalf("Execute() error = nil, want a block on an archived database\n%s", out)
 	}
 	if strings.Contains(out, "No changes") {
-		t.Errorf("stdout affirme la conformité alors que la database est archivée:\n%s", out)
+		t.Errorf("stdout asserts conformity while the database is archived:\n%s", out)
 	}
 	for _, want := range []string{"Plan blocked", "archiv", "database.tasks"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sortie = %q, elle doit contenir %q", out, want)
+			t.Errorf("output = %q, it must contain %q", out, want)
 		}
 	}
 }
 
-// C2 : après import, plan --skip-preflight n'a fait aucun appel réseau — il
-// ne peut donc pas affirmer que la configuration correspond à l'état réel.
-// Une CI qui s'appuierait sur ce mode passerait au vert sur une réécriture
-// silencieuse sans cette garantie.
+// C2: after import, plan --skip-preflight made no network call — it therefore
+// cannot assert that the configuration matches the actual state. A CI relying
+// on this mode would go green on a silent rewrite without this guarantee.
 func TestPlanSkipPreflightNamesResourceItDidNotCompare(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeImportFixture(t)
@@ -754,19 +752,19 @@ func TestPlanSkipPreflightNamesResourceItDidNotCompare(t *testing.T) {
 		t.Fatalf("plan error = %v\n%s", err, out)
 	}
 	if strings.Contains(out, "matches the actual state") {
-		t.Errorf("--skip-preflight ne doit jamais affirmer la conformité:\n%s", out)
+		t.Errorf("--skip-preflight must never assert conformity:\n%s", out)
 	}
 	if !strings.Contains(out, "Not compared") || !strings.Contains(out, "database.tasks") {
-		t.Errorf("sortie = %q, elle doit nommer la ressource non comparée", out)
+		t.Errorf("output = %q, it must name the resource not compared", out)
 	}
 }
 
-// Review Focus 5 : un state sans workspace_id ne peut pas être comparé. Ça ne
-// doit pas valoir « workspace différent ».
+// Review Focus 5: a state without workspace_id cannot be compared. It must not
+// count as "different workspace".
 func TestCheckWorkspaceMatchAcceptsEmptyWorkspaceID(t *testing.T) {
 	snap := &state.Snapshot{Version: state.Version}
 	if err := checkWorkspaceMatch(snap, "33333333-3333-4333-8333-333333333333"); err != nil {
-		t.Errorf("un workspace_id vide est inconnu, pas différent: %v", err)
+		t.Errorf("an empty workspace_id is unknown, not different: %v", err)
 	}
 }
 
@@ -774,29 +772,29 @@ func TestCheckWorkspaceMatchRejectsForeignWorkspace(t *testing.T) {
 	snap := &state.Snapshot{Version: state.Version, WorkspaceID: "44444444-4444-4444-8444-444444444444"}
 	err := checkWorkspaceMatch(snap, "33333333-3333-4333-8333-333333333333")
 	if err == nil {
-		t.Fatal("un state d'un autre workspace doit être refusé")
+		t.Fatal("a state from another workspace must be rejected")
 	}
 	if !strings.Contains(err.Error(), "44444444") || !strings.Contains(err.Error(), "33333333") {
-		t.Errorf("le message doit nommer les deux workspaces: %v", err)
+		t.Errorf("the message must name both workspaces: %v", err)
 	}
 }
 
-// De bout en bout : le plan mesure réellement les lignes contre l'API et
-// reclasse la ligne concernée avec ce qu'il a compté, au lieu de la laisser en
-// « impact inconnu ». Il ne bloque plus.
+// End to end: the plan actually measures the rows against the API and
+// reclassifies the affected line with what it counted, instead of leaving it
+// as "unknown impact". It no longer blocks.
 //
-// Le faux ntn rend deux lignes portant l'option "Fait" sur une propriété de
-// type status : mesuré, ce retrait est une réécriture silencieuse. Non mesuré,
-// il resterait « impact inconnu » — c'est exactement l'écart que cette passe
-// ferme. Depuis que le rendu porte le chiffre, ce test l'assère : c'est la
-// seule vérification de bout en bout que le nombre AFFICHÉ est celui qui a été
-// compté, et pas un compte d'une autre database ou un reste de classification.
+// The fake ntn returns two rows holding the "Fait" option on a status
+// property: measured, this removal is a silent rewrite. Unmeasured, it would
+// stay "unknown impact" — that is exactly the gap this pass closes. Since the
+// render carries the number, this test asserts it: it is the only end-to-end
+// check that the number SHOWN is the one that was counted, and not a count of
+// another database or a leftover of classification.
 func TestPlanMeasuresRowsAndDoesNotBlock(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml": workspaceYAML,
-		// Le YAML ne déclare plus l'option "Fait" que porte la database réelle :
-		// son retrait est mesuré à 2 lignes.
+		// The YAML no longer declares the "Fait" option the real database holds:
+		// its removal is measured at 2 rows.
 		"databases/all.yaml": `
 databases:
   - key: tasks
@@ -819,42 +817,42 @@ databases:
 
 	out, err := runCmd(t, "plan", "--dir", dir)
 	if err != nil {
-		t.Fatalf("plan ne doit plus échouer : %v\n%s", err, out)
+		t.Fatalf("plan must no longer fail: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "silent rewrite") {
-		t.Errorf("le retrait n'a pas été reclassé par la mesure:\n%s", out)
+		t.Errorf("the removal was not reclassified by the measurement:\n%s", out)
 	}
 	if strings.Contains(out, "unknown impact") {
-		t.Errorf("la ligne est restée non mesurée:\n%s", out)
+		t.Errorf("the line stayed unmeasured:\n%s", out)
 	}
 	if strings.Contains(out, "Plan blocked") {
-		t.Errorf("le plan bloque encore:\n%s", out)
+		t.Errorf("the plan still blocks:\n%s", out)
 	}
-	// Le chiffre lui-même, pas seulement la classe : c'est lui le produit.
+	// The number itself, not just the class: it is the product.
 	//
-	// La phrase ENTIÈRE, pas « 2 lignes » : ce fragment est déjà satisfait par la
-	// seule ligne d'agrégat, donc il ne prouverait pas que la ligne de détail
-	// porte son compte — ce qui est pourtant tout l'objet de cette passe.
+	// The WHOLE sentence, not "2 rows": that fragment is already satisfied by
+	// the aggregate line alone, so it would not prove the detail line carries
+	// its count — which is the whole point of this pass.
 	if !strings.Contains(out, "2 rows will be reassigned to another option, without a trace") {
-		t.Errorf("la ligne de détail ne porte pas son compte mesuré:\n%s", out)
+		t.Errorf("the detail line does not carry its measured count:\n%s", out)
 	}
 	if !strings.Contains(out, "Impact: 2 values reassigned without a trace.") {
-		t.Errorf("la ligne d'agrégat manque ou ne dit pas ce qui a été mesuré:\n%s", out)
+		t.Errorf("the aggregate line is missing or does not say what was measured:\n%s", out)
 	}
 }
 
-// Le piège d'ordre du faux ntn, désarmé pour TOUS les scénarios.
+// The fake ntn's ordering trap, disarmed for ALL scenarios.
 //
-// `/v1/data_sources/ds-1/query` porte le préfixe `/v1/data_sources/` : un
-// scénario qui teste le préfixe avant le suffixe `/query` rend le schéma d'un
-// data source à une requête de comptage. Ce n'est pas une erreur visible — la
-// réponse est un 200 valide — mais elle ne porte aucun `results`, et un
-// comptage qui en tirerait 0 ferait annoncer « rien à perdre ».
+// `/v1/data_sources/ds-1/query` carries the `/v1/data_sources/` prefix: a
+// scenario that tests the prefix before the `/query` suffix returns a data
+// source's schema to a count query. It is not a visible error — the response
+// is a valid 200 — but it carries no `results`, and a count that got 0 from it
+// would announce "nothing to lose".
 //
-// Ce test interroge le faux binaire directement, scénario par scénario : il
-// rattrape le piège dans un scénario existant comme dans un scénario futur.
+// This test queries the fake binary directly, scenario by scenario: it catches
+// the trap in an existing scenario as well as in a future one.
 func TestFakeNtnAnswersQueryWithAListInEveryScenario(t *testing.T) {
-	// Tous les scénarios qui servent /v1/data_sources/ et répondent en 200.
+	// Every scenario that serves /v1/data_sources/ and answers 200.
 	scenarios := []string{
 		"authenticated_database",
 		"authenticated_database_select",
@@ -870,20 +868,20 @@ func TestFakeNtnAnswersQueryWithAListInEveryScenario(t *testing.T) {
 				t.Fatalf("ntn api: %v", err)
 			}
 			if !strings.Contains(string(out), `"object":"list"`) {
-				t.Errorf("une requête de comptage doit rendre une liste, pas %s", out)
+				t.Errorf("a count query must return a list, not %s", out)
 			}
 			if !strings.Contains(string(out), `"results"`) {
-				t.Errorf("la liste doit porter un champ results, pas %s", out)
+				t.Errorf("the list must carry a results field, not %s", out)
 			}
 		})
 	}
 }
 
-// Le comptage doit interroger le data source que le plan vient de LIRE, pas
-// celui que le state a mémorisé. Le plan est calculé contre `refreshed` ; si la
-// mesure interroge un autre objet, elle compte les lignes d'une autre
-// database. Un id périmé encore vivant appartient alors à quelqu'un d'autre,
-// répond 200, et le 0 qui en sort devient « rien à perdre ».
+// The count must query the data source the plan just READ, not the one the
+// state remembered. The plan is computed against `refreshed`; if the
+// measurement queries another object, it counts the rows of another database.
+// A stale id still alive then belongs to someone else, answers 200, and the 0
+// coming out of it becomes "nothing to lose".
 func TestMeasuredDataSourceIDsPreferTheRefreshedOne(t *testing.T) {
 	snap := &state.Snapshot{
 		Version: state.Version,
@@ -895,8 +893,8 @@ func TestMeasuredDataSourceIDsPreferTheRefreshedOne(t *testing.T) {
 	}
 	refreshed := map[string]diff.Refreshed{
 		"tasks": {Database: state.Database{ID: "db-1", DataSourceID: "ds-frais"}},
-		// Relue, mais sans data source id : le state reste la meilleure réponse
-		// disponible, et vaut mieux que pas de mesure du tout.
+		// Read back, but without a data source id: the state stays the best
+		// available answer, and beats no measurement at all.
 		"notes": {Database: state.Database{ID: "db-2"}},
 	}
 
@@ -913,9 +911,9 @@ func TestMeasuredDataSourceIDsPreferTheRefreshedOne(t *testing.T) {
 	}
 }
 
-// Une ressource que le state n'ancre pas mais que le réel a rendue (une
-// orpheline lue par Compute) doit rester mesurable : son id vient alors du seul
-// endroit qui l'ait.
+// A resource the state does not anchor but the actual state returned (an
+// orphan read by Compute) must stay measurable: its id then comes from the only
+// place that has it.
 func TestMeasuredDataSourceIDsIncludesResourcesAbsentFromTheState(t *testing.T) {
 	got := measuredDataSourceIDs(&state.Snapshot{Version: state.Version},
 		map[string]diff.Refreshed{
@@ -926,10 +924,10 @@ func TestMeasuredDataSourceIDsIncludesResourcesAbsentFromTheState(t *testing.T) 
 	}
 }
 
-// Review Focus 2 : un comptage refusé par l'API ne fait pas échouer la
-// commande. La ligne reste en « impact inconnu », la cause part sur stderr, et
-// le reste du plan est rendu quand même — priver l'utilisateur de son plan
-// parce qu'un comptage a échoué serait le vrai défaut.
+// Review Focus 2: a count refused by the API does not fail the command. The
+// line stays "unknown impact", the cause goes to stderr, and the rest of the
+// plan is rendered anyway — depriving the user of their plan because a count
+// failed would be the real defect.
 func TestPlanReportsAFailedCountAndStillRendersThePlan(t *testing.T) {
 	withFakeNtn(t, "authenticated_database_query_403")
 	dir := writeConfigDir(t, map[string]string{
@@ -960,30 +958,29 @@ databases:
 	cmd.SetErr(&errOut)
 	cmd.SetArgs([]string{"plan", "--dir", dir})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("un comptage en échec ne doit pas faire échouer plan : %v\n%s", err, out.String())
+		t.Fatalf("a failed count must not fail plan: %v\n%s", err, out.String())
 	}
 
 	if !strings.Contains(out.String(), `option "Fait"`) {
-		t.Errorf("le reste du plan n'est pas rendu:\n%s", out.String())
+		t.Errorf("the rest of the plan is not rendered:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "unknown impact") {
-		t.Errorf("la ligne non mesurée doit rester inconnue:\n%s", out.String())
+		t.Errorf("the unmeasured line must stay unknown:\n%s", out.String())
 	}
-	// Les incidents ne polluent pas stdout : le plan doit rester exploitable
-	// dans un pipe.
-	if strings.Contains(out.String(), "comptage impossible") {
-		t.Errorf("l'incident est sur stdout:\n%s", out.String())
+	// Incidents do not pollute stdout: the plan must stay usable in a pipe.
+	if strings.Contains(out.String(), "count failed") {
+		t.Errorf("the incident is on stdout:\n%s", out.String())
 	}
-	for _, want := range []string{"comptage impossible", "database.tasks", "403"} {
+	for _, want := range []string{"count failed", "database.tasks", "403"} {
 		if !strings.Contains(errOut.String(), want) {
-			t.Errorf("stderr = %q, il doit contenir %q", errOut.String(), want)
+			t.Errorf("stderr = %q, it must contain %q", errOut.String(), want)
 		}
 	}
 }
 
-// statusWithoutFait déclare la database `tasks` SANS l'option "Fait" que le
-// faux ntn rend : son retrait est donc mesuré, et classé réécriture
-// silencieuse parce que des lignes la portent.
+// statusWithoutFait declares the `tasks` database WITHOUT the "Fait" option the
+// fake ntn returns: its removal is therefore measured, and classified as a
+// silent rewrite because rows hold it.
 const statusWithoutFait = `
 databases:
   - key: tasks
@@ -1000,8 +997,8 @@ databases:
             group: "To-do"
 `
 
-// Sans --fail-on, un plan qui réassigne des lignes reste en succès : plus rien
-// ne bloque, l'utilisateur est garant de sa base.
+// Without --fail-on, a plan that reassigns rows stays successful: nothing
+// blocks anymore, the user is responsible for their database.
 func TestPlanSucceedsOnSilentRewriteWithoutFailOn(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -1017,8 +1014,8 @@ func TestPlanSucceedsOnSilentRewriteWithoutFailOn(t *testing.T) {
 	}
 }
 
-// Avec --fail-on, la CI attrape le changement. C'est le mécanisme qui remplace
-// le blocage, et il est choisi dans le workflow.
+// With --fail-on, the CI catches the change. It is the mechanism that replaces
+// the block, and it is chosen in the workflow.
 func TestPlanFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -1031,15 +1028,15 @@ func TestPlanFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	}
 	out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=silent-rewrite")
 	if err == nil {
-		t.Fatalf("plan error = nil, want un échec\n%s", out)
+		t.Fatalf("plan error = nil, want a failure\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "silent rewrite") {
-		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+		t.Errorf("message = %q, it must name the class that triggered", err.Error())
 	}
 }
 
-// Une classe qui n'existe pas doit être refusée AVANT tout appel réseau : sinon
-// une CI mal configurée passerait au vert en croyant se protéger.
+// A class that does not exist must be rejected BEFORE any network call:
+// otherwise a misconfigured CI would go green believing it is protected.
 func TestPlanRejectsAnUnknownFailOnValue(t *testing.T) {
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml":     workspaceYAML,
@@ -1047,19 +1044,19 @@ func TestPlanRejectsAnUnknownFailOnValue(t *testing.T) {
 	})
 	_, err := runCmd(t, "plan", "--dir", dir, "--fail-on=dangereux")
 	if err == nil {
-		t.Fatal("plan error = nil, want un refus de la valeur")
+		t.Fatal("plan error = nil, want a rejection of the value")
 	}
 	for _, want := range []string{"dangereux", "destructive", "silent-rewrite", "unknown", "  → "} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// diff partage planOptions avec plan, donc --fail-on y est disponible sans rien
-// de plus. C'est diff, pas plan, que la documentation conseille en CI : le flag
-// y serait inutile s'il ne marchait que sur plan, et personne ne le verrait
-// avant que la CI ne laisse passer une réécriture.
+// diff shares planOptions with plan, so --fail-on is available there with
+// nothing more. It is diff, not plan, that the documentation recommends in CI:
+// the flag would be useless there if it only worked on plan, and nobody would
+// notice before the CI let a rewrite through.
 func TestDiffFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -1071,23 +1068,23 @@ func TestDiffFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	}
 	out, err := runCmd(t, "diff", "--dir", dir, "--fail-on=silent-rewrite")
 	if err == nil {
-		t.Fatalf("diff error = nil, want un échec\n%s", out)
+		t.Fatalf("diff error = nil, want a failure\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "silent rewrite") {
-		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+		t.Errorf("message = %q, it must name the class that triggered", err.Error())
 	}
-	// Le plan est rendu quand même : --fail-on change le code de sortie, il ne
-	// prive pas de ce qui explique l'échec.
+	// The plan is rendered anyway: --fail-on changes the exit code, it does not
+	// deprive the user of what explains the failure.
 	if !strings.Contains(out, `option "Fait"`) {
-		t.Errorf("le plan n'a pas été rendu avant l'échec:\n%s", out)
+		t.Errorf("the plan was not rendered before the failure:\n%s", out)
 	}
 }
 
-// --fail-on ne doit pas déclencher sur une classe qu'on ne lui a pas nommée.
-// La liste est énumérée, pas un seuil : demander `destructive` ne demande pas
-// « tout ce qui est au moins aussi grave », et faire échouer sur une réécriture
-// silencieuse ou un impact inconnu non demandés fabriquerait un ordre que le
-// produit refuse.
+// --fail-on must not trigger on a class it was not given. The list is
+// enumerated, not a threshold: asking for `destructive` does not ask for
+// "everything at least as serious", and failing on a silent rewrite or an
+// unknown impact that was not asked for would invent an ordering the product
+// refuses.
 func TestPlanFailOnIsEnumeratedNotAThreshold(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -1097,18 +1094,18 @@ func TestPlanFailOnIsEnumeratedNotAThreshold(t *testing.T) {
 	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	// Le plan porte une réécriture silencieuse mesurée. Demander `destructive`
-	// et `migration` ne doit rien attraper.
+	// The plan carries a measured silent rewrite. Asking for `destructive` and
+	// `migration` must catch nothing.
 	if out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=destructive,migration"); err != nil {
-		t.Fatalf("plan error = %v, want nil : aucune classe demandée n'est au plan\n%s", err, out)
+		t.Fatalf("plan error = %v, want nil: no requested class is in the plan\n%s", err, out)
 	}
 }
 
-// select → multi_select est classé sûr par la table des couples, et il l'est
-// pour les options redéclarées. Celles que le YAML omet disparaissent, et leurs
-// lignes passent à vide (mesuré le 2026-09-25). Avant, le plan ne le disait
-// nulle part et --fail-on=destructive laissait passer : c'est la perte que ce
-// produit existe pour annoncer.
+// select → multi_select is classified safe by the pair table, and it is for
+// the redeclared options. Those the YAML omits vanish, and their rows are
+// emptied (measured on 2026-09-25). Before, the plan said so nowhere and
+// --fail-on=destructive let it through: it is the loss this product exists to
+// announce.
 func TestPlanFailsOnDestructiveWhenATypeChangeDropsAnOption(t *testing.T) {
 	withFakeNtn(t, "authenticated_database_select")
 	dir := writeConfigDir(t, map[string]string{
@@ -1133,10 +1130,10 @@ databases:
 	}
 	out, err := runCmd(t, "plan", "--dir", dir, "--fail-on=destructive")
 	if err == nil {
-		t.Fatalf("plan error = nil, want un échec\n%s", out)
+		t.Fatalf("plan error = nil, want a failure\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "destructi") {
-		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+		t.Errorf("message = %q, it must name the class that triggered", err.Error())
 	}
 	for _, want := range []string{
 		`- option "Basse" (property "Prio")`,
@@ -1144,15 +1141,15 @@ databases:
 		"Impact: 2 values lost.",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("il manque %q:\n%s", want, out)
+			t.Errorf("%q is missing:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, `- option "Haute"`) {
-		t.Errorf("une option redéclarée sous le même nom garde ses lignes:\n%s", out)
+		t.Errorf("an option redeclared under the same name keeps its rows:\n%s", out)
 	}
 }
 
-// routedTransport rend en 200 le corps associé au préfixe du chemin demandé.
+// routedTransport returns with a 200 the body mapped to the prefix of the requested path.
 type routedTransport map[string]string
 
 func (r routedTransport) Execute(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
@@ -1161,11 +1158,11 @@ func (r routedTransport) Execute(_ context.Context, req transport.APIRequest) (t
 			return transport.APIResponse{Status: 200, Body: []byte(body)}, nil
 		}
 	}
-	return transport.APIResponse{}, fmt.Errorf("chemin non servi: %s", req.Path)
+	return transport.APIResponse{}, fmt.Errorf("path not served: %s", req.Path)
 }
 
-// Le refresh garde le nombre de data sources de la database relue : c'est lui
-// qui dit au plan qu'un compte de lignes de destruction n'en couvre qu'un.
+// The refresh keeps the data source count of the database read back: it is
+// what tells the plan that a destruction row count covers only one of them.
 func TestRefreshManagedKeepsTheDataSourceCount(t *testing.T) {
 	tr := routedTransport{
 		"/v1/databases/": `{"object":"database","id":"db-1","archived":false,"in_trash":false,` +

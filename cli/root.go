@@ -9,13 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version est écrasée au build via -ldflags.
+// Version is overwritten at build time via -ldflags.
 var Version = "0.0.0-dev"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "notion-seed",
-		Short:         "Déclare et planifie la structure d'un workspace Notion",
+		Short:         "Declare and plan the structure of a Notion workspace",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

@@ -14,8 +14,8 @@ import (
 	"github.com/tykok/notion-seed/core/state"
 )
 
-// testDatabaseID est l'UUID passé à import. Le faux ntn répond avec l'id
-// interne "db-1" : le state retient ce que l'API rend, pas ce qu'on a tapé.
+// testDatabaseID is the UUID passed to import. The fake ntn answers with the
+// internal id "db-1": the state keeps what the API returns, not what was typed.
 const testDatabaseID = "1b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d"
 
 const oneDatabase = `
@@ -27,8 +27,8 @@ databases:
         type: title
 `
 
-// tasksWithStatus décrit la database que le scénario authenticated_database
-// rend : deux options de status, avec leurs couleurs et leurs groupes.
+// tasksWithStatus describes the database the authenticated_database scenario
+// returns: two status options, with their colors and groups.
 const tasksWithStatus = `
 databases:
   - key: tasks
@@ -49,10 +49,10 @@ databases:
             group: "Complete"
 `
 
-// forceInteractive fait croire à apply qu'il parle à un terminal. Le vrai test
-// (stdin est un périphérique caractère) est infaisable dans `go test`, et le
-// contourner par un flag de production serait pire : le point d'injection reste
-// interne au paquet.
+// forceInteractive makes apply believe it talks to a terminal. The real test
+// (stdin is a character device) cannot be done in `go test`, and bypassing it
+// with a production flag would be worse: the injection point stays internal to
+// the package.
 func forceInteractive(t *testing.T) {
 	t.Helper()
 	previous := isInteractive
@@ -60,7 +60,7 @@ func forceInteractive(t *testing.T) {
 	t.Cleanup(func() { isInteractive = previous })
 }
 
-// runCmdWithStdin exécute une commande en lui fournissant une entrée standard.
+// runCmdWithStdin runs a command, feeding it a standard input.
 func runCmdWithStdin(t *testing.T, input string, args ...string) (string, error) {
 	t.Helper()
 	cmd := NewRootCmd()
@@ -82,8 +82,8 @@ func mustReadFile(t *testing.T, path string) string {
 	return string(b)
 }
 
-// Le chemin heureux : la création part, le state est écrit, le compte rendu la
-// nomme.
+// The happy path: the creation goes out, the state is written, the report
+// names it.
 func TestApplyCreatesDatabaseAndWritesState(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -96,22 +96,22 @@ func TestApplyCreatesDatabaseAndWritesState(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "database.projects created") {
-		t.Errorf("sortie:\n%s", out)
+		t.Errorf("output:\n%s", out)
 	}
 	snap, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if snap.Databases["projects"].ID != "db-new" {
-		t.Errorf("state = %+v, want l'id db-new", snap.Databases["projects"])
+		t.Errorf("state = %+v, want id db-new", snap.Databases["projects"])
 	}
 }
 
-// apply est souvent la PREMIÈRE commande qui écrit le state. S'il n'y inscrit
-// pas le workspace, checkWorkspaceMatch reste désarmé pour toujours : un state
-// sans workspace_id est traité comme « on ne peut pas vérifier ». Le projet
-// serait alors jouable contre n'importe quel workspace, et un 404 venu du
-// mauvais workspace ferait jeter une identité parfaitement valide.
+// apply is often the FIRST command that writes the state. If it does not
+// record the workspace, checkWorkspaceMatch stays disarmed forever: a state
+// without workspace_id is treated as "cannot check". The project could then be
+// run against any workspace, and a 404 from the wrong workspace would throw
+// away a perfectly valid identity.
 func TestApplyRecordsTheWorkspaceInTheStateItCreates(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -126,15 +126,15 @@ func TestApplyRecordsTheWorkspaceInTheStateItCreates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// L'id que le faux ntn annonce dans whoami.
+	// The id the fake ntn announces in whoami.
 	if snap.WorkspaceID != "33333333-3333-4333-8333-333333333333" {
-		t.Errorf("WorkspaceID = %q, want celui sur lequel ntn est authentifié", snap.WorkspaceID)
+		t.Errorf("WorkspaceID = %q, want the one ntn is authenticated on", snap.WorkspaceID)
 	}
 }
 
-// Le nettoyage d'une entrée de state obsolète n'écrit RIEN dans Notion. La
-// confirmation ne doit pas annoncer le contraire : c'est le seul moment où
-// l'utilisateur décide, sur la foi de ce qui est écrit à l'écran.
+// Cleaning up a stale state entry writes NOTHING to Notion. The confirmation
+// must not announce otherwise: it is the only moment the user decides, based
+// on what is written on screen.
 func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -144,7 +144,7 @@ func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	// La database sort du YAML ET disparaît de Notion : entrée obsolète pure.
+	// The database leaves the YAML AND vanishes from Notion: a pure stale entry.
 	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
 		[]byte("databases: []\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -156,29 +156,35 @@ func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	if strings.Contains(out, "vont partir dans la page") {
-		t.Errorf("la confirmation annonce une écriture Notion pour un nettoyage local:\n%s", out)
+	for _, notionWrite := range []string{
+		"will be created under page",
+		"will be updated in Notion",
+		"will be moved to the trash in Notion",
+	} {
+		if strings.Contains(out, notionWrite) {
+			t.Errorf("the confirmation announces a Notion write (%q) for a local cleanup:\n%s", notionWrite, out)
+		}
 	}
-	if !strings.Contains(out, "state") {
-		t.Errorf("la confirmation ne dit pas ce qui va être touché:\n%s", out)
+	if !strings.Contains(out, "1 stale entry(ies) will be removed from the state") {
+		t.Errorf("the confirmation does not say what will be touched:\n%s", out)
 	}
 	snap, lerr := state.Load(dir)
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
 	if _, ok := snap.Databases["tasks"]; ok {
-		t.Error("l'entrée obsolète n'a pas été retirée")
+		t.Error("the stale entry was not removed")
 	}
 }
 
-// Un plan bloqué gagne sur --auto-approve : le consentement est déclaratif, et
-// la confirmation ne lève rien. Aucune écriture.
+// A blocked plan wins over --auto-approve: consent is declarative, and the
+// confirmation clears nothing. No write.
 //
-// notion-seed ne bloque plus sur la foi de la classe d'un changement, ni sur
-// lifecycle.prevent_destroy ou allow_data_loss (voir core/diff) : les deux ne
-// sont plus que des accusés de lecture. Le seul blocage qui subsiste est une
-// ressource que le state ancre et que Notion ne connaît plus — c'est le
-// scénario qui exerce encore un vrai refus ici.
+// notion-seed no longer blocks based on a change's class, nor on
+// lifecycle.prevent_destroy or allow_data_loss (see core/diff): both are now
+// only acknowledgements. The only remaining block is a resource the state
+// anchors and Notion no longer knows — that is the scenario that still
+// exercises a real refusal here.
 func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -188,25 +194,25 @@ func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
 	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	// database.tasks reste déclarée dans le YAML — ce n'est pas une orpheline —
-	// mais Notion ne la connaît plus : le plan devient incalculable, quel que
-	// soit --auto-approve.
+	// database.tasks stays declared in the YAML — it is not an orphan — but
+	// Notion no longer knows it: the plan cannot be computed, whatever
+	// --auto-approve says.
 	withFakeNtn(t, "authenticated_database_404")
 	before := mustReadFile(t, filepath.Join(dir, state.FileName))
 
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal\n%s", out)
 	}
 	if !strings.Contains(out, "Plan blocked") {
-		t.Errorf("sortie:\n%s", out)
+		t.Errorf("output:\n%s", out)
 	}
 	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
-		t.Error("le state a été modifié malgré un plan bloqué")
+		t.Error("the state was modified despite a blocked plan")
 	}
 }
 
-// Un plan déjà convergé n'écrit rien, ne demande rien, et sort en 0.
+// An already converged plan writes nothing, asks nothing, and exits 0.
 func TestApplyOnConvergedPlanWritesNothing(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -227,21 +233,21 @@ func TestApplyOnConvergedPlanWritesNothing(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s", aerr, out)
 	}
 	if !strings.Contains(out, "No changes") {
-		t.Errorf("sortie:\n%s", out)
+		t.Errorf("output:\n%s", out)
 	}
 	after, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !after.ModTime().Equal(before.ModTime()) {
-		t.Error("le state a été réécrit alors que rien ne changeait")
+		t.Error("the state was rewritten while nothing changed")
 	}
 }
 
-// Toute réponse qui n'est pas exactement « apply » refuse.
+// Any answer that is not exactly "apply" declines.
 func TestApplyRefusesOnAnythingButTheWord(t *testing.T) {
 	for _, answer := range []string{"", "oui", "APPLY", "y", "apply now"} {
-		t.Run("réponse "+answer, func(t *testing.T) {
+		t.Run("answer "+answer, func(t *testing.T) {
 			withFakeNtn(t, "authenticated_create")
 			dir := writeConfigDir(t, map[string]string{
 				"workspace.yaml":     workspaceYAML,
@@ -251,19 +257,19 @@ func TestApplyRefusesOnAnythingButTheWord(t *testing.T) {
 
 			out, err := runCmdWithStdin(t, answer+"\n", "apply", "--dir", dir)
 			if err == nil {
-				t.Fatalf("Execute() error = nil, want un refus pour %q\n%s", answer, out)
+				t.Fatalf("Execute() error = nil, want a refusal for %q\n%s", answer, out)
 			}
-			if !strings.Contains(err.Error(), "« apply »") {
-				t.Errorf("message = %q, il doit citer « apply » comme le prompt", err.Error())
+			if !strings.Contains(err.Error(), `"apply"`) {
+				t.Errorf("message = %q, it must quote \"apply\" like the prompt", err.Error())
 			}
 			if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
-				t.Error("un state a été écrit alors que la confirmation a été refusée")
+				t.Error("a state was written although the confirmation was declined")
 			}
 		})
 	}
 }
 
-// Une entrée standard fermée sans réponse n'est pas un oui.
+// A standard input closed without an answer is not a yes.
 func TestApplyRefusesOnEOF(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -274,16 +280,16 @@ func TestApplyRefusesOnEOF(t *testing.T) {
 
 	out, err := runCmdWithStdin(t, "", "apply", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus sur EOF\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal on EOF\n%s", out)
 	}
 	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit alors qu'aucune confirmation n'a été donnée")
+		t.Error("a state was written although no confirmation was given")
 	}
 }
 
-// Ctrl-D sur un vrai terminal : l'entrée se ferme sans réponse. Mesuré le
-// 2026-09-25, le message disait « l'entrée standard n'est pas un terminal »,
-// ce qui est faux — c'en était un. La fin d'entrée a son propre message.
+// Ctrl-D on a real terminal: the input closes without an answer. Measured on
+// 2026-09-25, the message said "standard input is not a terminal", which is
+// wrong — it was one. End of input has its own message.
 func TestApplyNamesEndOfInputOnATerminal(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -294,29 +300,28 @@ func TestApplyNamesEndOfInputOnATerminal(t *testing.T) {
 
 	out, err := runCmdWithStdin(t, "", "apply", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus sur fin d'entrée\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal on end of input\n%s", out)
 	}
-	if strings.Contains(err.Error(), "pas un terminal") {
-		t.Errorf("message = %q, il accuse le terminal d'une fin d'entrée", err.Error())
+	if strings.Contains(err.Error(), "not a terminal") {
+		t.Errorf("message = %q, it blames the terminal for an end of input", err.Error())
 	}
-	// « relancez la commande », pas `notion-seed apply` : les flags de
-	// l'utilisateur seraient perdus. Et « apply » entre guillemets français,
-	// comme au prompt.
-	for _, want := range []string{"fin d'entrée", "rien n'a été appliqué", "  → ",
-		"relancez la commande", "« apply »"} {
+	// "rerun the command", not `notion-seed apply`: the user's flags would be
+	// lost. And "apply" in double quotes, as at the prompt.
+	for _, want := range []string{"end of input", "nothing was applied", "  → ",
+		"rerun the command", `"apply"`} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+			t.Errorf("message = %q, it must contain %q", err.Error(), want)
 		}
 	}
 }
 
-// /dev/null est un périphérique caractère, comme un terminal : sans ce test, une
-// entrée branchée dessus passerait pour un terminal, et sa fin d'entrée
-// immédiate pour un Ctrl-D.
+// /dev/null is a character device, like a terminal: without this test, an
+// input wired to it would pass for a terminal, and its immediate end of input
+// for a Ctrl-D.
 func TestIsInteractiveRejectsTheNullDevice(t *testing.T) {
 	f, err := os.Open(os.DevNull)
 	if err != nil {
-		t.Skipf("%s indisponible: %v", os.DevNull, err)
+		t.Skipf("%s unavailable: %v", os.DevNull, err)
 	}
 	defer f.Close()
 	cmd := NewRootCmd()
@@ -326,7 +331,7 @@ func TestIsInteractiveRejectsTheNullDevice(t *testing.T) {
 	}
 }
 
-// Le mot exact confirme, et la création part.
+// The exact word confirms, and the creation goes out.
 func TestApplyProceedsOnExactConfirmation(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -340,12 +345,12 @@ func TestApplyProceedsOnExactConfirmation(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "database.projects created") {
-		t.Errorf("sortie:\n%s", out)
+		t.Errorf("output:\n%s", out)
 	}
 }
 
-// Hors TTY et sans --auto-approve : refus explicite, plutôt qu'une exécution
-// parce que personne ne répondait.
+// Outside a TTY and without --auto-approve: an explicit refusal, rather than a
+// run because nobody answered.
 func TestApplyRefusesWithoutTTYAndWithoutAutoApprove(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")
 	dir := writeConfigDir(t, map[string]string{
@@ -355,21 +360,21 @@ func TestApplyRefusesWithoutTTYAndWithoutAutoApprove(t *testing.T) {
 
 	out, err := runCmd(t, "apply", "--dir", dir)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "--auto-approve") {
-		t.Errorf("message = %q, il doit nommer --auto-approve", err.Error())
+		t.Errorf("message = %q, it must name --auto-approve", err.Error())
 	}
-	// Le mot à taper s'écrit comme le prompt l'affiche : « apply ».
-	if !strings.Contains(err.Error(), "« apply »") {
-		t.Errorf("message = %q, il doit citer « apply » entre guillemets français", err.Error())
+	// The word to type is written as the prompt shows it: "apply".
+	if !strings.Contains(err.Error(), `"apply"`) {
+		t.Errorf("message = %q, it must quote \"apply\" in double quotes", err.Error())
 	}
 	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit sans confirmation possible")
+		t.Error("a state was written without any possible confirmation")
 	}
 }
 
-// Écrire hors ligne n'a pas de sens, comme pour import.
+// Writing offline makes no sense, as for import.
 func TestApplyRejectsSkipPreflight(t *testing.T) {
 	dir := writeConfigDir(t, map[string]string{
 		"workspace.yaml":     workspaceYAML,
@@ -377,15 +382,15 @@ func TestApplyRejectsSkipPreflight(t *testing.T) {
 	})
 	out, err := runCmd(t, "apply", "--dir", dir, "--skip-preflight", "--auto-approve")
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un refus\n%s", out)
+		t.Fatalf("Execute() error = nil, want a refusal\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "--skip-preflight") {
-		t.Errorf("message = %q, il doit nommer --skip-preflight", err.Error())
+		t.Errorf("message = %q, it must name --skip-preflight", err.Error())
 	}
 }
 
-// Un refus de l'API arrête la série sans rien annuler, et le state ne retient
-// rien.
+// An API refusal stops the series without rolling anything back, and the state
+// keeps nothing.
 func TestApplyStopsWithoutRollbackWhenAPIRefuses(t *testing.T) {
 	withFakeNtn(t, "authenticated_create_refused")
 	dir := writeConfigDir(t, map[string]string{
@@ -395,17 +400,17 @@ func TestApplyStopsWithoutRollbackWhenAPIRefuses(t *testing.T) {
 
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want l'échec de création\n%s", out)
+		t.Fatalf("Execute() error = nil, want the creation failure\n%s", out)
 	}
 	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
-		t.Error("un state a été écrit alors qu'aucune création n'a abouti")
+		t.Error("a state was written although no creation succeeded")
 	}
 }
 
-// apply partage planOptions avec plan : --fail-on y apparaît donc dans l'aide.
-// Un flag affiché puis ignoré serait pire que pas de flag — la CI qui ÉCRIT est
-// justement celle qui croit se protéger. apply doit donc s'arrêter sur la
-// classe demandée, avant d'écrire quoi que ce soit.
+// apply shares planOptions with plan: --fail-on therefore shows in its help. A
+// flag shown then ignored would be worse than no flag — the CI that WRITES is
+// precisely the one that believes it is protected. apply must therefore stop
+// on the requested class, before writing anything.
 func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 	withFakeNtn(t, "authenticated_database")
 	dir := writeConfigDir(t, map[string]string{
@@ -419,21 +424,21 @@ func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve",
 		"--fail-on=silent-rewrite")
 	if err == nil {
-		t.Fatalf("apply error = nil, want un échec\n%s", out)
+		t.Fatalf("apply error = nil, want a failure\n%s", out)
 	}
-	// Le message doit être celui de --fail-on, pas celui de la non-convergence :
-	// sinon rien ne prouve que le flag a servi à quelque chose.
+	// The message must be the --fail-on one, not the non-convergence one:
+	// otherwise nothing proves the flag did anything.
 	if !strings.Contains(err.Error(), "--fail-on") {
-		t.Errorf("message = %q, il doit dire que --fail-on a déclenché", err.Error())
+		t.Errorf("message = %q, it must say --fail-on triggered", err.Error())
 	}
 	if !strings.Contains(err.Error(), "silent rewrite") {
-		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
+		t.Errorf("message = %q, it must name the class that triggered", err.Error())
 	}
 }
 
-// tasksWithRenamedOption reprend tasksWithStatus en changeant le NOM de
-// l'option "Fait" sans toucher à sa key : l'API ne sait pas renommer une
-// option, donc la ressource est retenue.
+// tasksWithRenamedOption takes tasksWithStatus and changes the NAME of the
+// "Fait" option without touching its key: the API cannot rename an option, so
+// the resource is withheld.
 const tasksWithRenamedOption = `
 databases:
   - key: tasks
@@ -454,24 +459,23 @@ databases:
             group: "Complete"
 `
 
-// tasksWithEstimate ajoute une propriété à la database importée : un update
-// que cette version écrit.
+// tasksWithEstimate adds a property to the imported database: an update this
+// version writes.
 const tasksWithEstimate = tasksWithStatus + `      Estimate:
         type: number
 `
 
-// importThenDeclare importe la database du scénario à état de fakentn, puis
-// remplace le YAML par celui du test, dans le MÊME dossier.
+// importThenDeclare imports the database of fakentn's stateful scenario, then
+// replaces the YAML with the test's, in the SAME directory.
 //
-// L'import se fait toujours avec tasksWithStatus : import joint les keys
-// d'options PAR NOM, donc importer avec un nom d'option changé laisserait
-// l'option renommée sans key, et le plan montrerait un retrait suivi d'un ajout
-// au lieu d'une migration. C'est le YAML déclaré APRÈS l'import qui porte le
-// changement à tester.
+// The import always uses tasksWithStatus: import joins option keys BY NAME, so
+// importing with a changed option name would leave the renamed option without
+// a key, and the plan would show a removal followed by an addition instead of
+// a migration. The YAML declared AFTER the import carries the change to test.
 //
-// Le scénario garde en fichier les PATCH qu'il reçoit et les fusionne dans ses
-// lectures suivantes : sans ça, la relecture qui suit une écriture rendrait
-// l'état d'avant, et apply signalerait un écart qui n'existe pas.
+// The scenario keeps the PATCHes it receives in a file and merges them into
+// its next reads: without that, the read-back following a write would return
+// the previous state, and apply would report a mismatch that does not exist.
 func importThenDeclare(t *testing.T, databasesYAML string) string {
 	t.Helper()
 	withFakeNtn(t, "authenticated_database_updatable")
@@ -490,9 +494,9 @@ func importThenDeclare(t *testing.T, databasesYAML string) string {
 	return dir
 }
 
-// applyAfterImport monte importThenDeclare puis lance apply sans confirmation.
-// Les tests d'update de ce fichier partagent ce montage : ce qui les distingue
-// est le YAML, pas la plomberie.
+// applyAfterImport sets up importThenDeclare then runs apply without
+// confirmation. The update tests of this file share this setup: what sets them
+// apart is the YAML, not the plumbing.
 func applyAfterImport(t *testing.T, databasesYAML string) (string, error) {
 	t.Helper()
 	dir := importThenDeclare(t, databasesYAML)
@@ -502,51 +506,51 @@ func applyAfterImport(t *testing.T, databasesYAML string) (string, error) {
 func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
 	out, err := applyAfterImport(t, tasksWithRenamedOption)
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
+		t.Fatalf("Execute() error = nil, want an apply that did not converge\n%s", out)
 	}
-	if !strings.Contains(out, "Retenu — migration requise") {
-		t.Errorf("sortie:\n%s", out)
+	if !strings.Contains(out, "Withheld — migration required") {
+		t.Errorf("output:\n%s", out)
 	}
 	if !strings.Contains(out, "database.tasks") {
-		t.Errorf("la section ne nomme pas la ressource:\n%s", out)
+		t.Errorf("the section does not name the resource:\n%s", out)
 	}
-	// La raison, pas seulement le fait : une ressource sautée sans motif renvoie
-	// l'utilisateur deviner.
+	// The reason, not just the fact: a resource skipped without a reason leaves
+	// the user guessing.
 	if !strings.Contains(out, "migrated by hand") {
-		t.Errorf("la section ne dit pas quoi faire:\n%s", out)
+		t.Errorf("the section does not say what to do:\n%s", out)
 	}
-	// Le bilan doit compter la ressource retenue alors qu'apply échoue
-	// à cause de cette ressource.
-	if !strings.Contains(out, "Retenu : 1 ressource(s)") {
-		t.Errorf("le bilan ne compte pas la ressource retenue:\n%s", out)
+	// The summary must count the withheld resource while apply fails
+	// because of this resource.
+	if !strings.Contains(out, "Withheld: 1 resource(s)") {
+		t.Errorf("the summary does not count the withheld resource:\n%s", out)
 	}
-	// Rien n'est écrit : le compte est le coût du remède, pas une perte.
+	// Nothing is written: the count is the cost of the remedy, not a loss.
 	if !strings.Contains(out, `2 rows hold "Fait": migrate them by hand`) {
-		t.Errorf("la ligne ne chiffre pas la migration à faire:\n%s", out)
+		t.Errorf("the line does not quantify the migration to do:\n%s", out)
 	}
 	if strings.Contains(out, "reassigned") {
-		t.Errorf("une ressource retenue est annoncée comme réassignant des lignes:\n%s", out)
+		t.Errorf("a withheld resource is announced as reassigning rows:\n%s", out)
 	}
 }
 
-// Une ressource retenue ne part pas : aucun PATCH, state intact.
+// A withheld resource does not go out: no PATCH, state intact.
 func TestApplyWritesNothingForAWithheldResource(t *testing.T) {
 	dir := importThenDeclare(t, tasksWithRenamedOption)
 	before := mustReadFile(t, filepath.Join(dir, state.FileName))
 
 	if out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve"); err == nil {
-		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
+		t.Fatalf("Execute() error = nil, want an apply that did not converge\n%s", out)
 	}
 	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
-		t.Error("le state a été réécrit pour une ressource retenue")
+		t.Error("the state was rewritten for a withheld resource")
 	}
 	if _, err := os.Stat(os.Getenv("FAKE_NTN_STATE_FILE")); !os.IsNotExist(err) {
-		t.Error("un PATCH est parti pour une ressource retenue")
+		t.Error("a PATCH went out for a withheld resource")
 	}
 }
 
-// L'annonce des modifications précède la confirmation : c'est le seul moment où
-// l'utilisateur décide, sur la foi de ce qui est à l'écran.
+// The update announcement precedes the confirmation: it is the only moment the
+// user decides, based on what is on screen.
 func TestApplyAnnouncesUpdatesBeforeConfirmation(t *testing.T) {
 	dir := importThenDeclare(t, tasksWithEstimate)
 	forceInteractive(t)
@@ -555,16 +559,16 @@ func TestApplyAnnouncesUpdatesBeforeConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	announce := strings.Index(out, "vont être modifiées")
-	prompt := strings.Index(out, "Confirmez")
+	announce := strings.Index(out, "will be updated")
+	prompt := strings.Index(out, "to confirm:")
 	if announce < 0 || prompt < 0 || announce > prompt {
-		t.Errorf("sortie:\n%s\nwant l'annonce des modifications avant la confirmation", out)
+		t.Errorf("sortie:\n%s\nwant the update announcement before the confirmation", out)
 	}
 }
 
-// Le chemin heureux de l'update, de bout en bout : la propriété part, la
-// relecture la rapporte, le state l'inscrit, le compte rendu la nomme, et le
-// plan suivant est vide.
+// The update happy path, end to end: the property goes out, the read-back
+// reports it, the state records it, the report names it, and the next plan is
+// empty.
 func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 	dir := importThenDeclare(t, tasksWithEstimate)
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
@@ -572,10 +576,10 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "~ database.tasks updated") {
-		t.Errorf("le compte rendu ne nomme pas la modification:\n%s", out)
+		t.Errorf("the report does not name the update:\n%s", out)
 	}
-	if !strings.Contains(out, "1 modification(s)") {
-		t.Errorf("le bilan ne compte pas la modification:\n%s", out)
+	if !strings.Contains(out, "1 updated") {
+		t.Errorf("the summary does not count the update:\n%s", out)
 	}
 
 	snap, lerr := state.Load(dir)
@@ -583,7 +587,7 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 		t.Fatal(lerr)
 	}
 	if _, ok := snap.Databases["tasks"].Properties["Estimate"]; !ok {
-		t.Errorf("state = %+v, want la propriété Estimate relue", snap.Databases["tasks"])
+		t.Errorf("state = %+v, want the Estimate property read back", snap.Databases["tasks"])
 	}
 
 	planOut, perr := runCmd(t, "plan", "--dir", dir)
@@ -591,19 +595,19 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
 	if !strings.Contains(planOut, "No changes") {
-		t.Errorf("le plan qui suit un apply réussi n'est pas vide:\n%s", planOut)
+		t.Errorf("the plan following a successful apply is not empty:\n%s", planOut)
 	}
 }
 
-// orphanYAML retire toute database du YAML : la database importée devient
-// orpheline, et Notion la porte toujours.
+// orphanYAML removes every database from the YAML: the imported database
+// becomes an orphan, and Notion still holds it.
 const orphanYAML = "databases: []\n"
 
-// trashLine est la SEULE écriture qu'une destruction doit produire.
+// trashLine is the ONLY write a destruction must produce.
 const trashLine = `PATCH /v1/databases/db-1 {"in_trash":true}` + "\n"
 
-// withMutationLog demande au scénario à état de journaliser chaque écriture
-// qu'il reçoit, et rend le chemin du journal.
+// withMutationLog asks the stateful scenario to log every write it receives,
+// and returns the log path.
 func withMutationLog(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fakentn.log")
@@ -611,8 +615,8 @@ func withMutationLog(t *testing.T) string {
 	return path
 }
 
-// readMutationLog rend le journal, "" s'il n'a jamais été créé : aucune
-// écriture n'est partie.
+// readMutationLog returns the log, "" if it was never created: no write went
+// out.
 func readMutationLog(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -625,11 +629,11 @@ func readMutationLog(t *testing.T, path string) string {
 	return string(b)
 }
 
-// Le chemin heureux de la destruction, de bout en bout :
-//   - l'annonce a sa propre ligne, avant la confirmation, distincte du nettoyage ;
-//   - un seul PATCH part, et il ne porte que la corbeille ;
-//   - l'entrée quitte le state ;
-//   - le plan suivant est vide.
+// The destruction happy path, end to end:
+//   - the announcement has its own line, before the confirmation, distinct from the cleanup;
+//   - a single PATCH goes out, and it carries only the trashing;
+//   - the entry leaves the state;
+//   - the next plan is empty.
 func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 	logPath := withMutationLog(t)
 	dir := importThenDeclare(t, orphanYAML)
@@ -639,23 +643,23 @@ func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
-	announce := strings.Index(out, "1 database(s) vont être mises à la corbeille")
-	prompt := strings.Index(out, "Confirmez")
+	announce := strings.Index(out, "1 database(s) will be moved to the trash")
+	prompt := strings.Index(out, "to confirm:")
 	if announce < 0 || prompt < 0 || announce > prompt {
-		t.Errorf("sortie:\n%s\nwant l'annonce de la corbeille avant la confirmation", out)
+		t.Errorf("sortie:\n%s\nwant the trash announcement before the confirmation", out)
 	}
-	// Une destruction n'est pas un nettoyage : elle écrit dans Notion.
-	if strings.Contains(out, "entrée(s) obsolètes") {
-		t.Errorf("la destruction est annoncée comme un nettoyage local:\n%s", out)
+	// A destruction is not a cleanup: it writes to Notion.
+	if strings.Contains(out, "stale entry(ies)") {
+		t.Errorf("the destruction is announced as a local cleanup:\n%s", out)
 	}
 	if !strings.Contains(out, "- database.tasks moved to the trash") {
-		t.Errorf("le compte rendu ne nomme pas la destruction:\n%s", out)
+		t.Errorf("the report does not name the destruction:\n%s", out)
 	}
-	if !strings.Contains(out, "1 mise(s) à la corbeille") {
-		t.Errorf("le bilan ne compte pas la destruction:\n%s", out)
+	if !strings.Contains(out, "1 trashed") {
+		t.Errorf("the summary does not count the destruction:\n%s", out)
 	}
 	if got := readMutationLog(t, logPath); got != trashLine {
-		t.Errorf("écritures = %q, want exactement %q", got, trashLine)
+		t.Errorf("writes = %q, want exactly %q", got, trashLine)
 	}
 
 	snap, lerr := state.Load(dir)
@@ -663,21 +667,21 @@ func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
 		t.Fatal(lerr)
 	}
 	if _, ok := snap.Databases["tasks"]; ok {
-		t.Error("l'entrée de la database mise à la corbeille est restée dans le state")
+		t.Error("the entry of the trashed database stayed in the state")
 	}
 	planOut, perr := runCmd(t, "plan", "--dir", dir)
 	if perr != nil {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
 	if !strings.Contains(planOut, "No changes") {
-		t.Errorf("le plan qui suit une destruction n'est pas vide:\n%s", planOut)
+		t.Errorf("the plan following a destruction is not empty:\n%s", planOut)
 	}
 }
 
-// Mesuré le 2026-09-25 : la destruction s'annonçait sans dire combien de lignes
-// la database emporte. Le faux ntn en porte 3 — et 2 seulement portent « Fait »,
-// donc un 2 trahirait une requête filtrée au lieu du compte de toutes les
-// lignes.
+// Measured on 2026-09-25: the destruction was announced without saying how
+// many rows the database takes with it. The fake ntn holds 3 — and only 2 hold
+// "Fait", so a 2 would betray a filtered query instead of the count of all
+// rows.
 func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
 	dir := importThenDeclare(t, orphanYAML)
 
@@ -691,13 +695,13 @@ func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
 		"Impact: 1 database(s) in the trash with 3 row(s).",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sortie:\n%s\nwant %q", out, want)
+			t.Errorf("output:\n%s\nwant %q", out, want)
 		}
 	}
 }
 
-// Review Focus #4 : prevent_destroy est un accusé de lecture. La destruction
-// part, et la mention reste affichée.
+// Review Focus #4: prevent_destroy is an acknowledgement. The destruction
+// goes out, and the mention stays displayed.
 func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
 	logPath := withMutationLog(t)
 	dir := importThenDeclare(t, orphanYAML)
@@ -711,15 +715,15 @@ func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
 		t.Fatalf("Execute() error = %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "→ declared in lifecycle.prevent_destroy.") {
-		t.Errorf("la mention prevent_destroy a disparu:\n%s", out)
+		t.Errorf("the prevent_destroy mention disappeared:\n%s", out)
 	}
 	if got := readMutationLog(t, logPath); got != trashLine {
-		t.Errorf("écritures = %q, want exactement %q", got, trashLine)
+		t.Errorf("writes = %q, want exactly %q", got, trashLine)
 	}
 }
 
-// Review Focus #5 : une CI qui a demandé --fail-on=destructive ne met JAMAIS une
-// database à la corbeille. Zéro écriture, state intact.
+// Review Focus #5: a CI that asked for --fail-on=destructive NEVER moves a
+// database to the trash. Zero writes, state intact.
 func TestApplyFailOnDestructiveTrashesNothing(t *testing.T) {
 	logPath := withMutationLog(t)
 	dir := importThenDeclare(t, orphanYAML)
@@ -727,21 +731,21 @@ func TestApplyFailOnDestructiveTrashesNothing(t *testing.T) {
 
 	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve", "--fail-on=destructive")
 	if err == nil {
-		t.Fatalf("Execute() error = nil, want le refus de --fail-on\n%s", out)
+		t.Fatalf("Execute() error = nil, want the --fail-on refusal\n%s", out)
 	}
 	if !strings.Contains(err.Error(), "--fail-on") {
-		t.Errorf("message = %q, il doit dire que --fail-on a déclenché", err.Error())
+		t.Errorf("message = %q, it must say --fail-on triggered", err.Error())
 	}
 	if got := readMutationLog(t, logPath); got != "" {
-		t.Errorf("écritures = %q, want aucune", got)
+		t.Errorf("writes = %q, want none", got)
 	}
 	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
-		t.Error("le state a été réécrit malgré --fail-on")
+		t.Error("the state was rewritten despite --fail-on")
 	}
 }
 
-// Spec §5, configuration courante : sans ressource retenue, apply annonce
-// exactement l'agrégat de plan — destruction comprise, maintenant qu'il l'écrit.
+// Spec §5, common configuration: without a withheld resource, apply announces
+// exactly the plan's aggregate — destruction included, now that it writes it.
 func TestApplyShowsTheSameImpactAsPlanWhenNothingIsWithheld(t *testing.T) {
 	dir := importThenDeclare(t, orphanYAML)
 	const want = "Impact: 1 database(s) in the trash with 3 row(s)."
@@ -751,20 +755,20 @@ func TestApplyShowsTheSameImpactAsPlanWhenNothingIsWithheld(t *testing.T) {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
 	if !strings.Contains(planOut, want) {
-		t.Fatalf("montage du test faux : le plan doit porter %q\n%s", want, planOut)
+		t.Fatalf("broken test setup: the plan must carry %q\n%s", want, planOut)
 	}
 	applyOut, aerr := runCmd(t, "apply", "--dir", dir, "--auto-approve")
 	if aerr != nil {
 		t.Fatalf("apply: %v\n%s", aerr, applyOut)
 	}
 	if !strings.Contains(applyOut, want) {
-		t.Errorf("apply n'annonce pas l'agrégat de plan:\n%s", applyOut)
+		t.Errorf("apply does not announce the plan's aggregate:\n%s", applyOut)
 	}
 }
 
-// tasksRenamedWithoutTodo renomme « Fait » ET retire « À faire ». Le renommage
-// retient la ressource ; le retrait, qu'apply ne causera donc pas, porte un
-// impact mesuré que plan agrège.
+// tasksRenamedWithoutTodo renames "Fait" AND removes "À faire". The rename
+// withholds the resource; the removal, which apply will therefore not cause,
+// carries a measured impact that plan aggregates.
 const tasksRenamedWithoutTodo = `
 databases:
   - key: tasks
@@ -781,9 +785,9 @@ databases:
             group: "Complete"
 `
 
-// Spec §5, seconde configuration : une ressource retenue garde un impact
-// qu'apply ne causera pas. Son agrégat est donc strictement inférieur à celui
-// de plan — ici, nul.
+// Spec §5, second configuration: a withheld resource keeps an impact apply
+// will not cause. Its aggregate is therefore strictly lower than plan's — here,
+// zero.
 func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
 	dir := importThenDeclare(t, tasksRenamedWithoutTodo)
 
@@ -792,38 +796,38 @@ func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
 		t.Fatalf("plan: %v\n%s", perr, planOut)
 	}
 	if !strings.Contains(planOut, "Impact: 2 values reassigned without a trace.") {
-		t.Fatalf("montage du test faux : le plan doit agréger le retrait\n%s", planOut)
+		t.Fatalf("broken test setup: the plan must aggregate the removal\n%s", planOut)
 	}
 	applyOut, aerr := runCmd(t, "apply", "--dir", dir, "--auto-approve")
 	if aerr == nil {
-		t.Fatalf("apply error = nil, want un apply non convergé\n%s", applyOut)
+		t.Fatalf("apply error = nil, want an apply that did not converge\n%s", applyOut)
 	}
-	if !strings.Contains(applyOut, "Retenu — migration requise") {
-		t.Fatalf("montage du test faux : la ressource doit être retenue\n%s", applyOut)
+	if !strings.Contains(applyOut, "Withheld — migration required") {
+		t.Fatalf("broken test setup: the resource must be withheld\n%s", applyOut)
 	}
 	if strings.Contains(applyOut, "Impact:") {
-		t.Errorf("apply agrège l'impact d'une ressource qu'il n'écrit pas:\n%s", applyOut)
+		t.Errorf("apply aggregates the impact of a resource it does not write:\n%s", applyOut)
 	}
-	// Reliquat du lot A : le bilan ne suit plus la section « Retenu » de deux
-	// lignes vides.
-	if strings.Contains(applyOut, "\n\n\nAppliqué") {
-		t.Errorf("double ligne vide avant le bilan:\n%s", applyOut)
+	// Leftover from batch A: the summary no longer follows the "Withheld"
+	// section by two blank lines.
+	if strings.Contains(applyOut, "\n\n\nApplied") {
+		t.Errorf("double blank line before the summary:\n%s", applyOut)
 	}
 }
 
-// Un apply dont la seule écriture est une corbeille non confirmée échoue : son
-// bilan doit quand même dire que rien n'a été acquis, et suivre les écarts
-// d'une seule ligne vide.
+// An apply whose only write is an unconfirmed trashing fails: its summary
+// must still say nothing was done, and follow the mismatches by a single blank
+// line.
 func TestApplyReportKeepsItsSummaryWhenOnlyAMismatchRemains(t *testing.T) {
 	var b bytes.Buffer
 	renderReport(&b, apply.Report{Mismatches: []string{
 		"database.tasks — the API answered without moving the database to the trash",
 	}}, 0)
 	out := b.String()
-	if !strings.Contains(out, "Appliqué : 0 création(s), 0 modification(s), 0 mise(s) à la corbeille") {
-		t.Errorf("bilan absent:\n%s", out)
+	if !strings.Contains(out, "Applied: 0 created, 0 updated, 0 trashed") {
+		t.Errorf("summary missing:\n%s", out)
 	}
-	if strings.Contains(out, "\n\n\nAppliqué") {
-		t.Errorf("double ligne vide avant le bilan:\n%s", out)
+	if strings.Contains(out, "\n\n\nApplied") {
+		t.Errorf("double blank line before the summary:\n%s", out)
 	}
 }
