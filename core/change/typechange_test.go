@@ -246,3 +246,17 @@ func TestCheckboxCaveatFollowsTheDeclaredOptions(t *testing.T) {
 		t.Errorf("caveat toward number = %q", c)
 	}
 }
+
+// From multi_select, the removal lines already count the rows holding an
+// option that is not redeclared. The property line excludes them, so no row
+// lands in two families of the total.
+func TestWithoutRowsHoldingExcludesTheRemovedOptions(t *testing.T) {
+	tc := TypeChangeOf("multi_select", "select", []string{"A"}).WithoutRowsHolding([]string{"B", "C"})
+	if strings.Join(tc.Except, ",") != "B,C" || tc.Bound != BoundAtMost ||
+		!strings.Contains(tc.Caveat, "counted on their own lines") {
+		t.Errorf("TypeChange = %+v", tc)
+	}
+	if tc := TypeChangeOf("multi_select", "status", nil).WithoutRowsHolding(nil); tc.Except != nil {
+		t.Errorf("no removed option, Except = %q", tc.Except)
+	}
+}

@@ -335,6 +335,35 @@ func TypeChangeOf(from, to string, declared []string) TypeChange {
 	return tc
 }
 
+// WithoutRowsHolding excludes from a multi_select type change's count the
+// rows holding one of these options — those the YAML does not redeclare.
+//
+// Their rows are already counted, one removal line per option, in another
+// family of the total: "lost" toward select, "reassigned" toward status.
+// Counting them again on the property line, as "degraded", would sum the
+// same rows twice in the product's most-read line. The property line keeps
+// only the rows whose values are all redeclared — those it alone accounts for.
+func (tc TypeChange) WithoutRowsHolding(names []string) TypeChange {
+	if len(names) == 0 || tc.Count == CountUnsound {
+		return tc
+	}
+	if len(names) > maxExcept {
+		tc.Count, tc.Except, tc.Caveat = CountUnsound, nil, caveatManyOptions
+		return tc
+	}
+	tc.Except = names
+	tc.Caveat = withReason(tc.Caveat, "rows holding an option that is not "+
+		"redeclared are counted on their own lines")
+	return tc
+}
+
+func withReason(caveat, reason string) string {
+	if caveat == "" {
+		return reason
+	}
+	return caveat + "; " + reason
+}
+
 // countFor fills in how to count a type change, from the 2026-09-25
 // campaign's filters. See the design note: a filter is used only where it is
 // sound, with the bound it really gives.

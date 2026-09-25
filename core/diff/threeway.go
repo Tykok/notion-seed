@@ -401,6 +401,9 @@ func typeChangeLines(name string, want, have state.Property) []resources.Detail 
 		declared = append(declared, o.Name)
 	}
 	tc := change.TypeChangeOf(have.Type, want.Type, declared)
+	if have.Type == "multi_select" && hasOptions(want.Type) {
+		tc = tc.WithoutRowsHolding(undeclaredOptions(want, have))
+	}
 	d := resources.NewDetail("~", fmt.Sprintf("property %q", name), tc.Class)
 	d.Property = name
 	d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
@@ -601,18 +604,28 @@ func retypedRemovalLines(propName string, want, have state.Property) []resources
 	if !hasOptions(want.Type) {
 		return nil
 	}
+	var out []resources.Detail
+	for _, name := range undeclaredOptions(want, have) {
+		d := removalLine(propName, have.Type, name, true)
+		d.Measure.TargetType = want.Type
+		out = append(out, d)
+	}
+	return out
+}
+
+// undeclaredOptions lists the current options the YAML does not redeclare
+// under the same name, in their current order. Under a type change they
+// disappear: the pairing is by name alone.
+func undeclaredOptions(want, have state.Property) []string {
 	declared := make(map[string]bool, len(want.Options))
 	for _, o := range want.Options {
 		declared[o.Name] = true
 	}
-	var out []resources.Detail
+	var out []string
 	for _, o := range have.Options {
-		if declared[o.Name] {
-			continue
+		if !declared[o.Name] {
+			out = append(out, o.Name)
 		}
-		d := removalLine(propName, have.Type, o.Name, true)
-		d.Measure.TargetType = want.Type
-		out = append(out, d)
 	}
 	return out
 }

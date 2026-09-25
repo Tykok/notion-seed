@@ -387,6 +387,10 @@ func TestCountBuildsTheTypeChangeFilters(t *testing.T) {
 			Request{Property: "N", PropertyType: "number", Except: []string{"-3.5"}},
 			`{"and":[{"number":{"is_not_empty":true},"property":"N"},` +
 				`{"number":{"does_not_equal":-3.5},"property":"N"}]}`},
+		{"multi_select rows holding none of the removed options",
+			Request{Property: "M", PropertyType: "multi_select", Except: []string{"B"}},
+			`{"and":[{"multi_select":{"is_not_empty":true},"property":"M"},` +
+				`{"multi_select":{"does_not_contain":"B"},"property":"M"}]}`},
 		{"every row except the declared options",
 			Request{Property: "U", PropertyType: "url", Count: change.CountEveryRow, Except: []string{"a"}},
 			`{"or":[{"property":"U","url":{"is_empty":true}},` +
