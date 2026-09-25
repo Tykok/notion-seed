@@ -278,6 +278,47 @@ func TestApplyRefusesOnEOF(t *testing.T) {
 	}
 }
 
+// Ctrl-D sur un vrai terminal : l'entrée se ferme sans réponse. Mesuré le
+// 2026-09-25, le message disait « l'entrée standard n'est pas un terminal »,
+// ce qui est faux — c'en était un. La fin d'entrée a son propre message.
+func TestApplyNamesEndOfInputOnATerminal(t *testing.T) {
+	withFakeNtn(t, "authenticated_create")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": oneDatabase,
+	})
+	forceInteractive(t)
+
+	out, err := runCmdWithStdin(t, "", "apply", "--dir", dir)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un refus sur fin d'entrée\n%s", out)
+	}
+	if strings.Contains(err.Error(), "pas un terminal") {
+		t.Errorf("message = %q, il accuse le terminal d'une fin d'entrée", err.Error())
+	}
+	for _, want := range []string{"fin d'entrée", "rien n'a été appliqué", "  → ", "apply"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+}
+
+// /dev/null est un périphérique caractère, comme un terminal : sans ce test, une
+// entrée branchée dessus passerait pour un terminal, et sa fin d'entrée
+// immédiate pour un Ctrl-D.
+func TestIsInteractiveRejectsTheNullDevice(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skipf("%s indisponible: %v", os.DevNull, err)
+	}
+	defer f.Close()
+	cmd := NewRootCmd()
+	cmd.SetIn(f)
+	if isInteractive(cmd) {
+		t.Errorf("isInteractive(%s) = true, want false", os.DevNull)
+	}
+}
+
 // Le mot exact confirme, et la création part.
 func TestApplyProceedsOnExactConfirmation(t *testing.T) {
 	withFakeNtn(t, "authenticated_create")

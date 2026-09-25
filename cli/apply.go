@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,13 +26,26 @@ const confirmWord = "apply"
 // C'est une variable pour que les tests puissent l'imposer : un périphérique
 // caractère n'est pas simulable dans `go test`, et ajouter un flag de
 // production pour ça exposerait un contournement dans le binaire livré.
+//
+// /dev/null est écarté nommément : c'est un périphérique caractère, comme un
+// terminal, et le test de mode ne sait pas les distinguer. Sans cette
+// exclusion, une entrée branchée sur /dev/null passerait pour un terminal, et
+// sa fin d'entrée immédiate pour un Ctrl-D — confirm dirait alors « confirmation
+// interrompue » à qui n'a jamais eu de terminal, au lieu de réclamer
+// --auto-approve.
 var isInteractive = func(cmd *cobra.Command) bool {
 	f, ok := cmd.InOrStdin().(*os.File)
 	if !ok {
 		return false
 	}
 	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(info, null) {
+		return false
+	}
+	return true
 }
 
 func newApplyCmd() *cobra.Command {
@@ -319,12 +333,22 @@ func confirm(cmd *cobra.Command, autoApprove bool) (bool, error) {
 	fmt.Fprintf(cmd.OutOrStdout(), "Confirmez en tapant « %s » : ", confirmWord)
 	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
 	if err != nil && line == "" {
-		// Fin de fichier sans un seul octet : personne n'a répondu. C'est le cas
-		// d'une entrée standard branchée sur /dev/null, que le test de
-		// périphérique caractère ci-dessus ne SAIT PAS distinguer d'un terminal —
-		// /dev/null en est un. Même situation qu'un pipe fermé, donc même
-		// message : il faut --auto-approve.
-		return false, errNoOneToAsk()
+		// L'entrée est un terminal (isInteractive a écarté /dev/null), et elle
+		// s'est fermée sans un seul octet : c'est un Ctrl-D, ou un terminal
+		// refermé. Dire « pas un terminal » ici serait faux, et renverrait vers
+		// --auto-approve quelqu'un qui voulait simplement ne pas appliquer.
+		//
+		// Le retour à la ligne rend la main sous le prompt : sans lui, l'erreur
+		// s'imprimerait à la suite de « Confirmez en tapant … : ».
+		fmt.Fprintln(cmd.OutOrStdout())
+		if errors.Is(err, io.EOF) {
+			return false, fmt.Errorf(
+				"confirmation interrompue (fin d'entrée) : rien n'a été appliqué\n"+
+					"  → relancez `notion-seed apply` et tapez %q pour appliquer", confirmWord)
+		}
+		return false, fmt.Errorf(
+			"lecture de la confirmation impossible: %w — rien n'a été appliqué\n"+
+				"  → relancez `notion-seed apply` et tapez %q pour appliquer", err, confirmWord)
 	}
 	return strings.TrimSpace(line) == confirmWord, nil
 }
