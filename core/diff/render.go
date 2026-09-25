@@ -291,6 +291,11 @@ func consequence(d resources.Detail) string {
 		case "status":
 			return count + " seront réassignées à une autre option, sans trace"
 		case "multi_select":
+			// Sous un changement de type depuis multi_select, rien n'a été
+			// mesuré : on dit la perte, pas ce qu'il reste de la cellule.
+			if d.Measure.Retyped {
+				return count + " perdront cette valeur (sort exact non mesuré)"
+			}
 			// Mesuré : ['Un','Deux'] moins 'Un' donne ['Deux'] ; ['Un'] moins 'Un'
 			// donne []. La ligne perd CETTE valeur, pas forcément toute sa cellule.
 			//
@@ -321,10 +326,9 @@ func consequence(d resources.Detail) string {
 
 // removalFate dit de quel type le sort des lignes suit, pour une option qui
 // part. C'est l'ancien type, sauf quand l'option disparaît avec un changement de
-// type : un status n'a alors plus d'option où réassigner la ligne, qui perd sa
-// valeur comme sous un select — une seule valeur, donc la cellule se vide.
-// Mesuré le 2026-09-25 sur select → multi_select uniquement ; status → autre
-// type suit la même règle de nom, jamais observée pour lui.
+// type depuis status : il est alors traité comme un select, une perte.
+// Seul select → multi_select a été mesuré (2026-09-25) ; les autres couples sont
+// traités par prudence comme destructifs, sans que leur sort ait été observé.
 func removalFate(m resources.Measurement) string {
 	if m.Retyped && m.PropertyType == "status" {
 		return "select"

@@ -25,7 +25,8 @@ Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies — le
 dernier le 2026-09-25.
 
 Le retrait d'option de `status` et `multi_select` → `select` sont ceux qui
-justifient l'outil : la donnée n'est pas perdue, elle est remplacée par une valeur plausible et fausse, indistinguable après coup.
+justifient l'outil : la donnée n'est pas perdue, elle est remplacée par une
+valeur plausible et fausse, indistinguable après coup.
 
 `notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
 de lignes sont concernées. Une option de `status` retirée du YAML, deux lignes

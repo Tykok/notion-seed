@@ -323,7 +323,7 @@ func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 		`+ option "Faite" (propriété "Prio") group Complete`,
 		// "Basse" n'est pas redéclarée : elle disparaît avec le changement de
 		// type, et ses lignes avec elle.
-		`- option "Basse" (propriété "Prio") absente du YAML : l'API remplace la liste entière des options`,
+		`- option "Basse" (propriété "Prio") non redéclarée sous ce nom : le changement de type recrée les options`,
 	})
 	for _, d := range res.Changeset.Details {
 		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
@@ -1320,7 +1320,7 @@ func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 		if d.Property != "Prio" || d.Field != "" {
 			t.Errorf("%s : Property=%q Field=%q, want Property=\"Prio\" seul", d.Target, d.Property, d.Field)
 		}
-		if d.Note != "absente du YAML : l'API remplace la liste entière des options" {
+		if d.Note != "non redéclarée sous ce nom : le changement de type recrée les options" {
 			t.Errorf("%s : Note = %q", d.Target, d.Note)
 		}
 		if d.Class != change.ClassUnknownImpact || d.Count != -1 {

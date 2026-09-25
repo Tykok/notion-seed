@@ -919,3 +919,29 @@ func TestRenderSaysARetypedStatusOptionEmptiesTheCell(t *testing.T) {
 		t.Errorf("sortie:\n%s\nle total doit compter une perte, pas une réassignation", got)
 	}
 }
+
+// Depuis multi_select, le sort d'une option perdue dans un changement de type
+// n'a pas été mesuré : la phrase dit la perte, sans décrire ce qu'il reste.
+func TestRenderStaysCautiousOnARetypedMultiSelectOption(t *testing.T) {
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate,
+		Details: []resources.Detail{{
+			Op: "-", Target: `option "Un" (propriété "Tags")`,
+			Class: ClassDestructive, Count: 3,
+			Measure: &resources.Measurement{
+				Property: "Tags", PropertyType: "multi_select", Option: "Un", Retyped: true,
+			},
+		}},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if !strings.Contains(got, "3 lignes perdront cette valeur (sort exact non mesuré)") {
+		t.Errorf("sortie:\n%s\nil manque la perte prudente", got)
+	}
+	if strings.Contains(got, "n'en portaient pas d'autre") {
+		t.Errorf("sortie:\n%s\nun sort non mesuré est décrit", got)
+	}
+}

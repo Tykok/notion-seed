@@ -272,8 +272,9 @@ func createLines(target *state.Database) []resources.Detail {
 
 // newOptionLines annonce les options d'une propriété écrite sans aucune
 // identité distante : à la création, sous une propriété neuve, sous un
-// changement de type, ou quand une option déclarée n'a pas d'appariement. Toutes partent, avec leur couleur et leur groupe : les
-// taire serait écrire ce que le plan n'a jamais montré.
+// changement de type, ou quand une option déclarée n'a pas d'appariement.
+// Toutes partent, avec leur couleur et leur groupe : les taire serait écrire ce
+// que le plan n'a jamais montré.
 //
 // L'ordre des options est celui du YAML : il est visible dans Notion, le trier
 // le rendrait faux.
@@ -576,14 +577,18 @@ func removalLine(propName, propType, option string, retyped bool) resources.Deta
 	// dit « non mesuré », et la classification le traduit en impact inconnu
 	// plutôt qu'en « sûr ».
 	class := change.ClassifyOptionRemoval(propType, -1)
+	note := "absente du YAML : l'API remplace la liste entière des options"
 	if retyped {
 		class = change.ClassifyRetypedOptionRemoval(-1)
+		// Une key conservée sous un autre nom ne sauve rien ici : « absente du
+		// YAML » serait faux, c'est le nom qui manque.
+		note = "non redéclarée sous ce nom : le changement de type recrée les options"
 	}
 	return resources.Detail{
 		Op:       "-",
 		Target:   fmt.Sprintf("option %q (propriété %q)", option, propName),
 		Property: propName,
-		Note:     "absente du YAML : l'API remplace la liste entière des options",
+		Note:     note,
 		Class:    class,
 		Count:    -1,
 		Measure: &resources.Measurement{
