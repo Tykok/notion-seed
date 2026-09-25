@@ -1,46 +1,46 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Construit un dépôt apt signé à partir des .deb produits par goreleaser.
+# Builds a signed apt repository from the .deb files produced by goreleaser.
 #
-# apt n'a pas d'équivalent de `brew tap` : il n'existe pas de mécanisme par
-# utilisateur. Un dépôt apt n'est cependant qu'un arbre de fichiers statiques,
-# donc GitHub Pages suffit à l'héberger — c'est ce que ce script produit.
+# apt has no equivalent of `brew tap`: there is no per-user mechanism. An apt
+# repository is however just a tree of static files, so GitHub Pages is
+# enough to host it — that is what this script produces.
 #
-# Usage : build-apt-repo.sh <dossier-des-deb> <dossier-de-sortie>
-# Variables : APT_SUITE (défaut stable), APT_GPG_KEY (identité de signature).
+# Usage: build-apt-repo.sh <deb-dir> <output-dir>
+# Variables: APT_SUITE (default stable), APT_GPG_KEY (signing identity).
 set -euo pipefail
 
-deb_dir=${1:?usage: build-apt-repo.sh <dossier-des-deb> <dossier-de-sortie>}
-out=${2:?usage: build-apt-repo.sh <dossier-des-deb> <dossier-de-sortie>}
+deb_dir=${1:?usage: build-apt-repo.sh <deb-dir> <output-dir>}
+out=${2:?usage: build-apt-repo.sh <deb-dir> <output-dir>}
 suite=${APT_SUITE:-stable}
 component=main
 origin=notion-seed
 
 for tool in dpkg-deb dpkg-scanpackages apt-ftparchive gpg; do
-  command -v "$tool" >/dev/null || { echo "outil absent : $tool" >&2; exit 1; }
+  command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
 shopt -s nullglob
 debs=("$deb_dir"/*.deb)
-[ ${#debs[@]} -gt 0 ] || { echo "aucun .deb dans $deb_dir" >&2; exit 1; }
+[ ${#debs[@]} -gt 0 ] || { echo "no .deb in $deb_dir" >&2; exit 1; }
 
 rm -rf "$out"
 mkdir -p "$out/pool/$component"
 cp "${debs[@]}" "$out/pool/$component/"
 
-# Les architectures viennent des paquets eux-mêmes : les lister à la main
-# produirait un Release qui promet une architecture absente, et apt échoue
-# alors sur un 404 au lieu de simplement ignorer.
+# The architectures come from the packages themselves: listing them by hand
+# would produce a Release promising a missing architecture, and apt then fails
+# on a 404 instead of simply ignoring it.
 archs=$(for f in "$out/pool/$component"/*.deb; do dpkg-deb -f "$f" Architecture; done | sort -u)
 
 for arch in $archs; do
   dir="$out/dists/$suite/$component/binary-$arch"
   mkdir -p "$dir"
-  # --multiversion, sans quoi dpkg-scanpackages ne garde QUE la version la plus
-  # récente de chaque paquet : `apt install notion-seed=0.1.0` échouerait dès la
-  # publication de la 0.2.0, et une release ne serait plus jamais réinstallable.
-  # Exécuté depuis $out pour que le champ Filename soit relatif à la racine du
-  # dépôt : un chemin absolu ici renverrait apt vers le disque du build.
+  # --multiversion, without which dpkg-scanpackages keeps ONLY the most recent
+  # version of each package: `apt install notion-seed=0.1.0` would fail as soon
+  # as 0.2.0 is published, and a release could never be reinstalled again.
+  # Run from $out so that the Filename field is relative to the repository
+  # root: an absolute path here would send apt to the build machine's disk.
   (cd "$out" && dpkg-scanpackages --multiversion --arch "$arch" "pool/$component") > "$dir/Packages"
   gzip -9nc "$dir/Packages" > "$dir/Packages.gz"
 done
@@ -57,9 +57,9 @@ done
     release . > Release
 )
 
-# InRelease (signature en ligne) ET Release.gpg (signature détachée) : apt
-# moderne ne lit que InRelease, mais les images plus anciennes encore en
-# service ne cherchent que Release.gpg.
+# InRelease (inline signature) AND Release.gpg (detached signature): modern apt
+# reads only InRelease, but older images still in service look only for
+# Release.gpg.
 key=${APT_GPG_KEY:-}
 gpg_args=(--batch --yes)
 [ -n "$key" ] && gpg_args+=(--local-user "$key")
@@ -67,7 +67,7 @@ gpg "${gpg_args[@]}" --clearsign -o "$out/dists/$suite/InRelease" "$out/dists/$s
 gpg "${gpg_args[@]}" --detach-sign --armor -o "$out/dists/$suite/Release.gpg" "$out/dists/$suite/Release"
 gpg --armor --export ${key:+"$key"} > "$out/gpg.key"
 
-echo "dépôt apt construit dans $out"
+echo "apt repository built in $out"
 echo "  suite         : $suite"
 echo "  architectures : $(echo "$archs" | tr '\n' ' ')"
-echo "  paquets       : ${#debs[@]}"
+echo "  packages      : ${#debs[@]}"

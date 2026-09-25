@@ -13,8 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # GoReleaser construit le changelog depuis l'historique : une
-          # checkout peu profonde le rendrait vide ou faux.
+          # GoReleaser builds the changelog from the history: a shallow
+          # checkout would make it empty or wrong.
           fetch-depth: 0
 
       - uses: actions/setup-go@v7
@@ -28,13 +28,13 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_TOKEN ne porte que sur ce dépôt : pousser le cask dans
-          # tykok/homebrew-tap demande un jeton qui porte sur l'autre dépôt.
+          # GITHUB_TOKEN covers only this repository: pushing the cask to
+          # tykok/homebrew-tap needs a token that covers the other repository.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   apt:
-    # Dans le même run que la release : le dépôt apt se republie à chaque tag
-    # sans dépendre d'un événement que GITHUB_TOKEN ne peut pas déclencher.
+    # In the same run as the release: the apt repository is republished on
+    # every tag without depending on an event GITHUB_TOKEN cannot trigger.
     needs: goreleaser
     uses: ./.github/workflows/apt.yml
     with:

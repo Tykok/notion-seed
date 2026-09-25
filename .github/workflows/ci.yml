@@ -16,17 +16,17 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          # La version vient de go.mod : une seule source de vérité, pour que
-          # la CI ne compile jamais avec un toolchain que le dépôt n'exige pas.
+          # The version comes from go.mod: a single source of truth, so the CI
+          # never builds with a toolchain the repository does not require.
           go-version-file: go.mod
 
-      # gofmt -l ne sort rien quand tout est formaté et ne renvoie jamais un
-      # code non nul : le test sur la sortie est ce qui fait échouer le job.
+      # gofmt -l prints nothing when everything is formatted and never returns
+      # a non-zero code: the test on its output is what fails the job.
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
-            echo "fichiers non formatés :"
+            echo "unformatted files:"
             echo "$unformatted"
             exit 1
           fi
@@ -37,10 +37,10 @@ jobs:
       - name: go test
         run: go test ./...
 
-      - name: en-têtes de licence
+      - name: license headers
         run: ./scripts/check-spdx.sh
 
-      # Le dépôt porte maintenant trois workflows qui se publient eux-mêmes ;
-      # une expression fautive n'y apparaîtrait qu'au moment d'une release.
+      # The repository now holds three workflows that publish on their own; a
+      # faulty expression would only show up at release time.
       - name: actionlint
         uses: raven-actions/actionlint@v2
