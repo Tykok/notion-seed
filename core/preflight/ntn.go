@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Package preflight vérifie que l'environnement peut faire tourner
-// notion-seed : ntn présent, assez récent, et authentifié.
+// Package preflight checks that the environment can run notion-seed: ntn
+// present, recent enough, and authenticated.
 package preflight
 
 import (
@@ -14,39 +14,39 @@ import (
 	"strings"
 )
 
-// MinNtnVersion est la seule version sur laquelle le contrat de sortie de ntn
-// a été mesuré. À relever quand une plus récente est validée, jamais à
-// supposer compatible vers le bas : notion-seed parse le stdout et le stderr
-// de ntn, donc un changement de format le casse silencieusement.
+// MinNtnVersion is the only version against which ntn's output contract was
+// measured. Raise it when a more recent one is validated, never assume
+// backward compatibility: notion-seed parses ntn's stdout and stderr, so a
+// format change breaks it silently.
 const MinNtnVersion = "0.22.11"
 
 var (
-	ErrNotInstalled     = errors.New("ntn n'est pas installé")
-	ErrNotAuthenticated = errors.New("ntn n'est pas authentifié")
+	ErrNotInstalled     = errors.New("ntn is not installed")
+	ErrNotAuthenticated = errors.New("ntn is not authenticated")
 )
 
-// NotAuthenticatedError signale une authentification absente ou invalide, en
-// GARDANT la cause réelle : un échec réseau, un plantage interne de ntn ou une
-// annulation de contexte ne sont pas « pas connecté ». Le type existe pour que
-// `init` puisse donner son propre conseil sans perdre le détail — afficher
-// « pas authentifié » pour une panne réseau, sur la commande dont le seul rôle
-// est de diagnostiquer l'environnement, envoie chercher au mauvais endroit.
+// NotAuthenticatedError reports missing or invalid authentication, while
+// KEEPING the real cause: a network failure, an internal ntn crash or a
+// context cancellation are not "not logged in". The type exists so that `init`
+// can give its own advice without losing the detail — printing "not
+// authenticated" for a network outage, on the command whose only job is to
+// diagnose the environment, sends the user looking in the wrong place.
 type NotAuthenticatedError struct {
 	Cause error
 }
 
 func (e *NotAuthenticatedError) Error() string {
-	return fmt.Sprintf("%v — lancez `notion-seed init` pour vous connecter (cause: %v)",
+	return fmt.Sprintf("%v — run `notion-seed init` to sign in (cause: %v)",
 		ErrNotAuthenticated, e.Cause)
 }
 
-// Unwrap rend les deux : errors.Is(err, ErrNotAuthenticated) reste vrai pour les
-// appelants, et la cause reste inspectable.
+// Unwrap returns both: errors.Is(err, ErrNotAuthenticated) stays true for
+// callers, and the cause stays inspectable.
 func (e *NotAuthenticatedError) Unwrap() []error {
 	return []error{ErrNotAuthenticated, e.Cause}
 }
 
-// TooOldError signale un ntn présent mais trop ancien.
+// TooOldError reports an ntn that is present but too old.
 type TooOldError struct {
 	Found   string
 	Minimum string
@@ -54,21 +54,21 @@ type TooOldError struct {
 
 func (e *TooOldError) Error() string {
 	return fmt.Sprintf(
-		"ntn %s est trop ancien, notion-seed exige au moins %s — mettez-le à jour avec `ntn update`",
+		"ntn %s is too old, notion-seed requires at least %s — update it with `ntn update`",
 		e.Found, e.Minimum)
 }
 
-// PinNtnHint est l'action corrective commune à tous les endroits où le contrat
-// de sortie de ntn peut casser : notion-seed lit un format de sortie, et une
-// seule version l'a été mesurée. Une seule source de vérité, pour que le
-// message et la version exigée ne divergent jamais.
+// PinNtnHint is the corrective action shared by every place where ntn's
+// output contract can break: notion-seed reads an output format, and only one
+// version of it was measured. A single source of truth, so the message and
+// the required version never diverge.
 func PinNtnHint() string {
 	return fmt.Sprintf(
-		"épinglez ntn %s (`npm i -g ntn@%s`), la seule version sur laquelle le format de sortie a été mesuré",
+		"pin ntn %s (`npm i -g ntn@%s`), the only version whose output format was measured",
 		MinNtnVersion, MinNtnVersion)
 }
 
-// Info décrit l'environnement validé.
+// Info describes the validated environment.
 type Info struct {
 	NtnVersion    string
 	WorkspaceID   string
@@ -76,20 +76,20 @@ type Info struct {
 	BotEmail      string
 }
 
-// Check vérifie la présence, la version et l'authentification de ntn.
+// Check verifies ntn's presence, version and authentication.
 func Check(ctx context.Context, binary string) (Info, error) {
 	if _, err := exec.LookPath(binary); err != nil {
 		return Info{}, fmt.Errorf(
-			"%w — installez-le avec `npm i -g ntn`, puis lancez `notion-seed init`",
+			"%w — install it with `npm i -g ntn`, then run `notion-seed init`",
 			ErrNotInstalled)
 	}
 
 	versionOut, err := run(ctx, binary, "--version")
 	if err != nil {
 		return Info{}, fmt.Errorf(
-			"`%s --version` a échoué: %w\n"+
-				"  → %s est présent mais ne répond pas ; réinstallez-le avec "+
-				"`npm i -g ntn@%s`, puis relancez `notion-seed init`",
+			"`%s --version` failed: %w\n"+
+				"  → %s is present but does not respond; reinstall it with "+
+				"`npm i -g ntn@%s`, then rerun `notion-seed init`",
 			binary, err, binary, MinNtnVersion)
 	}
 	version, err := parseVersion(versionOut)
@@ -117,34 +117,34 @@ func run(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	// cmd.Stdin laissé nil : os/exec donne /dev/null à l'enfant. Ne jamais y
-	// mettre os.Stdin, que `ntn` prendrait pour un body sans EOF.
+	// cmd.Stdin left nil: os/exec gives /dev/null to the child. Never set it to
+	// os.Stdin, which `ntn` would take for a body without EOF.
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
 
-// parseVersion lit la sortie de `ntn --version`, de la forme "ntn 0.22.11".
+// parseVersion reads the output of `ntn --version`, of the form "ntn 0.22.11".
 func parseVersion(out []byte) (string, error) {
 	fields := strings.Fields(string(out))
 	if len(fields) < 2 {
-		return "", fmt.Errorf("sortie de `ntn --version` illisible: %q\n  → %s",
+		return "", fmt.Errorf("unreadable `ntn --version` output: %q\n  → %s",
 			strings.TrimSpace(string(out)), PinNtnHint())
 	}
 	return fields[len(fields)-1], nil
 }
 
-// parseWhoami lit la sortie de `ntn whoami`, une ligne de champs séparés par
-// des tabulations : bot_id, bot_name, "bot", email, workspace_id,
-// workspace_name, user_id, user_name, "person".
+// parseWhoami reads the output of `ntn whoami`, a line of tab-separated
+// fields: bot_id, bot_name, "bot", email, workspace_id, workspace_name,
+// user_id, user_name, "person".
 func parseWhoami(out []byte) (Info, error) {
 	line := strings.TrimSpace(string(out))
 	fields := strings.Split(line, "\t")
 	if len(fields) < 6 {
 		return Info{}, fmt.Errorf(
-			"sortie de `ntn whoami` illisible (%d champs, 6 attendus au minimum): %q\n"+
-				"  → %s ; ou relancez `ntn login` si la session a expiré",
+			"unreadable `ntn whoami` output (%d fields, at least 6 expected): %q\n"+
+				"  → %s; or run `ntn login` again if the session expired",
 			len(fields), line, PinNtnHint())
 	}
 	return Info{
@@ -154,8 +154,8 @@ func parseWhoami(out []byte) (Info, error) {
 	}, nil
 }
 
-// versionAtLeast compare deux versions semver-ish champ par champ. Un champ
-// non numérique (pré-release) est traité comme 0.
+// versionAtLeast compares two semver-ish versions field by field. A
+// non-numeric field (pre-release) is treated as 0.
 func versionAtLeast(found, minimum string) bool {
 	f := splitVersion(found)
 	m := splitVersion(minimum)

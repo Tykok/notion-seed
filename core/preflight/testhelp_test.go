@@ -21,7 +21,7 @@ func withFakeNtn(t *testing.T, scenario string) {
 	t.Setenv("FAKE_NTN_SCENARIO", scenario)
 }
 
-// withEmptyPath simule un ntn absent.
+// withEmptyPath simulates a missing ntn.
 func withEmptyPath(t *testing.T) {
 	t.Helper()
 	t.Setenv("PATH", t.TempDir())
