@@ -79,9 +79,11 @@ le chiffre dit quelle borne il est :
 | `N rows` | `is_not_empty` | tout couple où rien ne survit (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
 | `N rows` | lignes cochées | `checkbox` → `number`, `date`, `people`, et → `select` / `multi_select` sans option `Yes` |
 | `N rows` | lignes vides | `select` → `status` : les lignes vides reçoivent une option |
+| `N rows` | non vides (toutes les lignes vers `status`), sauf les options déclarées écrites comme des nombres | `number` → `select`, `multi_select`, `status` avec options déclarées : seule une option nommée par l'écriture canonique du nombre le garde (`7` garde 7, `7.0` ne garde rien) |
 | `at least N rows` | `is_not_empty` sur `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people` : un texte fait seulement d'espaces ou de sauts de ligne n'est pas compté, et il est perdu aussi |
-| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : une valeur qui ne diffère d'une option que par la casse peut ne pas être comptée |
-| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` ou `date`, `multi_select` → `select` / `status` : certaines valeurs survivent à la conversion |
+| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : le filtre ignore la casse et les espaces de fin, la conversion non — une telle valeur n'est pas comptée, et ne survit pas non plus |
+| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` ou `date`, `multi_select` → `select` : certaines valeurs survivent à la conversion |
+| `up to N rows` | toutes les lignes | `multi_select` → `status` : une ligne qui ne porte qu'une valeur déclarée la garde |
 | inconnu | aucun | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
 
 Un minorant nul ne rend jamais un changement `safe` : il se lit « no rows
@@ -107,7 +109,14 @@ pourquoi :
       + option "Done" (property "Statut")
       - option "In progress" (property "Statut") — not redeclared under this name: the type change re-creates the options  [destructive]
           → 2 rows will be emptied.
+
+Impact: at least 2 values lost.
 ```
+
+Le total dit « at least » : les lignes jamais renseignées sont perdues aussi,
+et personne n'a pu les compter. Depuis `multi_select`, les lignes qui portent
+une option non redéclarée sont comptées une fois, sur leur ligne de retrait, et
+laissées hors de la ligne de propriété.
 
 La classe reste celle de la mesure — vous savez que le changement est
 dangereux, vous ne savez pas toujours sur combien de lignes.

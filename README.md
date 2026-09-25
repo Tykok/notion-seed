@@ -76,9 +76,11 @@ write. Not every filter is exact, and the figure says which bound it is:
 | `N rows` | `is_not_empty` | every pair where nothing survives (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
 | `N rows` | checked rows | `checkbox` → `number`, `date`, `people`, and → `select` / `multi_select` without an option `Yes` |
 | `N rows` | empty rows | `select` → `status`: the empty rows receive an option |
+| `N rows` | non-empty (every row toward `status`), except the declared options written as numbers | `number` → `select`, `multi_select`, `status` with declared options: only an option named with the number's canonical text keeps it (`7` keeps 7, `7.0` keeps nothing) |
 | `at least N rows` | `is_not_empty` on `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people`: text made only of spaces or line breaks is not counted, and is lost too |
-| `at least N rows` | non-empty, except the declared options | `rich_text` / `url` → `select`, `multi_select`, `status` with declared options: a value that differs from an option only by case may not be counted |
-| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` or `date`, `multi_select` → `select` / `status`: some values survive the conversion |
+| `at least N rows` | non-empty, except the declared options | `rich_text` / `url` → `select`, `multi_select`, `status` with declared options: the filter ignores case and trailing spaces, the conversion does not — such a value is not counted, and does not survive either |
+| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` or `date`, `multi_select` → `select`: some values survive the conversion |
+| `up to N rows` | every row | `multi_select` → `status`: a row holding a single declared value keeps it |
 | unknown | none | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
 
 A lower bound of zero never makes a change `safe`: it reads "no rows counted,
@@ -103,7 +105,14 @@ Where no filter is sound, the line carries no number and says why:
       + option "Done" (property "Statut")
       - option "In progress" (property "Statut") — not redeclared under this name: the type change re-creates the options  [destructive]
           → 2 rows will be emptied.
+
+Impact: at least 2 values lost.
 ```
+
+The total says "at least": the never-set rows are lost too, and nobody could
+count them. From `multi_select`, the rows holding an option that is not
+redeclared are counted once, on their removal line, and left out of the
+property line.
 
 The class stays the one from the measurement — you know the change is
 dangerous, you do not always know on how many rows.
