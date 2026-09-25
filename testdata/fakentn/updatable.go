@@ -63,7 +63,11 @@ func apiMethod() string {
 // Ce qui est fidèle aux mesures du 2026-09-24, et seulement cela : le titre est
 // partagé entre database et data source, l'icône écrite sur la database n'est
 // lue que sur la database, les options transmises avec un id le gardent, les
-// neuves en reçoivent un.
+// neuves en reçoivent un, et {"in_trash":true} rend archived et in_trash.
+//
+// Avec FAKE_NTN_LOG_FILE, chaque écriture est aussi journalisée : un test peut
+// alors dire EXACTEMENT ce qui est parti vers l'API, pas seulement ce que l'état
+// fusionné en a gardé.
 func runUpdatable() {
 	switch subcommand() {
 	case "whoami":
@@ -77,6 +81,13 @@ func runUpdatable() {
 
 	body, _ := io.ReadAll(os.Stdin)
 	path, method := apiPath(), apiMethod()
+	// Le comptage part en POST mais n'écrit rien : il n'est pas journalisé.
+	if method != "GET" && !strings.HasSuffix(path, "/query") {
+		if err := logMutation(method, path, body); err != nil {
+			fmt.Fprintf(os.Stderr, "fakentn: journal non écrit: %v\n", err)
+			os.Exit(70)
+		}
+	}
 	st, err := loadUpdatable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fakentn: état illisible: %v\n", err)
@@ -149,6 +160,23 @@ func saveUpdatable(st *updatableState) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// logMutation ajoute « MÉTHODE chemin corps » au fichier que nomme
+// FAKE_NTN_LOG_FILE, une ligne par écriture. Sans la variable, rien n'est
+// journalisé.
+func logMutation(method, path string, body []byte) error {
+	name := os.Getenv("FAKE_NTN_LOG_FILE")
+	if name == "" {
+		return nil
+	}
+	f, err := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "%s %s %s\n", method, path, strings.TrimSpace(string(body)))
+	return err
+}
+
 // patchDatabase fusionne un PATCH /v1/databases. Le titre et la description se
 // lisent des deux côtés ; l'icône, sur la database seule.
 func patchDatabase(st *updatableState, body []byte) {
@@ -166,6 +194,12 @@ func patchDatabase(st *updatableState, body []byte) {
 	}
 	if v, ok := patch["icon"]; ok {
 		st.Database["icon"] = v
+	}
+	// Mesuré le 2026-09-24 : {"in_trash":true} rend archived=true et
+	// in_trash=true.
+	if v, ok := patch["in_trash"].(bool); ok && v {
+		st.Database["archived"] = true
+		st.Database["in_trash"] = true
 	}
 }
 
