@@ -248,6 +248,11 @@ func compareLine(r, n Line, nd resources.Detail, subject string) (Drift, bool) {
 	switch {
 	case counted(r.Bound) != counted(n.Bound) && !counted(r.Bound):
 		return Drift{Message: about(subject, "cost nothing when reviewed, now has a cost to count")}, false
+	case counted(r.Bound) != counted(n.Bound) && r.Bound == BoundUnmeasured:
+		// The reviewed line WAS attempted (counted(r.Bound) is true for
+		// BoundUnmeasured too), but it never had a figure: saying it "was
+		// counted" would claim the opposite of what was reviewed.
+		return Drift{Message: about(subject, "had no figure when reviewed, now costs nothing to count")}, false
 	case counted(r.Bound) != counted(n.Bound):
 		return Drift{Message: about(subject, "was counted when reviewed, is no longer")}, false
 	}
