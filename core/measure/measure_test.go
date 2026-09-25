@@ -303,3 +303,37 @@ func TestCountAllRowsSendsNoFilter(t *testing.T) {
 		t.Errorf("Result = %+v, want {3 false}", res)
 	}
 }
+
+// Un comptage de destruction en échec ne rend pas la ligne « inconnue » : elle
+// reste destructive. Son message ne doit pas annoncer le contraire.
+func TestCountAllRowsFailureDoesNotPromiseAnUnknownImpact(t *testing.T) {
+	failures := map[string]transportFunc{
+		"transport": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{}, errors.New("403")
+		},
+		"illisible": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{Status: 200, Body: []byte("pas du json")}, nil
+		},
+		"pas une liste": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"data_source"}`)}, nil
+		},
+		"sans results": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list"}`)}, nil
+		},
+		"sans curseur": func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+			return transport.APIResponse{Status: 200, Body: []byte(`{"object":"list","results":[],"has_more":true}`)}, nil
+		},
+	}
+	for name, tr := range failures {
+		_, err := NewCounter(tr).Count(context.Background(), Request{DataSourceID: "ds-1", AllRows: true})
+		if err == nil {
+			t.Fatalf("%s : Count() error = nil", name)
+		}
+		if strings.Contains(err.Error(), "inconnu") {
+			t.Errorf("%s : message = %q, il annonce un impact inconnu", name, err.Error())
+		}
+		if !strings.Contains(err.Error(), "reste annoncée destructive, sans son nombre de lignes") {
+			t.Errorf("%s : message = %q, il doit dire que la destruction reste destructive", name, err.Error())
+		}
+	}
+}
