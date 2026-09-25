@@ -660,7 +660,17 @@ func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Sna
 
 	delete(snap.Databases, c.Key)
 	if err := state.Save(opts.Dir, snap); err != nil {
-		return err
+		// L'API a déjà confirmé la corbeille : le %w de state.Save dit « l'ancien
+		// state est intact », ce qui est vrai pour le FICHIER mais tairait que la
+		// database, elle, est déjà partie. Le dire ici évite l'inverse de
+		// destroyError : un lecteur qui croirait n'avoir rien à faire.
+		return fmt.Errorf(
+			"%s a bien été mise à la corbeille dans Notion, mais son entrée n'a pas "+
+				"pu être retirée de %s: %w\n"+
+				"  → relancez `notion-seed plan` : la database s'y lira comme à la "+
+				"corbeille, son entrée sera reconnue comme entrée de state obsolète et "+
+				"nettoyée sans rien écrire dans Notion",
+			c.Resource, state.FileName, err)
 	}
 	rep.Destroyed = append(rep.Destroyed, fmt.Sprintf(
 		"%s mise à la corbeille — id %s (entrée retirée du state)", c.Resource, id))
@@ -692,19 +702,21 @@ func destroyError(c diff.Change, rep Report, err error) error {
 		case apiErr.Status == 400 && strings.Contains(apiErr.Message, "archived ancestor"):
 			// Mesuré le 2026-09-25 sur {"in_trash":true} : sous une page ancêtre
 			// déjà à la corbeille, Notion répond ce 400 et ne modifie rien — la
-			// database se relit ensuite en 200, archived:false. Les deux issues
-			// convergent : restaurer la page rend la destruction écrivable ; la
-			// supprimer définitivement fait répondre 404 au GET, et le plan suivant
-			// classe l'entrée comme obsolète.
+			// database se relit ensuite en 200, archived:false. Restaurer la page
+			// rend donc la destruction écrivable. Supprimer définitivement la page
+			// parente n'a pas été mesuré ici : ce que rendra alors la lecture de la
+			// database (404, ou archivée) n'est pas garanti, seul le prochain
+			// `notion-seed plan` le tranche — voir cli/plan.go, où un 404 comme une
+			// lecture archivée valent tous deux entrée de state obsolète.
 			return fmt.Errorf(
 				"mise à la corbeille de %s impossible : une page ancêtre de la database "+
 					"est déjà à la corbeille, et Notion refuse d'écrire sous elle — la "+
 					"database y part déjà avec sa page parente\n"+
 					"  → soit restaurez la page parente dans Notion, puis relancez apply ; "+
 					"soit supprimez définitivement la page parente depuis la corbeille de "+
-					"Notion : la database répondra alors 404, le prochain `notion-seed plan` "+
-					"classera son entrée comme entrée de state obsolète, et apply la retirera. "+
-					"Son entrée de state est gardée. %s",
+					"Notion, puis relancez `notion-seed plan` : si Notion ne connaît plus la "+
+					"database, son entrée sera nettoyée comme entrée de state obsolète, sans "+
+					"rien écrire. Son entrée de state est gardée. %s",
 				c.Resource, acquired)
 		case apiErr.Status == 404:
 			// Le plan venait de la lire. Ce 404 n'est pas une preuve de

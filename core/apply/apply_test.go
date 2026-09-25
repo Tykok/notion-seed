@@ -1286,6 +1286,55 @@ func TestRunKeepsTheStateEntryWhenTheAPIDoesNotConfirmTheTrash(t *testing.T) {
 	}
 }
 
+// Une corbeille CONFIRMÉE dont l'écriture du state échoue ensuite ne doit
+// jamais laisser croire que rien ne s'est passé : la database est déjà à la
+// corbeille dans Notion, seul l'enregistrement local a échoué.
+func TestRunWarnsWhenTrashSucceedsButStateSaveFails(t *testing.T) {
+	dir := t.TempDir()
+	snap := orphanSnapshot("tasks")
+	// Le state est sur disque avant l'appel, comme en vrai : sans ça, la
+	// relecture ci-dessous ne prouverait rien.
+	if err := state.Save(dir, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	// Un dossier non inscriptible fait échouer state.Save après une corbeille
+	// déjà confirmée par l'API.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Skipf("chmod indisponible ici: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	p := &diff.Plan{Changes: []diff.Change{destroyChange("tasks")}}
+	_, err := Run(context.Background(), p, snap, Options{
+		Dir: dir, Trasher: &fakeTrasher{confirmed: true},
+	})
+	if err == nil {
+		_ = os.Chmod(dir, 0o700)
+		t.Skip("le dossier reste inscriptible (root ?), test non significatif")
+	}
+
+	for _, want := range []string{
+		"database.tasks", "corbeille", "  → ", "notion-seed plan",
+		"entrée de state obsolète",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur = %q, want contenant %q", err.Error(), want)
+		}
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	loaded, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, still := loaded.Databases["tasks"]; !still {
+		t.Error("le state sur disque a perdu l'entrée malgré l'échec d'écriture")
+	}
+}
+
 // Review Focus #2 et D-B1 : aucun échec ne retire l'entrée. Le 404 en
 // particulier ne vaut pas destruction — il renvoie au plan, qui relit le réel,
 // et n'accuse jamais le partage.
@@ -1309,7 +1358,8 @@ func TestRunKeepsTheStateEntryWhenTrashingFails(t *testing.T) {
 				Message: "Can't edit page on block with an archived ancestor. You must " +
 					"unarchive the ancestor before editing page."},
 			want: []string{"page ancêtre", "restaurez la page parente", "relancez apply",
-				"supprimez définitivement la page parente", "404", "entrée de state obsolète"},
+				"supprimez définitivement la page parente", "notion-seed plan",
+				"entrée de state obsolète"},
 		},
 		{
 			name: "issue inconnue",
