@@ -60,6 +60,11 @@ const queryTwoRows = `{"object":"list","results":[` +
 	`{"object":"page","id":"p1"},{"object":"page","id":"p2"}],` +
 	`"has_more":false}`
 
+// parentPage est la page parente lisible et vivante que rendent les scénarios.
+// Elle porte archived et in_trash comme la vraie API : checkParentPage refuse
+// une réponse qui ne dit pas si la page est à la corbeille.
+const parentPage = `{"object":"page","id":"page1","archived":false,"in_trash":false}`
+
 // subcommand dit quelle sous-commande ntn a été invoquée. Les scénarios d'auth
 // doivent répondre différemment à --version et à whoami : dispatcher uniquement
 // sur la variable d'environnement ferait répondre la version à whoami, et
@@ -97,7 +102,7 @@ func main() {
 			io.Copy(io.Discard, os.Stdin)
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+apiPath()+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
-			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			fmt.Fprint(os.Stdout, parentPage)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
@@ -114,6 +119,28 @@ func main() {
 				"error: Public API request failed (404 Not Found object_not_found): "+
 				"Could not find page with ID: page-absente.\n")
 			os.Exit(5)
+		default:
+			fmt.Fprint(os.Stdout, versionLine)
+		}
+	case "authenticated_page_in_trash":
+		// ntn authentifié, page parente lisible mais à la corbeille : couvre le
+		// refus de checkParentPage. Seule la page est servie — plan s'arrête
+		// avant toute autre lecture, et une requête imprévue doit échouer
+		// bruyamment plutôt que rendre une réponse plausible.
+		switch subcommand() {
+		case "whoami":
+			fmt.Fprint(os.Stdout, whoamiLine)
+		case "api":
+			io.Copy(io.Discard, os.Stdin)
+			path := apiPath()
+			if !strings.HasPrefix(path, "/v1/pages/") {
+				fmt.Fprintf(os.Stderr, "fakentn: %s non servi par ce scénario\n", path)
+				os.Exit(64)
+			}
+			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
+				"< 200 OK\n< content-type: application/json\n")
+			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1",`+
+				`"archived":true,"in_trash":true}`)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
@@ -165,7 +192,7 @@ func main() {
 					`{"id":"g1","name":"To-do","option_ids":["o-todo"]},`+
 					`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`)
 			default:
-				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+				fmt.Fprint(os.Stdout, parentPage)
 			}
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
@@ -201,7 +228,7 @@ func main() {
 					`{"id":"o-haute","name":"Haute","color":"red"},`+
 					`{"id":"o-basse","name":"Basse","color":"blue"}]}}}}`)
 			default:
-				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+				fmt.Fprint(os.Stdout, parentPage)
 			}
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
@@ -248,7 +275,7 @@ func main() {
 					`{"id":"g1","name":"To-do","option_ids":["o-todo"]},`+
 					`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`)
 			default:
-				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+				fmt.Fprint(os.Stdout, parentPage)
 			}
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
@@ -273,7 +300,7 @@ func main() {
 			}
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
-			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			fmt.Fprint(os.Stdout, parentPage)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
@@ -311,7 +338,7 @@ func main() {
 					`{"id":"g1","name":"To-do","option_ids":["o-todo"]},`+
 					`{"id":"g2","name":"Complete","option_ids":["o-done"]}]}}}}`)
 			default:
-				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+				fmt.Fprint(os.Stdout, parentPage)
 			}
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
@@ -337,7 +364,7 @@ func main() {
 			case strings.HasPrefix(path, "/v1/data_sources/"):
 				fmt.Fprint(os.Stdout, createdDataSource)
 			default:
-				fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+				fmt.Fprint(os.Stdout, parentPage)
 			}
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
@@ -360,7 +387,7 @@ func main() {
 			}
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
-			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1"}`)
+			fmt.Fprint(os.Stdout, parentPage)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}

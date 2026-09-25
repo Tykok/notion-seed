@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/tykok/notion-seed/core/diff"
+	"github.com/tykok/notion-seed/core/providers/notion/transport"
 	"github.com/tykok/notion-seed/core/state"
 )
 
@@ -164,6 +166,76 @@ func TestPlanReportsUnreachableParentPage(t *testing.T) {
 	if strings.Contains(out.String(), "Plan:") {
 		t.Errorf("un plan a été affiché malgré une page parente illisible:\n%s", out.String())
 	}
+}
+
+// Mesuré le 2026-09-25 : avec une page parente à la corbeille, plan disait
+// « Aucun changement » et sortait en 0, alors que toute écriture sous elle est
+// refusée (400 « archived ancestor »). La page se lit en 200 : seul son champ
+// in_trash le dit.
+func TestPlanRefusesATrashedParentPage(t *testing.T) {
+	withFakeNtn(t, "authenticated_page_in_trash")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+
+	out, err := runCmd(t, "plan", "--dir", dir)
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want un refus sur la page parente à la corbeille\n%s", out)
+	}
+	for _, want := range []string{testParentPageID, "corbeille", "restaurez", "parent_page_id", "  → "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message = %q, il doit contenir %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(out, "Plan:") || strings.Contains(out, "Aucun changement") {
+		t.Errorf("un plan a été rendu malgré une page parente à la corbeille:\n%s", out)
+	}
+}
+
+// apply partage le preflight de plan : il refuse avant le prompt, donc avant
+// toute écriture.
+func TestApplyRefusesATrashedParentPageBeforeWriting(t *testing.T) {
+	withFakeNtn(t, "authenticated_page_in_trash")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": twoDatabases,
+	})
+
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if err == nil || !strings.Contains(err.Error(), "corbeille") {
+		t.Fatalf("Execute() error = %v, want le refus de la page parente à la corbeille\n%s", err, out)
+	}
+	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
+		t.Error("un state a été écrit sous une page parente à la corbeille")
+	}
+}
+
+// Une réponse qui ne dit pas si la page est à la corbeille ne vaut pas « page
+// vivante » : le silence de l'API n'est pas une mesure.
+func TestCheckParentPageRefusesAnAnswerWithoutTrashFields(t *testing.T) {
+	for name, body := range map[string]string{
+		"sans champ": `{"object":"page","id":"p"}`,
+		"illisible":  `pas du json`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := fixedTransport{body: body}
+			err := checkParentPage(context.Background(), tr, testParentPageID, 3)
+			if err == nil {
+				t.Fatal("checkParentPage() = nil, want un refus")
+			}
+			if !strings.Contains(err.Error(), "  → ") {
+				t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+			}
+		})
+	}
+}
+
+// fixedTransport rend toujours le même corps en 200.
+type fixedTransport struct{ body string }
+
+func (f fixedTransport) Execute(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+	return transport.APIResponse{Status: 200, Body: []byte(f.body)}, nil
 }
 
 func TestPlanFailsOnDuplicateKeyNamingBothFiles(t *testing.T) {
