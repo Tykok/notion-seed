@@ -60,10 +60,21 @@ databases:
             group: Complete
 ```
 
-The `key` is stable — it anchors the database across a rename and is what the
-state and `import` use to identify it. `name` can change freely, `icon` is the
-optional emoji shown in Notion, and `properties` declares each property by
-name.
+| Field | Required | Role |
+|---|---|---|
+| `key` | no — derived from `name` when absent | stable identity: it anchors the database across a rename and is what the state and `import` use to identify it |
+| `name` | yes | display name shown in Notion |
+| `description` | no | shown under the database's name in Notion |
+| `icon` | no | emoji shown in Notion |
+| `properties` | yes | each property, by name — see [Property types](#property-types) |
+
+::: warning A key derived from `name` moves when you rename
+Without an explicit `key`, notion-seed derives one from `name`. Rename the
+database in the YAML without setting `key` first, and the derived key changes
+with it: notion-seed cannot tell the result from a new database — the old key
+comes out orphaned and goes to the trash, the new one is created empty. Set
+`key` explicitly before renaming a database you want to keep.
+:::
 
 ## Property types
 
@@ -86,6 +97,13 @@ A property of any other type present in Notion is left untouched — see
 [What is not declared](#what-is-not-declared).
 
 ## Options
+
+| Field | Required | Role |
+|---|---|---|
+| `key` | no | anchors the option's identity across a rename — see below |
+| `name` | yes | display name shown in Notion |
+| `color` | no | sets the option's color on creation, one of `default`, `gray`, `brown`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink`, `red` — changing it on an existing option is withheld, see [What it withholds](/commands#what-it-withholds) |
+| `group` | status only, required there | one of `To-do`, `In progress`, `Complete` — see below |
 
 ::: warning Removing a status option rewrites rows
 The API reassigns the rows to another option, without an error. The plan counts

@@ -60,10 +60,22 @@ databases:
             group: Complete
 ```
 
-La `key` est stable — elle ancre la database à travers un renommage et c'est
-elle que le state et `import` utilisent pour l'identifier. Le `name` peut
-changer librement, l'`icon` est l'emoji optionnel affiché dans Notion, et
-`properties` déclare chaque propriété par son nom.
+| Champ | Obligatoire | Rôle |
+|---|---|---|
+| `key` | non — dérivée de `name` si absente | identité stable : elle ancre la database à travers un renommage et c'est elle que le state et `import` utilisent pour l'identifier |
+| `name` | oui | nom affiché dans Notion |
+| `description` | non | affichée sous le nom de la database dans Notion |
+| `icon` | non | emoji affiché dans Notion |
+| `properties` | oui | chaque propriété, par son nom — voir [Types de propriétés](#types-de-proprietes) |
+
+::: warning Une key dérivée de name bouge quand vous renommez
+Sans `key` explicite, notion-seed en dérive une à partir de `name`. Renommer la
+database dans le YAML sans fixer `key` au préalable change la key dérivée avec
+elle : notion-seed ne peut pas distinguer le résultat d'une nouvelle database —
+l'ancienne key en ressort orpheline et part à la corbeille, la nouvelle est
+créée vide. Fixez `key` explicitement avant de renommer une database que vous
+voulez garder.
+:::
 
 ## Types de propriétés
 
@@ -86,6 +98,13 @@ Une propriété d'un autre type présente dans Notion est laissée intacte — v
 [Ce qui n'est pas déclaré](#ce-qui-n-est-pas-declare).
 
 ## Options
+
+| Champ | Obligatoire | Rôle |
+|---|---|---|
+| `key` | non | ancre l'identité de l'option à travers un renommage — voir plus bas |
+| `name` | oui | nom affiché dans Notion |
+| `color` | non | fixe la couleur de l'option à la création, parmi `default`, `gray`, `brown`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink`, `red` — la changer sur une option existante est retenu, voir [Ce qu'il retient](/fr/commands#ce-qu-il-retient) |
+| `group` | obligatoire sur status seulement | l'un de `To-do`, `In progress`, `Complete` — voir plus bas |
 
 ::: warning Retirer une option de status réécrit des lignes
 L'API réassigne les lignes à une autre option, sans erreur. Le plan les compte
