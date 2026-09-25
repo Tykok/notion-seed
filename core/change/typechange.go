@@ -13,11 +13,16 @@ package change
 //	from         to            row before       row after
 //	select    → multi_select   "Alpha"          ["Alpha"]        lossless
 //	number    → rich_text      7                "7"              lossless
-//	status    → select         "Ouvert"         "Ouvert"         lossless
+//	status    → select         "Ouvert"         (empty)          DESTRUCTIVE
 //	date      → rich_text      2026-01-15       "2026-01-15"     lossless
 //	multi_select → select      ["Un","Deux"]    "Un"             REWRITE
 //	rich_text → number         "42 texte"       42               REWRITE
 //	checkbox  → number         true             (empty)          DESTRUCTIVE
+//
+// status → select was first read as lossless on 2026-09-24. Re-measured on
+// 2026-09-25, a PATCH with `{}` empties every row (5/5), and even with the
+// options redeclared by name, a row that never received a status — read back
+// as "Not started" — is emptied too. No filter isolates such a row.
 //
 // multi_select → select deserves attention: the row held two values, it holds
 // one, and nothing says the second one ever existed. That is the exact
@@ -25,13 +30,13 @@ package change
 var typeChangeImpact = map[[2]string]Class{
 	{"select", "multi_select"}: ClassSafe,
 	{"number", "rich_text"}:    ClassSafe,
-	{"status", "select"}:       ClassSafe,
 	{"date", "rich_text"}:      ClassSafe,
 
 	{"multi_select", "select"}: ClassSilentRewrite,
 	{"rich_text", "number"}:    ClassSilentRewrite,
 
 	{"checkbox", "number"}: ClassDestructive,
+	{"status", "select"}:   ClassDestructive,
 }
 
 // ClassifyTypeChange says what going from one type to another costs.
