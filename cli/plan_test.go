@@ -821,10 +821,10 @@ databases:
 	if err != nil {
 		t.Fatalf("plan ne doit plus échouer : %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "réécriture silencieuse") {
+	if !strings.Contains(out, "silent rewrite") {
 		t.Errorf("le retrait n'a pas été reclassé par la mesure:\n%s", out)
 	}
-	if strings.Contains(out, "impact inconnu") {
+	if strings.Contains(out, "unknown impact") {
 		t.Errorf("la ligne est restée non mesurée:\n%s", out)
 	}
 	if strings.Contains(out, "Plan bloqué") {
@@ -966,7 +966,7 @@ databases:
 	if !strings.Contains(out.String(), `option "Fait"`) {
 		t.Errorf("le reste du plan n'est pas rendu:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "impact inconnu") {
+	if !strings.Contains(out.String(), "unknown impact") {
 		t.Errorf("la ligne non mesurée doit rester inconnue:\n%s", out.String())
 	}
 	// Les incidents ne polluent pas stdout : le plan doit rester exploitable
@@ -1033,7 +1033,7 @@ func TestPlanFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	if err == nil {
 		t.Fatalf("plan error = nil, want un échec\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+	if !strings.Contains(err.Error(), "silent rewrite") {
 		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
 	}
 }
@@ -1073,7 +1073,7 @@ func TestDiffFailsOnSilentRewriteWhenAsked(t *testing.T) {
 	if err == nil {
 		t.Fatalf("diff error = nil, want un échec\n%s", out)
 	}
-	if !strings.Contains(err.Error(), "réécriture silencieuse") {
+	if !strings.Contains(err.Error(), "silent rewrite") {
 		t.Errorf("message = %q, il doit nommer la classe qui a déclenché", err.Error())
 	}
 	// Le plan est rendu quand même : --fail-on change le code de sortie, il ne

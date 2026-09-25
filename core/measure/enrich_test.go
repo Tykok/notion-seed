@@ -42,7 +42,7 @@ func TestEnrichMakesARemovalSafeWhenNoRowUsesTheOption(t *testing.T) {
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != 0 || d.Class != change.ClassSafe {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {0 sûr}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {0 safe}", d.Count, d.Class)
 	}
 }
 
@@ -54,7 +54,7 @@ func TestEnrichClassifiesAStatusRemovalWithRowsAsSilentRewrite(t *testing.T) {
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	d := p.Changes[0].Details[0]
 	if d.Count != 47 || d.Class != change.ClassSilentRewrite {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {47 réécriture silencieuse}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {47 silent rewrite}", d.Count, d.Class)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestEnrichKeepsGoingWhenAMeasurementFails(t *testing.T) {
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != -1 || d.Class != change.ClassUnknownImpact {
-		t.Errorf("Detail = {Count:%d Class:%v}, want inconnu", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want unknown", d.Count, d.Class)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestEnrichReportsNoFailureForAnUnfilterableType(t *testing.T) {
 	}
 	// Le comportement de la ligne, lui, ne change pas : on ne sait toujours pas.
 	if d := p.Changes[0].Details[0]; d.Class != change.ClassUnknownImpact || d.Count != -1 {
-		t.Errorf("Detail = {Count:%d Class:%v}, want inconnu", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want unknown", d.Count, d.Class)
 	}
 }
 
@@ -243,10 +243,10 @@ func TestEnrichMakesATypeChangeSafeWhenTheColumnIsEmpty(t *testing.T) {
 
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if d := p.Changes[0].Details[0]; d.Count != 0 || d.Class != change.ClassSafe {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {0 sûr}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {0 safe}", d.Count, d.Class)
 	}
 	if got := p.Changes[0].Class; got != change.ClassSafe {
-		t.Errorf("Class d'en-tête = %v, want sûr", got)
+		t.Errorf("header Class = %v, want safe", got)
 	}
 }
 
@@ -259,7 +259,7 @@ func TestEnrichKeepsTheTableClassWhenATypeChangeHasRows(t *testing.T) {
 
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	if d := p.Changes[0].Details[0]; d.Count != 12 || d.Class != change.ClassSilentRewrite {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {12 réécriture silencieuse}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {12 silent rewrite}", d.Count, d.Class)
 	}
 }
 
@@ -274,7 +274,7 @@ func TestEnrichClassifiesARetypedStatusOptionAsDestructive(t *testing.T) {
 	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
 	d := p.Changes[0].Details[0]
 	if d.Count != 2 || d.Class != change.ClassDestructive {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {2 destructif}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {2 destructive}", d.Count, d.Class)
 	}
 }
 
@@ -308,7 +308,7 @@ func TestEnrichCountsTheRowsOfADestroyWithoutReclassifyingIt(t *testing.T) {
 		}
 		d := p.Changes[0].Details[0]
 		if d.Count != n || d.Class != change.ClassDestructive || p.Changes[0].Class != change.ClassDestructive {
-			t.Errorf("n=%d : Detail = {Count:%d Class:%v}, ressource %v, want destructif",
+			t.Errorf("n=%d: Detail = {Count:%d Class:%v}, resource %v, want destructive",
 				n, d.Count, d.Class, p.Changes[0].Class)
 		}
 	}
@@ -325,6 +325,6 @@ func TestEnrichKeepsADestroyDestructiveWhenCountingFails(t *testing.T) {
 	}
 	d := p.Changes[0].Details[0]
 	if d.Count != -1 || d.Class != change.ClassDestructive {
-		t.Errorf("Detail = {Count:%d Class:%v}, want {-1 destructif}", d.Count, d.Class)
+		t.Errorf("Detail = {Count:%d Class:%v}, want {-1 destructive}", d.Count, d.Class)
 	}
 }

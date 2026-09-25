@@ -4,9 +4,9 @@ package change
 
 import "testing"
 
-// La table ne contient QUE ce qui a été mesuré contre l'API le 2026-09-24.
-// Un couple absent doit rendre ClassUnknownImpact — affirmer « sûr » sur un
-// couple jamais essayé serait exactement le défaut que ce produit dénonce.
+// The table holds ONLY what was measured against the API on 2026-09-24. A
+// missing pair must return ClassUnknownImpact — asserting "safe" on a pair
+// never tried would be exactly the flaw this product calls out.
 func TestClassifyTypeChangeUsesMeasuredCouples(t *testing.T) {
 	tests := []struct {
 		from, to string
@@ -40,15 +40,15 @@ func TestClassifyTypeChangeIsUnknownForUnmeasuredCouples(t *testing.T) {
 	}
 }
 
-// Un type inchangé n'est pas un changement de type : la question ne se pose pas.
+// An unchanged type is not a type change: the question does not arise.
 func TestClassifyTypeChangeIsSafeWhenTypeDoesNotChange(t *testing.T) {
 	if got := ClassifyTypeChange("select", "select"); got != ClassSafe {
-		t.Errorf("ClassifyTypeChange sur un type inchangé = %v, want ClassSafe", got)
+		t.Errorf("ClassifyTypeChange on an unchanged type = %v, want ClassSafe", got)
 	}
 }
 
 func TestClassUnknownImpactHasItsOwnLabel(t *testing.T) {
-	if got := ClassUnknownImpact.String(); got != "impact inconnu" {
-		t.Errorf("String() = %q, want \"impact inconnu\"", got)
+	if got := ClassUnknownImpact.String(); got != "unknown impact" {
+		t.Errorf("String() = %q, want \"unknown impact\"", got)
 	}
 }

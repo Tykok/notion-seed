@@ -2,27 +2,26 @@
 
 package change
 
-// typeChangeImpact est ce que l'API Notion fait d'une colonne quand son type
-// change. MESURÉ le 2026-09-24 contre l'API 2025-09-03 (ntn 0.22.11), sur une
-// ligne remplie, database jetable dans un espace personnel.
+// typeChangeImpact is what the Notion API does to a column when its type
+// changes. MEASURED on 2026-09-24 against API 2025-09-03 (ntn 0.22.11), on a
+// filled row, in a throwaway database in a personal workspace.
 //
-// 7 couples sur 90 possibles. Tout le reste est inconnu et doit le rester :
-// écrire « sûr » sur un couple jamais essayé serait précisément le défaut que
-// cet outil existe pour rendre visible.
+// 7 pairs out of 90 possible. Everything else is unknown and must stay so:
+// writing "safe" on a pair never tried would be precisely the flaw this tool
+// exists to make visible.
 //
-//	de           vers          ligne avant      ligne après
-//	select    → multi_select   "Alpha"          ["Alpha"]        sans perte
-//	number    → rich_text      7                "7"              sans perte
-//	status    → select         "Ouvert"         "Ouvert"         sans perte
-//	date      → rich_text      2026-01-15       "2026-01-15"     sans perte
-//	multi_select → select      ["Un","Deux"]    "Un"             RÉÉCRITURE
-//	rich_text → number         "42 texte"       42               RÉÉCRITURE
-//	checkbox  → number         true             (vide)           DESTRUCTIF
+//	from         to            row before       row after
+//	select    → multi_select   "Alpha"          ["Alpha"]        lossless
+//	number    → rich_text      7                "7"              lossless
+//	status    → select         "Ouvert"         "Ouvert"         lossless
+//	date      → rich_text      2026-01-15       "2026-01-15"     lossless
+//	multi_select → select      ["Un","Deux"]    "Un"             REWRITE
+//	rich_text → number         "42 texte"       42               REWRITE
+//	checkbox  → number         true             (empty)          DESTRUCTIVE
 //
-// multi_select → select mérite l'attention : la ligne portait deux valeurs,
-// elle en porte une, et plus rien ne dit que la seconde a existé. C'est la
-// définition exacte de la réécriture silencieuse, et elle n'était donc pas
-// propre au status.
+// multi_select → select deserves attention: the row held two values, it holds
+// one, and nothing says the second one ever existed. That is the exact
+// definition of a silent rewrite, so it was not specific to status.
 var typeChangeImpact = map[[2]string]Class{
 	{"select", "multi_select"}: ClassSafe,
 	{"number", "rich_text"}:    ClassSafe,
@@ -35,10 +34,10 @@ var typeChangeImpact = map[[2]string]Class{
 	{"checkbox", "number"}: ClassDestructive,
 }
 
-// ClassifyTypeChange dit ce que coûte le passage d'un type à un autre.
+// ClassifyTypeChange says what going from one type to another costs.
 //
-// Un couple absent de la table rend ClassUnknownImpact : la réponse honnête
-// quand personne n'a essayé.
+// A pair missing from the table returns ClassUnknownImpact: the honest answer
+// when nobody has tried.
 func ClassifyTypeChange(from, to string) Class {
 	if from == to {
 		return ClassSafe

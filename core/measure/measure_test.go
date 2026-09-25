@@ -330,7 +330,7 @@ func TestCountAllRowsFailureDoesNotPromiseAnUnknownImpact(t *testing.T) {
 			t.Fatalf("%s : Count() error = nil", name)
 		}
 		if strings.Contains(err.Error(), "inconnu") {
-			t.Errorf("%s : message = %q, il annonce un impact inconnu", name, err.Error())
+			t.Errorf("%s: message = %q, it announces an unknown impact", name, err.Error())
 		}
 		if !strings.Contains(err.Error(), "reste annoncée destructive, sans son nombre de lignes") {
 			t.Errorf("%s : message = %q, il doit dire que la destruction reste destructive", name, err.Error())
