@@ -138,7 +138,7 @@ code non nul tant qu'ils restent — voir
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
 | `apply` | créations, modifications et destructions — voir [Appliquer](#appliquer) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
+| `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | accusés de lecture — voir [lifecycle](#lifecycle--des-accusés-de-lecture) |
 | `--fail-on` | le garde-fou de CI — voir [En CI](#en-ci) |
 
 ## Prérequis
@@ -235,7 +235,7 @@ version: 1
 workspace:
   parent_page_id: 33333333-3333-4333-8333-333333333333
 lifecycle:
-  prevent_destroy:
+  acknowledge_destroy:
     - database.projects
 ```
 
@@ -289,10 +289,10 @@ Le schéma JSON complet est dans [`schema/notion-seed.schema.json`](schema/notio
 
 ### `lifecycle` — des accusés de lecture
 
-`prevent_destroy` et `allow_data_loss` ne bloquent **plus rien**. Malgré son
-nom, `prevent_destroy` n'empêche pas la destruction : ces deux clés ne sont que
-des accusés de lecture, affichés sous la ressource qu'elles nomment. Une
-database sortie du YAML, déclarée dans `prevent_destroy` :
+`acknowledge_destroy` et `acknowledge_data_loss` ne bloquent **rien**. Ces
+deux clés ne sont que des accusés de lecture, affichés sous la ressource
+qu'elles nomment. Une database sortie du YAML, déclarée dans
+`acknowledge_destroy` :
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
@@ -302,20 +302,36 @@ Plan: 0 to add, 0 to change, 1 to destroy
   - database.tasks  [destructive]
       - database.tasks — present in the state, absent from the configuration  [destructive]
           → 3 row(s) go to the trash with it.
-      → declared in lifecycle.prevent_destroy.
+      → declared in lifecycle.acknowledge_destroy.
 
 Impact: 1 database(s) in the trash with 3 row(s).
 ```
 
 Elles disent « je sais ce que cette ressource porte », et rien de plus. `apply`
-met donc à la corbeille une database déclarée dans `prevent_destroy` exactement
-comme une autre, en affichant la mention. C'est écrit noir sur blanc parce
-qu'une clé nommée `prevent_destroy` qu'on croirait bloquante serait un piège :
-vous compteriez sur elle, et elle ne vous retiendrait pas.
+met donc à la corbeille une database déclarée dans `acknowledge_destroy`
+exactement comme une autre, en affichant la mention.
 
 Ce qui arrête une commande, désormais, c'est ce que vous demandez dans votre
 workflow : [`--fail-on`](#en-ci). Ce qui informe, c'est la mesure. Ce qui
 décide, c'est vous.
+
+#### Clés renommées
+
+`acknowledge_destroy` s'appelait `prevent_destroy`, et `acknowledge_data_loss`
+s'appelait `allow_data_loss` : les anciens noms promettaient un blocage qui
+n'existe plus, un piège pour qui comptait dessus. Les anciens noms sont
+**encore lus pendant une version**, avec un avertissement sur stderr à chaque
+commande qui charge la configuration, et disparaîtront à la suivante :
+
+```
+warning: workspace.yaml: `lifecycle.prevent_destroy` is deprecated, it is now `lifecycle.acknowledge_destroy` — the old name is still read in this version only
+  → rename `prevent_destroy` to `acknowledge_destroy` in workspace.yaml
+```
+
+D'ici là, la ligne du plan nomme la clé telle que vous l'avez écrite, pour
+qu'elle corresponde à votre YAML. Un ancien et un nouveau nom côte à côte voient
+leurs entrées fusionnées, avec un avertissement qui dit de déplacer les entrées
+de l'ancienne clé dans la nouvelle.
 
 ## State
 
@@ -422,7 +438,7 @@ du state. L'entrée n'est retirée que si la réponse de l'API confirme la
 corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
 `plan` et `apply` disent avant combien de lignes partent avec elle ; si le
 comptage échoue, la ligne dit que ce nombre n'est pas mesuré, jamais 0.
-`lifecycle.prevent_destroy` n'y change rien — voir
+`lifecycle.acknowledge_destroy` n'y change rien — voir
 [lifecycle](#lifecycle--des-accusés-de-lecture). Une database mise à la corbeille
 se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
 nouveau, redéclarez-la puis lancez `notion-seed import`.

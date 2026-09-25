@@ -138,7 +138,7 @@ a non-zero code as long as they remain — see
 | `init`, `version`, `plan`, `diff`, `import` | available |
 | `apply` | creations, updates and destructions — see [Applying](#applying) |
 | state file | `notion-seed.state.json`, written by `import` and `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | acknowledgements — see [lifecycle](#lifecycle--acknowledgements) |
+| `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | acknowledgements — see [lifecycle](#lifecycle--acknowledgements) |
 | `--fail-on` | the CI safeguard — see [In CI](#in-ci) |
 
 ## Requirements
@@ -235,7 +235,7 @@ version: 1
 workspace:
   parent_page_id: 33333333-3333-4333-8333-333333333333
 lifecycle:
-  prevent_destroy:
+  acknowledge_destroy:
     - database.projects
 ```
 
@@ -287,10 +287,9 @@ The full JSON schema is in [`schema/notion-seed.schema.json`](schema/notion-seed
 
 ### `lifecycle` — acknowledgements
 
-`prevent_destroy` and `allow_data_loss` **no longer block anything**. Despite
-its name, `prevent_destroy` does not prevent destruction: these two keys are
-only acknowledgements, shown under the resource they name. A database removed
-from the YAML, declared in `prevent_destroy`:
+`acknowledge_destroy` and `acknowledge_data_loss` **block nothing**. These two
+keys are only acknowledgements of reading, shown under the resource they name.
+A database removed from the YAML, declared in `acknowledge_destroy`:
 
 ```
 ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
@@ -300,19 +299,34 @@ Plan: 0 to add, 0 to change, 1 to destroy
   - database.tasks  [destructive]
       - database.tasks — present in the state, absent from the configuration  [destructive]
           → 3 row(s) go to the trash with it.
-      → declared in lifecycle.prevent_destroy.
+      → declared in lifecycle.acknowledge_destroy.
 
 Impact: 1 database(s) in the trash with 3 row(s).
 ```
 
 They say "I know what this resource holds", and nothing more. `apply`
-therefore moves a database declared in `prevent_destroy` to the trash exactly
-like any other, showing the mention. It is spelled out because a key named
-`prevent_destroy` that one would believe to be blocking would be a trap: you
-would rely on it, and it would not hold you back.
+therefore moves a database declared in `acknowledge_destroy` to the trash
+exactly like any other, showing the mention.
 
 What stops a command, from now on, is what you ask for in your workflow:
 [`--fail-on`](#in-ci). What informs is the measurement. What decides is you.
+
+#### Renamed keys
+
+`acknowledge_destroy` was called `prevent_destroy`, and `acknowledge_data_loss`
+was called `allow_data_loss`: the old names promised a block that no longer
+exists, a trap for whoever relied on them. The old names are **still read for
+one version**, with a warning on stderr on every command that loads the
+configuration, and will be removed in the next one:
+
+```
+warning: workspace.yaml: `lifecycle.prevent_destroy` is deprecated, it is now `lifecycle.acknowledge_destroy` — the old name is still read in this version only
+  → rename `prevent_destroy` to `acknowledge_destroy` in workspace.yaml
+```
+
+Until then, the plan line names the key as you wrote it, so that it matches
+your YAML. An old and a new name side by side have their entries merged, with a
+warning saying to move the old key's entries into the new one.
 
 ## State
 
@@ -416,8 +430,8 @@ declares and that Notion still holds is moved to the trash by a single call,
 from the state. The entry is removed only if the API response confirms the
 trash: otherwise it is kept, and `apply` reports it as a mismatch. `plan` and
 `apply` say beforehand how many rows go with it; if the count fails, the line
-says that number is not measured, never 0. `lifecycle.prevent_destroy` changes
-nothing about it — see [lifecycle](#lifecycle--acknowledgements). A database
+says that number is not measured, never 0. `lifecycle.acknowledge_destroy`
+changes nothing about it — see [lifecycle](#lifecycle--acknowledgements). A database
 moved to the trash is restored from the Notion trash; for notion-seed to manage
 it again, redeclare it then run `notion-seed import`.
 
