@@ -144,7 +144,7 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 		}
 		if !ok {
 			return fmt.Errorf("confirmation refusée, rien n'a été appliqué\n"+
-				"  → relancez et tapez exactement %q pour appliquer", confirmWord)
+				"  → relancez et tapez exactement « %s » pour appliquer", confirmWord)
 		}
 	}
 
@@ -361,5 +361,5 @@ func errNoOneToAsk() error {
 		"apply a besoin d'une confirmation, mais aucune n'a pu être obtenue "+
 			"(l'entrée standard n'est pas un terminal)\n"+
 			"  → passez --auto-approve pour appliquer sans confirmation (c'est le mode "+
-			"CI), ou lancez la commande dans un terminal et tapez %q", confirmWord)
+			"CI), ou lancez la commande dans un terminal et tapez « %s »", confirmWord)
 }
