@@ -1,1 +1,178 @@
 # YAML
+
+## Layout
+
+One directory, one workspace file, one YAML file per database:
+
+```
+.
+├── workspace.yaml
+└── databases/
+    ├── projects.yaml
+    └── tasks.yaml
+```
+
+`workspace.yaml` holds the global sections — `version`, `workspace`,
+`lifecycle`. A file in `databases/` only declares databases: without this rule,
+any file could divert the write target or erase a declaration, and the last one
+loaded would win.
+
+## workspace.yaml
+
+```yaml
+# workspace.yaml
+version: 1
+workspace:
+  parent_page_id: 33333333-3333-4333-8333-333333333333
+lifecycle:
+  prevent_destroy:
+    - database.projects
+```
+
+| Field | Required | Role |
+|---|---|---|
+| `version` | yes | format version of the configuration — `1` |
+| `workspace.parent_page_id` | yes | the Notion page under which databases are created |
+| `lifecycle.prevent_destroy` | no | list of `database.<key>`: acknowledgement, shown in the plan — blocks nothing |
+| `lifecycle.allow_data_loss` | no | list of `database.<key>`: acknowledgement, shown in the plan — blocks nothing |
+
+## databases/*.yaml
+
+```yaml
+# databases/tasks.yaml
+databases:
+  - key: tasks
+    name: Tasks
+    properties:
+      Name:
+        type: title
+      Estimate:
+        type: number
+        format: number
+      Statut:
+        type: status
+        options:
+          - key: todo
+            name: À faire
+            group: To-do
+          - key: done
+            name: Fait
+            group: Complete
+```
+
+The `key` is stable — it anchors the database across a rename and is what the
+state and `import` use to identify it. `name` can change freely, `icon` is the
+optional emoji shown in Notion, and `properties` declares each property by
+name.
+
+## Property types
+
+Ten types are managed today:
+
+| Type | Extra fields |
+|---|---|
+| `title` | — (exactly one per database) |
+| `rich_text` | — |
+| `number` | `format` |
+| `url` | — |
+| `select` | `options` |
+| `multi_select` | `options` |
+| `status` | `options`, each with a required `group` |
+| `date` | — |
+| `checkbox` | — |
+| `people` | — |
+
+A property of any other type present in Notion is left untouched — see
+[What is not declared](#what-is-not-declared).
+
+## Options
+
+::: warning Removing a status option rewrites rows
+The API reassigns the rows to another option, without an error. The plan counts
+them before you apply.
+:::
+
+A `status` property must declare its `options`, and `group` is **required** on
+each of them. A `status` created without options gets populated by the API with
+its own default options, which the plan will not have shown — and removing them
+later silently reassigns the rows. `select` and `multi_select` do not have this
+constraint: their options can be managed by hand without that risk.
+
+`group` only accepts
+`To-do`, `In progress` or `Complete`. notion-seed does not choose a group for
+you: an option sent without `group` is put by the API in the first group,
+without an error — hence a write the plan would not have announced. On the
+other types, `group` is rejected, like `format` outside `number`.
+
+The `key` is what anchors an option's identity across a rename: without it, an
+option renamed in the YAML comes out as a removal followed by an addition —
+`destructive` or `silent rewrite` depending on the type and the number of rows
+affected — since it cannot be followed across the name change.
+
+## Icon
+
+The `icon` — an emoji — is written on the database, never on its data source:
+measured, writing on the database updates both, writing on the data source
+makes them diverge. `notion-seed` only reads the database's icon: if the data
+source's is changed separately, in Notion, it does not see it.
+
+## lifecycle — acknowledgements
+
+::: danger prevent_destroy prevents nothing
+Despite its name, a database listed in `prevent_destroy` goes to the trash like
+any other when it leaves the YAML. The key only adds a mention to the plan.
+:::
+
+`prevent_destroy` and `allow_data_loss` **no longer block anything**. Despite
+its name, `prevent_destroy` does not prevent destruction: these two keys are
+only acknowledgements, shown under the resource they name. A database removed
+from the YAML, declared in `prevent_destroy`:
+
+```
+ntn 0.22.11 — workspace Example Space (33333333-3333-4333-8333-333333333333)
+
+Plan: 0 to add, 0 to change, 1 to destroy
+
+  - database.tasks  [destructive]
+      - database.tasks — present in the state, absent from the configuration  [destructive]
+          → 3 row(s) go to the trash with it.
+      → declared in lifecycle.prevent_destroy.
+
+Impact: 1 database(s) in the trash with 3 row(s).
+```
+
+They say "I know what this resource holds", and nothing more. `apply`
+therefore moves a database declared in `prevent_destroy` to the trash exactly
+like any other, showing the mention. It is spelled out because a key named
+`prevent_destroy` that one would believe to be blocking would be a trap: you
+would rely on it, and it would not hold you back.
+
+What stops a command, from now on, is what you ask for in your workflow:
+[`--fail-on`](/commands#in-ci). What informs is the measurement. What decides
+is you.
+
+## What is not declared
+
+::: warning Undeclared options are destroyed
+An undeclared property is never touched. An undeclared option is removed as
+soon as its property is written: the API replaces the whole list.
+:::
+
+A **property** present in Notion and absent from the YAML is never touched: it
+appears under `Unmanaged — present in Notion, left untouched`. The API updates
+properties one by one, so not declaring it is enough to leave it alone.
+
+An **option** present in Notion and absent from the YAML, on the other hand,
+will be destroyed as soon as its property is written: the API replaces the
+whole list of options instead of merging it. The plan therefore shows it as a
+removal, with the number of rows that hold it: `destructive` for `select` and
+`multi_select`, `silent rewrite` for `status` — and `safe` if that number is
+zero.
+
+In other words, "not declared = not touched" is true for properties and false
+for options. It is exactly the kind of gap this tool exists to make visible.
+
+## JSON schema
+
+The full schema is
+[`schema/notion-seed.schema.json`](https://github.com/tykok/notion-seed/blob/main/schema/notion-seed.schema.json).
