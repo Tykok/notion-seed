@@ -21,10 +21,6 @@ import (
 // sortie est exactement celle d'avant.
 func Render(w io.Writer, p *Plan) error { return render(w, p, Impact(p)) }
 
-// RenderWithoutImpact écrit le plan sans sa ligne d'agrégat. Elle ne sert plus
-// qu'à apply, jusqu'à ce qu'il passe à RenderForApply.
-func RenderWithoutImpact(w io.Writer, p *Plan) error { return render(w, p, "") }
-
 // RenderForApply écrit le plan comme Render, à une ligne près : l'agrégat
 // d'impact ne porte que sur ce qu'apply VA écrire.
 //

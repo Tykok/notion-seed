@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/tykok/notion-seed/core/apply"
 	"github.com/tykok/notion-seed/core/state"
 )
 
@@ -128,45 +129,6 @@ func TestApplyRecordsTheWorkspaceInTheStateItCreates(t *testing.T) {
 	// L'id que le faux ntn annonce dans whoami.
 	if snap.WorkspaceID != "33333333-3333-4333-8333-333333333333" {
 		t.Errorf("WorkspaceID = %q, want celui sur lequel ntn est authentifié", snap.WorkspaceID)
-	}
-}
-
-// Une destruction en attente ne doit pas être présentée comme une modification
-// de propriétés : c'est l'opération la plus destructrice du produit, et le
-// message enverrait l'utilisateur faire la mauvaise chose.
-func TestApplyNamesAPendingDestroyAsADestroy(t *testing.T) {
-	withFakeNtn(t, "authenticated_database")
-	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     workspaceYAML,
-		"databases/all.yaml": tasksWithStatus,
-	})
-	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
-		t.Fatalf("import: %v", err)
-	}
-	// La database sort du YAML : elle devient orpheline, et existe toujours dans
-	// Notion. allow_data_loss évite que le plan soit bloqué avant la section.
-	writeConfigDir(t, map[string]string{})
-	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
-		[]byte(workspaceYAML+"lifecycle:\n  allow_data_loss:\n    - database.tasks\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
-		[]byte("databases: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
-	if err == nil {
-		t.Fatalf("Execute() error = nil, want un apply non convergé\n%s", out)
-	}
-	if !strings.Contains(out, "Non appliqué par cette version") {
-		t.Fatalf("sortie:\n%s", out)
-	}
-	if strings.Contains(out, "modifications de propriétés arrivent") {
-		t.Errorf("une destruction est annoncée comme une modification de propriétés:\n%s", out)
-	}
-	if !strings.Contains(out, "destruction") {
-		t.Errorf("la section ne dit pas qu'une destruction est en attente:\n%s", out)
 	}
 }
 
@@ -417,43 +379,6 @@ func TestApplyHonoursFailOnBeforeWriting(t *testing.T) {
 	}
 }
 
-// La ligne Impact agrège TOUT le plan. apply n'écrivant pas les destructions, la
-// lui faire afficher lui ferait annoncer une destruction qu'il ne fera pas —
-// contredite quatre lignes plus bas par sa propre section « Non appliqué ».
-// apply annonce lui-même ce qu'il va écrire, juste avant la confirmation.
-func TestApplyDoesNotAnnounceAnImpactItWillNotCause(t *testing.T) {
-	withFakeNtn(t, "authenticated_database")
-	dir := writeConfigDir(t, map[string]string{
-		"workspace.yaml":     workspaceYAML,
-		"databases/all.yaml": tasksWithStatus,
-	})
-	if _, err := runCmd(t, "import", "database.tasks", testDatabaseID, "--dir", dir); err != nil {
-		t.Fatalf("import: %v", err)
-	}
-	// La database sort du YAML : elle devient orpheline et existe toujours dans
-	// Notion, donc le plan porte une destruction qu'apply ne sait pas écrire.
-	if err := os.WriteFile(filepath.Join(dir, "databases", "all.yaml"),
-		[]byte("databases: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	planOut, perr := runCmd(t, "plan", "--dir", dir)
-	if perr != nil {
-		t.Fatalf("plan: %v\n%s", perr, planOut)
-	}
-	if !strings.Contains(planOut, "Impact :") {
-		t.Fatalf("montage du test faux : le plan doit porter une ligne Impact\n%s", planOut)
-	}
-
-	applyOut, _ := runCmd(t, "apply", "--dir", dir, "--auto-approve")
-	if strings.Contains(applyOut, "Impact :") {
-		t.Errorf("apply annonce un impact qu'il ne causera pas:\n%s", applyOut)
-	}
-	if !strings.Contains(applyOut, "Non appliqué par cette version") {
-		t.Errorf("apply doit toujours nommer ce qu'il ne sait pas écrire:\n%s", applyOut)
-	}
-}
-
 // tasksWithRenamedOption reprend tasksWithStatus en changeant le NOM de
 // l'option "Fait" sans toucher à sa key : l'API ne sait pas renommer une
 // option, donc la ressource est retenue.
@@ -538,14 +463,9 @@ func TestApplyWithholdsARenamedOptionAndSaysWhy(t *testing.T) {
 	if !strings.Contains(out, "migrée à la main") {
 		t.Errorf("la section ne dit pas quoi faire:\n%s", out)
 	}
-	// Retenu n'est pas « non appliqué par cette version » : la confusion
-	// enverrait l'utilisateur attendre une version qui ne changera rien.
-	if strings.Contains(out, "Non appliqué par cette version") {
-		t.Errorf("une ressource retenue est rangée avec ce que cette version n'écrit pas:\n%s", out)
-	}
-	// Le bilan ne doit pas dire « rien de non appliqué » alors qu'apply échoue
+	// Le bilan doit compter la ressource retenue alors qu'apply échoue
 	// à cause de cette ressource.
-	if !strings.Contains(out, "Retenu : 1") {
+	if !strings.Contains(out, "Retenu : 1 ressource(s)") {
 		t.Errorf("le bilan ne compte pas la ressource retenue:\n%s", out)
 	}
 	// Rien n'est écrit : le compte est le coût du remède, pas une perte.
@@ -605,9 +525,6 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 	if !strings.Contains(out, "1 modification(s)") {
 		t.Errorf("le bilan ne compte pas la modification:\n%s", out)
 	}
-	if strings.Contains(out, "Non appliqué par cette version") {
-		t.Errorf("une modification écrite est encore annoncée comme non appliquée:\n%s", out)
-	}
 
 	snap, lerr := state.Load(dir)
 	if lerr != nil {
@@ -623,5 +540,216 @@ func TestApplyWritesAnUpdateAndConverges(t *testing.T) {
 	}
 	if !strings.Contains(planOut, "Aucun changement") {
 		t.Errorf("le plan qui suit un apply réussi n'est pas vide:\n%s", planOut)
+	}
+}
+
+// orphanYAML retire toute database du YAML : la database importée devient
+// orpheline, et Notion la porte toujours.
+const orphanYAML = "databases: []\n"
+
+// trashLine est la SEULE écriture qu'une destruction doit produire.
+const trashLine = `PATCH /v1/databases/db-1 {"in_trash":true}` + "\n"
+
+// withMutationLog demande au scénario à état de journaliser chaque écriture
+// qu'il reçoit, et rend le chemin du journal.
+func withMutationLog(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fakentn.log")
+	t.Setenv("FAKE_NTN_LOG_FILE", path)
+	return path
+}
+
+// readMutationLog rend le journal, "" s'il n'a jamais été créé : aucune
+// écriture n'est partie.
+func readMutationLog(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// Le chemin heureux de la destruction, de bout en bout :
+//   - l'annonce a sa propre ligne, avant la confirmation, distincte du nettoyage ;
+//   - un seul PATCH part, et il ne porte que la corbeille ;
+//   - l'entrée quitte le state ;
+//   - le plan suivant est vide.
+func TestApplyTrashesAnOrphanAndConverges(t *testing.T) {
+	logPath := withMutationLog(t)
+	dir := importThenDeclare(t, orphanYAML)
+	forceInteractive(t)
+
+	out, err := runCmdWithStdin(t, "apply\n", "apply", "--dir", dir)
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	announce := strings.Index(out, "1 database(s) vont être mises à la corbeille")
+	prompt := strings.Index(out, "Confirmez")
+	if announce < 0 || prompt < 0 || announce > prompt {
+		t.Errorf("sortie:\n%s\nwant l'annonce de la corbeille avant la confirmation", out)
+	}
+	// Une destruction n'est pas un nettoyage : elle écrit dans Notion.
+	if strings.Contains(out, "entrée(s) obsolètes") {
+		t.Errorf("la destruction est annoncée comme un nettoyage local:\n%s", out)
+	}
+	if !strings.Contains(out, "- database.tasks mise à la corbeille") {
+		t.Errorf("le compte rendu ne nomme pas la destruction:\n%s", out)
+	}
+	if !strings.Contains(out, "1 mise(s) à la corbeille") {
+		t.Errorf("le bilan ne compte pas la destruction:\n%s", out)
+	}
+	if got := readMutationLog(t, logPath); got != trashLine {
+		t.Errorf("écritures = %q, want exactement %q", got, trashLine)
+	}
+
+	snap, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if _, ok := snap.Databases["tasks"]; ok {
+		t.Error("l'entrée de la database mise à la corbeille est restée dans le state")
+	}
+	planOut, perr := runCmd(t, "plan", "--dir", dir)
+	if perr != nil {
+		t.Fatalf("plan: %v\n%s", perr, planOut)
+	}
+	if !strings.Contains(planOut, "Aucun changement") {
+		t.Errorf("le plan qui suit une destruction n'est pas vide:\n%s", planOut)
+	}
+}
+
+// Review Focus #4 : prevent_destroy est un accusé de lecture. La destruction
+// part, et la mention reste affichée.
+func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
+	logPath := withMutationLog(t)
+	dir := importThenDeclare(t, orphanYAML)
+	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
+		[]byte(workspaceYAML+"lifecycle:\n  prevent_destroy:\n    - database.tasks\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if err != nil {
+		t.Fatalf("Execute() error = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "→ déclarée dans lifecycle.prevent_destroy.") {
+		t.Errorf("la mention prevent_destroy a disparu:\n%s", out)
+	}
+	if got := readMutationLog(t, logPath); got != trashLine {
+		t.Errorf("écritures = %q, want exactement %q", got, trashLine)
+	}
+}
+
+// Review Focus #5 : une CI qui a demandé --fail-on=destructive ne met JAMAIS une
+// database à la corbeille. Zéro écriture, state intact.
+func TestApplyFailOnDestructiveTrashesNothing(t *testing.T) {
+	logPath := withMutationLog(t)
+	dir := importThenDeclare(t, orphanYAML)
+	before := mustReadFile(t, filepath.Join(dir, state.FileName))
+
+	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve", "--fail-on=destructive")
+	if err == nil {
+		t.Fatalf("Execute() error = nil, want le refus de --fail-on\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--fail-on") {
+		t.Errorf("message = %q, il doit dire que --fail-on a déclenché", err.Error())
+	}
+	if got := readMutationLog(t, logPath); got != "" {
+		t.Errorf("écritures = %q, want aucune", got)
+	}
+	if after := mustReadFile(t, filepath.Join(dir, state.FileName)); after != before {
+		t.Error("le state a été réécrit malgré --fail-on")
+	}
+}
+
+// Spec §5, configuration courante : sans ressource retenue, apply annonce
+// exactement l'agrégat de plan — destruction comprise, maintenant qu'il l'écrit.
+func TestApplyShowsTheSameImpactAsPlanWhenNothingIsWithheld(t *testing.T) {
+	dir := importThenDeclare(t, orphanYAML)
+	const want = "Impact : 1 database(s) à la corbeille."
+
+	planOut, perr := runCmd(t, "plan", "--dir", dir)
+	if perr != nil {
+		t.Fatalf("plan: %v\n%s", perr, planOut)
+	}
+	if !strings.Contains(planOut, want) {
+		t.Fatalf("montage du test faux : le plan doit porter %q\n%s", want, planOut)
+	}
+	applyOut, aerr := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if aerr != nil {
+		t.Fatalf("apply: %v\n%s", aerr, applyOut)
+	}
+	if !strings.Contains(applyOut, want) {
+		t.Errorf("apply n'annonce pas l'agrégat de plan:\n%s", applyOut)
+	}
+}
+
+// tasksRenamedWithoutTodo renomme « Fait » ET retire « À faire ». Le renommage
+// retient la ressource ; le retrait, qu'apply ne causera donc pas, porte un
+// impact mesuré que plan agrège.
+const tasksRenamedWithoutTodo = `
+databases:
+  - key: tasks
+    name: "Tasks"
+    properties:
+      Name:
+        type: title
+      Statut:
+        type: status
+        options:
+          - key: done
+            name: "Terminé"
+            color: green
+            group: "Complete"
+`
+
+// Spec §5, seconde configuration : une ressource retenue garde un impact
+// qu'apply ne causera pas. Son agrégat est donc strictement inférieur à celui
+// de plan — ici, nul.
+func TestApplyLeavesAWithheldResourceOutOfItsImpact(t *testing.T) {
+	dir := importThenDeclare(t, tasksRenamedWithoutTodo)
+
+	planOut, perr := runCmd(t, "plan", "--dir", dir)
+	if perr != nil {
+		t.Fatalf("plan: %v\n%s", perr, planOut)
+	}
+	if !strings.Contains(planOut, "Impact : 2 valeurs réassignées sans trace.") {
+		t.Fatalf("montage du test faux : le plan doit agréger le retrait\n%s", planOut)
+	}
+	applyOut, aerr := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+	if aerr == nil {
+		t.Fatalf("apply error = nil, want un apply non convergé\n%s", applyOut)
+	}
+	if !strings.Contains(applyOut, "Retenu — migration requise") {
+		t.Fatalf("montage du test faux : la ressource doit être retenue\n%s", applyOut)
+	}
+	if strings.Contains(applyOut, "Impact :") {
+		t.Errorf("apply agrège l'impact d'une ressource qu'il n'écrit pas:\n%s", applyOut)
+	}
+	// Reliquat du lot A : le bilan ne suit plus la section « Retenu » de deux
+	// lignes vides.
+	if strings.Contains(applyOut, "\n\n\nAppliqué") {
+		t.Errorf("double ligne vide avant le bilan:\n%s", applyOut)
+	}
+}
+
+// Un apply dont la seule écriture est une corbeille non confirmée échoue : son
+// bilan doit quand même dire que rien n'a été acquis, et suivre les écarts
+// d'une seule ligne vide.
+func TestApplyReportKeepsItsSummaryWhenOnlyAMismatchRemains(t *testing.T) {
+	var b bytes.Buffer
+	renderReport(&b, apply.Report{Mismatches: []string{
+		"database.tasks — l'API a répondu sans mettre la database à la corbeille",
+	}}, 0)
+	out := b.String()
+	if !strings.Contains(out, "Appliqué : 0 création(s), 0 modification(s), 0 mise(s) à la corbeille") {
+		t.Errorf("bilan absent:\n%s", out)
+	}
+	if strings.Contains(out, "\n\n\nAppliqué") {
+		t.Errorf("double ligne vide avant le bilan:\n%s", out)
 	}
 }
