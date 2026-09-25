@@ -9,7 +9,7 @@ Déclarer un workspace Notion en fichiers n'est pas le problème difficile. Le
 problème difficile, c'est de savoir ce que l'API va faire de vos données quand
 la déclaration change.
 
-Cinq comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
+Six comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
 la requête ne vous signale pas :
 
 | Changement | Ce que fait l'API |
@@ -19,11 +19,13 @@ la requête ne vous signale pas :
 | Retirer une option de `multi_select` | Les lignes concernées perdent **cette valeur** — elles ne passent à vide que si elles n'en portaient pas d'autre |
 | Retirer une option de `status` | **Réassigne les lignes à une autre option**, sans erreur |
 | `multi_select` → `select` | **Ne garde qu'une valeur** sur les lignes qui en portaient plusieurs |
+| `select` → `multi_select` | Recrée les options : une ligne ne garde sa valeur que si le YAML redéclare une option **de même nom** ; les autres passent à vide |
 
-Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies.
+Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies — le
+dernier le 2026-09-25.
 
-Les deux derniers sont ceux qui justifient l'outil : la donnée n'est pas perdue,
-elle est remplacée par une valeur plausible et fausse, indistinguable après coup.
+Le retrait d'option de `status` et `multi_select` → `select` sont ceux qui
+justifient l'outil : la donnée n'est pas perdue, elle est remplacée par une valeur plausible et fausse, indistinguable après coup.
 
 `notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
 de lignes sont concernées. Une option de `status` retirée du YAML, deux lignes
@@ -390,7 +392,12 @@ appels, toujours dans cet ordre :
 Ce qui part est exactement ce que le plan a affiché : une propriété déclarée
 mais identique au réel ne part pas, une propriété non déclarée non plus. Les
 options existantes sont transmises avec leur id, les neuves sans : l'API leur en
-crée un, que la relecture rapporte au state.
+crée un, que la relecture rapporte au state. Sous un changement de type, les
+options sont recréées : seules celles du YAML partent, sans id, et chaque option
+actuelle que le YAML ne redéclare pas sous le même nom ressort en `-`, avec le
+nombre de lignes qu'elle vide. Seul `select` → `multi_select` a été mesuré ; les
+autres couples entre `select`, `multi_select` et `status` suivent la même règle,
+sans l'avoir été.
 
 L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
 sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins

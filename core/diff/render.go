@@ -287,7 +287,7 @@ func consequence(d resources.Detail) string {
 	// a été mesuré, ce qui est le seul défaut que ce produit ne peut pas se
 	// permettre.
 	if d.Measure.Option != "" {
-		switch d.Measure.PropertyType {
+		switch removalFate(*d.Measure) {
 		case "status":
 			return count + " seront réassignées à une autre option, sans trace"
 		case "multi_select":
@@ -317,6 +317,19 @@ func consequence(d resources.Detail) string {
 		return "jusqu'à " + count + " appauvries, sans trace"
 	}
 	return count + " non vides dans cette colonne"
+}
+
+// removalFate dit de quel type le sort des lignes suit, pour une option qui
+// part. C'est l'ancien type, sauf quand l'option disparaît avec un changement de
+// type : un status n'a alors plus d'option où réassigner la ligne, qui perd sa
+// valeur comme sous un select — une seule valeur, donc la cellule se vide.
+// Mesuré le 2026-09-25 sur select → multi_select uniquement ; status → autre
+// type suit la même règle de nom, jamais observée pour lui.
+func removalFate(m resources.Measurement) string {
+	if m.Retyped && m.PropertyType == "status" {
+		return "select"
+	}
+	return m.PropertyType
 }
 
 // Impact agrège les comptes mesurés en une phrase. C'est le produit en une
@@ -358,7 +371,7 @@ func Impact(p *Plan) string {
 				continue
 			}
 			switch {
-			case d.Measure.Option != "" && d.Measure.PropertyType == "status":
+			case d.Measure.Option != "" && removalFate(*d.Measure) == "status":
 				reassigned += d.Count
 				reassignedCapped = reassignedCapped || d.Capped
 			case d.Measure.Option != "":

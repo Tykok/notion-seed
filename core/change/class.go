@@ -85,12 +85,29 @@ func (c Class) String() string {
 // sans rien coûter, quel que soit son type. C'est ce que le blocage par
 // principe ne savait pas voir, et pourquoi il a été remplacé par une mesure.
 func ClassifyOptionRemoval(propertyType string, count int) Class {
+	return classifyLoss(count, propertyType == "status")
+}
+
+// ClassifyRetypedOptionRemoval donne le coût d'une option qui disparaît avec un
+// changement de type, parce que le YAML ne la redéclare pas sous le même nom.
+//
+// Mesuré le 2026-09-25 contre l'API, sur select → multi_select seulement : une
+// ligne ne garde sa valeur que si une option de même nom part dans le payload,
+// sinon elle passe à vide. Aucune option ne reste où réassigner la ligne, donc
+// l'ancien type — status compris — ne change rien : c'est une perte.
+func ClassifyRetypedOptionRemoval(count int) Class {
+	return classifyLoss(count, false)
+}
+
+// classifyLoss est la règle commune aux deux retraits : le compte d'abord, le
+// sort des lignes ensuite.
+func classifyLoss(count int, reassigns bool) Class {
 	switch {
 	case count < 0:
 		return ClassUnknownImpact
 	case count == 0:
 		return ClassSafe
-	case propertyType == "status":
+	case reassigns:
 		return ClassSilentRewrite
 	default:
 		return ClassDestructive

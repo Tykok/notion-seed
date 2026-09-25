@@ -262,3 +262,18 @@ func TestEnrichKeepsTheTableClassWhenATypeChangeHasRows(t *testing.T) {
 		t.Errorf("Detail = {Count:%d Class:%v}, want {12 réécriture silencieuse}", d.Count, d.Class)
 	}
 }
+
+// Sous un changement de type, une option de status non redéclarée disparaît et
+// ses lignes perdent leur valeur : c'est une perte, pas une réassignation. La
+// mesure la reclasse destructive, quel que soit l'ancien type.
+func TestEnrichClassifiesARetypedStatusOptionAsDestructive(t *testing.T) {
+	p := planWithRemoval("status", "Fait")
+	p.Changes[0].Details[0].Measure.Retyped = true
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 2}, nil })
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	d := p.Changes[0].Details[0]
+	if d.Count != 2 || d.Class != change.ClassDestructive {
+		t.Errorf("Detail = {Count:%d Class:%v}, want {2 destructif}", d.Count, d.Class)
+	}
+}

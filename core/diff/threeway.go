@@ -180,7 +180,9 @@ func updateTarget(desired, applied, actual *state.Database) state.Database {
 		if want.Type != have.Type {
 			// Mesuré le 2026-09-24 : un changement de type recrée les options et
 			// ignore les ids transmis. planLines annonce ces mêmes options, toutes
-			// en `+`, depuis le même newProperty : les deux restent alignés.
+			// en `+`, depuis le même newProperty : les deux restent alignés. Les
+			// options actuelles que le YAML ne redéclare pas sous le même nom ne
+			// partent pas : planLines les annonce en `-`, avec leur compte.
 			p := newProperty(want)
 			p.ID = have.ID
 			target.Properties[name] = p
@@ -362,6 +364,10 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			// notion-seed paierait un appel contre l'API pour un nombre qui ne dit
 			// rien. Ne pas payer d'appels pour rien est une propriété du produit,
 			// pas une optimisation.
+			//
+			// Sûr pour les valeurs dont le nom revient, pas pour les autres :
+			// celles-là sont annoncées et mesurées une à une par
+			// retypedRemovalLines, ligne de retrait par option.
 			if class != change.ClassSafe {
 				d.Measure = &resources.Measurement{
 					Property:     name,
@@ -372,6 +378,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 			// Un changement de type recrée les options : toutes celles du YAML
 			// partent neuves, sans id, exactement comme sous une propriété neuve.
 			out = append(out, newOptionLines(name, newProperty(want).Options)...)
+			out = append(out, retypedRemovalLines(name, want, have)...)
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
@@ -529,22 +536,66 @@ func optionLines(propName string, want, have, applied state.Property) []resource
 		if p.Claimed[i] {
 			continue
 		}
-		out = append(out, resources.Detail{
-			Op:       "-",
-			Target:   fmt.Sprintf("option %q (propriété %q)", o.Name, propName),
-			Property: propName,
-			Note:     "absente du YAML : l'API remplace la liste entière des options",
-			// Classe et compte viennent de la mesure. Avant elle, on ne sait pas :
-			// -1 dit « non mesuré », et ClassifyOptionRemoval le traduit en impact
-			// inconnu plutôt qu'en « sûr ».
-			Class: change.ClassifyOptionRemoval(have.Type, -1),
-			Count: -1,
-			Measure: &resources.Measurement{
-				Property: propName, PropertyType: have.Type, Option: o.Name,
-			},
-		})
+		out = append(out, removalLine(propName, have.Type, o.Name, false))
 	}
 	return out
+}
+
+// retypedRemovalLines annonce les options qu'un changement de type fait
+// disparaître. Mesuré le 2026-09-25 sur select → multi_select : l'API recrée
+// les options, et une ligne ne garde sa valeur que si une option de MÊME NOM
+// part dans le payload. Les autres disparaissent du schéma, et leurs lignes
+// passent à vide. L'appariement se fait donc par nom seul : ni key ni id ne
+// survivent à la recréation.
+//
+// La même règle vaut pour tout couple entre types à options (status ↔ select,
+// status ↔ multi_select, multi_select → select), sans y avoir été mesurée. Vers
+// un type sans options, il n'y a aucun nom à retrouver : le compte des non vides
+// de la ligne de propriété dit seul ce qui est en jeu.
+func retypedRemovalLines(propName string, want, have state.Property) []resources.Detail {
+	if !hasOptions(want.Type) {
+		return nil
+	}
+	declared := make(map[string]bool, len(want.Options))
+	for _, o := range want.Options {
+		declared[o.Name] = true
+	}
+	var out []resources.Detail
+	for _, o := range have.Options {
+		if declared[o.Name] {
+			continue
+		}
+		out = append(out, removalLine(propName, have.Type, o.Name, true))
+	}
+	return out
+}
+
+// removalLine annonce une option que l'écriture détruira. propType est le type
+// ACTUEL de la propriété : c'est lui qui filtre les lignes à compter.
+func removalLine(propName, propType, option string, retyped bool) resources.Detail {
+	// Classe et compte viennent de la mesure. Avant elle, on ne sait pas : -1
+	// dit « non mesuré », et la classification le traduit en impact inconnu
+	// plutôt qu'en « sûr ».
+	class := change.ClassifyOptionRemoval(propType, -1)
+	if retyped {
+		class = change.ClassifyRetypedOptionRemoval(-1)
+	}
+	return resources.Detail{
+		Op:       "-",
+		Target:   fmt.Sprintf("option %q (propriété %q)", option, propName),
+		Property: propName,
+		Note:     "absente du YAML : l'API remplace la liste entière des options",
+		Class:    class,
+		Count:    -1,
+		Measure: &resources.Measurement{
+			Property: propName, PropertyType: propType, Option: option, Retyped: retyped,
+		},
+	}
+}
+
+// hasOptions dit si un type de propriété porte une liste d'options.
+func hasOptions(t string) bool {
+	return t == "select" || t == "status" || t == "multi_select"
 }
 
 // optionAttrLines compare color et group d'une option appariée dont le nom

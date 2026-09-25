@@ -321,6 +321,9 @@ func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 	assertOptionLinesMatchTarget(t, res, "Prio", []string{
 		`+ option "Haute" (propriété "Prio") color red, group To-do`,
 		`+ option "Faite" (propriété "Prio") group Complete`,
+		// "Basse" n'est pas redéclarée : elle disparaît avec le changement de
+		// type, et ses lignes avec elle.
+		`- option "Basse" (propriété "Prio") absente du YAML : l'API remplace la liste entière des options`,
 	})
 	for _, d := range res.Changeset.Details {
 		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
@@ -341,7 +344,9 @@ func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []
 	if res.Target == nil {
 		t.Fatalf("Target = nil, Withheld = %q", res.Withheld)
 	}
-	var got []string
+	// Seules les lignes `+` disent ce que la cible écrit ; une ligne `-` dit ce
+	// que la cible n'écrit PAS, et n'a donc pas d'option en face.
+	var got, added []string
 	propLine := false
 	for _, d := range res.Changeset.Details {
 		if d.Target == fmt.Sprintf("property %q", prop) ||
@@ -357,6 +362,9 @@ func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []
 				d.Target, d.Property, d.Field, prop)
 		}
 		got = append(got, d.Op+" "+d.Target+" "+d.Note)
+		if d.Op == "+" {
+			added = append(added, d.Op+" "+d.Target+" "+d.Note)
+		}
 	}
 	if !propLine {
 		t.Errorf("aucune ligne de propriété pour %q : les options élargiraient le jeu d'écriture", prop)
@@ -365,13 +373,13 @@ func assertOptionLinesMatchTarget(t *testing.T, res Result, prop string, want []
 		t.Errorf("lignes d'option:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	opts := res.Target.Properties[prop].Options
-	if len(opts) != len(want) {
-		t.Fatalf("la cible écrit %d options, le plan en montre %d", len(opts), len(want))
+	if len(opts) != len(added) {
+		t.Fatalf("la cible écrit %d options, le plan en montre %d", len(opts), len(added))
 	}
 	for i, o := range opts {
 		line := fmt.Sprintf(`+ option %q (propriété %q) %s`, o.Name, prop, optionAttrNote(o))
-		if got[i] != line {
-			t.Errorf("option %d écrite %q, montrée %q", i, line, got[i])
+		if added[i] != line {
+			t.Errorf("option %d écrite %q, montrée %q", i, line, added[i])
 		}
 		if o.ID != "" {
 			t.Errorf("option %q porte l'id %q : elle part neuve", o.Name, o.ID)
@@ -1254,4 +1262,114 @@ func containsSub(lines []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// Mesuré le 2026-09-25 sur select → multi_select : une ligne ne garde sa valeur
+// que si une option de MÊME NOM part dans le payload. Celles que le YAML ne
+// redéclare pas disparaissent du schéma, et leurs lignes passent à vide. Le plan
+// doit donc annoncer chacune, mesurée comme un retrait ordinaire — sinon ce
+// changement de type, classé sûr par la table, perd des valeurs sans qu'aucune
+// ligne ni aucun --fail-on ne le dise.
+func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Name: "Basse", Color: "blue"},
+				{ID: "o-moy", Name: "Moyenne", Color: "yellow"},
+			}},
+		},
+	}
+	applied := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio": {ID: "p1", Type: "select", Options: []state.Option{
+				{ID: "o-haute", Key: "haute", Name: "Haute", Color: "red"},
+				{ID: "o-basse", Key: "basse", Name: "Basse", Color: "blue"},
+				{ID: "o-moy", Key: "moyenne", Name: "Moyenne", Color: "yellow"},
+			}},
+		},
+	}
+	// "Haute" garde son nom sous une autre key : le nom seul compte, puisque
+	// l'API recrée les ids. "Moyenne" garde sa key mais change de nom : sous un
+	// changement de type, c'est une perte, pas un renommage.
+	desired := state.Database{Properties: map[string]state.Property{
+		"Prio": {Type: "multi_select", Options: []state.Option{
+			{Key: "h", Name: "Haute", Color: "red"},
+			{Key: "moyenne", Name: "Normale"},
+		}},
+	}}
+	res := CompareDatabase("tasks", &desired, &applied, &actual)
+
+	var removed []resources.Detail
+	for _, d := range res.Changeset.Details {
+		if d.Op == "-" {
+			removed = append(removed, d)
+		}
+	}
+	var names []string
+	for _, d := range removed {
+		names = append(names, d.Target)
+	}
+	want := []string{`option "Basse" (propriété "Prio")`, `option "Moyenne" (propriété "Prio")`}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("retraits = %q, want %q", names, want)
+	}
+	for _, d := range removed {
+		if d.Property != "Prio" || d.Field != "" {
+			t.Errorf("%s : Property=%q Field=%q, want Property=\"Prio\" seul", d.Target, d.Property, d.Field)
+		}
+		if d.Note != "absente du YAML : l'API remplace la liste entière des options" {
+			t.Errorf("%s : Note = %q", d.Target, d.Note)
+		}
+		if d.Class != change.ClassUnknownImpact || d.Count != -1 {
+			t.Errorf("%s : {Class:%v Count:%d}, want {impact inconnu -1} avant mesure",
+				d.Target, d.Class, d.Count)
+		}
+		if d.Measure == nil {
+			t.Fatalf("%s : aucune demande de mesure", d.Target)
+		}
+	}
+	// La mesure porte l'ANCIEN type : c'est lui qui filtre les lignes avant
+	// l'écriture, et le nom actuel qui les trouve.
+	wantMeasure := resources.Measurement{
+		Property: "Prio", PropertyType: "select", Option: "Basse", Retyped: true,
+	}
+	if *removed[0].Measure != wantMeasure {
+		t.Errorf("Measure = %+v, want %+v", *removed[0].Measure, wantMeasure)
+	}
+	// La cible reste celle que la mesure du 2026-09-25 dit juste : les seules
+	// options déclarées, par nom, sans id.
+	var sent []string
+	for _, o := range res.Target.Properties["Prio"].Options {
+		sent = append(sent, o.Name)
+		if o.ID != "" {
+			t.Errorf("option %q porte l'id %q : elle part neuve", o.Name, o.ID)
+		}
+	}
+	if !reflect.DeepEqual(sent, []string{"Haute", "Normale"}) {
+		t.Errorf("options écrites = %q", sent)
+	}
+}
+
+// Un changement vers un type SANS options (select → rich_text) n'a aucun nom à
+// retrouver : ce qu'il fait des valeurs est l'affaire de la table des couples et
+// du compte des non vides, pas d'une ligne de retrait par option.
+func TestTypeChangeToATypeWithoutOptionsAnnouncesNoRemoval(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio": sel(state.Option{ID: "o1", Name: "Haute"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Prio": {Type: "rich_text"},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	for _, d := range res.Changeset.Details {
+		if d.Op == "-" {
+			t.Errorf("ligne de retrait inattendue : %s", d.Target)
+		}
+	}
 }
