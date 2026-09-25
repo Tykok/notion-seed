@@ -61,6 +61,7 @@ with an error if you asked for it with [`--fail-on`](#in-ci).
 | `--rate` | `5` | ceiling of API calls per second |
 | `--burst` | `10` | calls tolerated in a burst |
 | `--fail-on` | empty | change classes that make it exit with a non-zero code — see [In CI](#in-ci). Empty: nothing makes it fail |
+| `--out` | empty | also writes the plan to this file, for `notion-seed apply <file>` — see [A reviewed plan](#a-reviewed-plan). Changes neither the output nor the exit code; refuses `--skip-preflight` |
 
 `import` takes `--dir`, `--rate` and `--burst`, but rejects `--skip-preflight`
 — the command reads the actual state, it makes no sense offline — and
@@ -190,11 +191,13 @@ Both stay distinct so that CI usage is stable the day `plan` touches it.
 
 ```sh
 notion-seed apply
+notion-seed apply plan.out   # a plan reviewed with plan --out
 ```
 
 `apply` recomputes the plan, shows it, asks for confirmation, then writes. It
-takes no argument: there is no plan file to replay, hence no stale plan to
-apply by mistake.
+never replays a plan: given a file written by `plan --out`, it still
+recomputes, and holds the new plan to the reviewed one — see [A reviewed
+plan](#a-reviewed-plan).
 
 ### What it writes
 
@@ -383,6 +386,110 @@ the database, the parent page and the steps to follow: check in Notion, then
 `notion-seed import` if it exists. For an update, the identity is already in
 the state: `notion-seed plan` is enough to see what Notion holds.
 
+### A reviewed plan
+
+`notion-seed plan --out plan.out` writes the plan to a file as well as printing
+it. `notion-seed apply plan.out` then applies **the plan that was reviewed, or
+writes nothing and says why**.
+
+`apply` does not replay the file. It recomputes the plan exactly as it does
+without one — same checks, same read-back, same counts — then, before printing
+it, before the confirmation and before any write, holds it to the reviewed one:
+
+- the same notion-seed version: another version can classify or count
+  differently — an unreleased build always reports itself as `0.0.0-dev`, so
+  this only tells released versions apart, not one dev build from another;
+- the same workspace, the same configuration and the same state. The
+  configuration is compared as notion-seed understands it: a comment or a
+  reindentation does not make a plan stale, an option `key` or a `lifecycle`
+  entry does;
+- the same resources, of the same kind, withheld for the same reason, with the
+  same lines — operation, target, class — and the same stale state entries;
+- on each counted line, no more rows than reviewed, and a figure that is no
+  vaguer.
+
+| Reviewed \ now | exact M | up to M | at least M, more than M | not measured |
+|---|---|---|---|---|
+| exact n | M ≤ n | refused | refused | refused |
+| up to n | M ≤ n | M ≤ n | refused | refused |
+| at least n, more than n | M ≤ n | M ≤ n | M ≤ n | refused |
+| not measured | accepted | accepted | accepted | accepted |
+
+A lower impact is covered by what was accepted: on a live database, fewer rows
+than reviewed is the common case, and an identical plan would rarely survive
+the hours between a review and a merge. A line reviewed without a figure was
+accepted without one — whatever class it turns out to have — so any figure and
+any class now stay within it. A count that falls to zero makes its line
+`safe`, which is not a change of class that refuses.
+
+When the plan passes, `apply` prints the **recomputed** plan — its counts are
+the ones that go out — and goes on as usual: `--fail-on`, announcement,
+confirmation or `--auto-approve`, write. Otherwise it names each difference on
+its own line, and writes nothing:
+
+```
+error: the plan recomputed now is not the one reviewed in plan.out, nothing was applied
+  state changed since the plan: another apply went through in between
+  database.tasks: option "High" (property "Prio") — 12 rows reviewed, 15 rows now
+  → rerun `notion-seed plan --out` and have the new plan reviewed
+```
+
+The other refusals read `configuration changed since the plan` or `workspace
+changed since the plan`, begin with `change added`, `change gone`, `line
+added` or `line gone`, or name the class that changed. A plan file written by
+another version of notion-seed, or of an unknown format, is refused before
+anything is compared. When the only difference is a count that failed now — a
+`403`, a `429` that ran out of patience —, the last line says to simply rerun
+the same command to apply `plan.out`: the reviewed plan may still hold.
+
+A reviewed plan that was blocked is never applied. An empty plan is written
+too: applying it writes nothing and exits with `0`. A withheld resource stays
+withheld, and `apply` exits with a non-zero code as it does without a file.
+
+`plan --out` and `diff --out` change neither the output nor the exit code. The
+file is written after the plan is printed and after `--fail-on`, so a CI that
+fails on `--fail-on` still has the plan to review; the write is atomic, like
+the state's. `--out` refuses `--skip-preflight`: an offline plan measured
+nothing `apply` could be held to.
+
+The file is JSON, format `1`. It carries what the plan shows and nothing more —
+no payload, no token, no row content — so it can live in a CI artifact. Its
+`rendered` field is the plan as printed, ready to post as a pull request
+comment without running notion-seed again.
+
+```json
+{
+  "format": 1,
+  "notion_seed": "0.9.0",
+  "workspace_id": "33333333-3333-4333-8333-333333333333",
+  "created_at": "2026-09-25T14:00:00Z",
+  "config_sha256": "…",
+  "state_sha256": "…",
+  "changes": [
+    {
+      "resource": "database.tasks",
+      "kind": "update",
+      "withheld": "",
+      "details": [
+        {
+          "op": "-",
+          "target": "option \"High\" (property \"Prio\")",
+          "class": "destructive",
+          "count": 12,
+          "bound": "exact"
+        }
+      ]
+    }
+  ],
+  "stale_state": [],
+  "rendered": "Plan: 0 to add, 1 to change, 0 to destroy\n…"
+}
+```
+
+`bound` is `exact`, `at_most`, `at_least`, `more_than` or `unmeasured`. A line
+that costs nothing carries neither `count` nor `bound`; an `unmeasured` line
+carries no `count`. A blocked plan also carries `"blocked": true`.
+
 ## import
 
 ```sh
@@ -477,3 +584,26 @@ Beware of `--skip-preflight`: offline, nothing is counted, and every line that
 could have cost comes out as `unknown impact` — a `--fail-on=destructive`
 therefore no longer catches anything there, whereas `--fail-on=unknown` catches
 them all.
+
+### Review in the pull request, apply after the merge
+
+```sh
+# in the pull request: the plan to review, frozen
+notion-seed plan --out plan.out --fail-on=destructive,silent-rewrite,unknown
+# keep plan.out as an artifact, and post its `rendered` field as a comment
+
+# after the merge, with the same plan.out
+notion-seed apply plan.out --auto-approve
+git add notion-seed.state.json   # then commit and push it
+```
+
+The plan must be computed on what will be merged: if `main` received other
+configuration changes in between, `apply` refuses with `configuration changed
+since the plan` — rebase the pull request on `main` and plan again.
+
+The apply job **must commit** `notion-seed.state.json`: notion-seed does not do
+it, since that depends on each CI. A plan computed before that commit is then
+refused with `state changed since the plan`, which is what you want. A plan
+computed on a state that was never committed is **not** caught: the plan and
+the apply both read the same stale file, which no longer knows what the last
+`apply` created — those databases would come out as creations again.
