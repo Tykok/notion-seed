@@ -11,14 +11,20 @@ import (
 	"github.com/tykok/notion-seed/core/preflight"
 )
 
-// The required ntn version is written in the code, in the README and in the
-// release footer. It is repeated by hand, so it drifts: this test fails on the
-// drift instead of letting it reach a user who installs the wrong version
-// because the README told them to.
+// The required ntn version is written in the code, in both READMEs, on the
+// installation pages of the site and in the release footer. It is repeated by
+// hand, so it drifts: this test fails on the drift instead of letting it reach
+// a user who installs the wrong version because the docs told them to.
 func TestDocsAnnounceTheNtnVersionOfTheCode(t *testing.T) {
 	semver := regexp.MustCompile(`\b\d+\.\d+\.\d+\b`)
 
-	for _, path := range []string{"README.md", ".goreleaser.yaml"} {
+	for _, path := range []string{
+		"README.md",
+		"README.fr.md",
+		"docs/installation.md",
+		"docs/fr/installation.md",
+		".goreleaser.yaml",
+	} {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("%s unreadable: %v", path, err)
