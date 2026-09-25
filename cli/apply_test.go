@@ -181,8 +181,8 @@ func TestApplyDoesNotAnnounceNotionWritesForStateCleanupOnly(t *testing.T) {
 // confirmation clears nothing. No write.
 //
 // notion-seed no longer blocks based on a change's class, nor on
-// lifecycle.prevent_destroy or allow_data_loss (see core/diff): both are now
-// only acknowledgements. The only remaining block is a resource the state
+// lifecycle.acknowledge_destroy or acknowledge_data_loss (see core/diff): both
+// are only acknowledgements. The only remaining block is a resource the state
 // anchors and Notion no longer knows — that is the scenario that still
 // exercises a real refusal here.
 func TestApplyRefusesBlockedPlanEvenWithAutoApprove(t *testing.T) {
@@ -700,25 +700,30 @@ func TestPlanCountsTheRowsADestroyTakesWithIt(t *testing.T) {
 	}
 }
 
-// Review Focus #4: prevent_destroy is an acknowledgement. The destruction
-// goes out, and the mention stays displayed.
-func TestApplyTrashesADatabaseDeclaredInPreventDestroy(t *testing.T) {
-	logPath := withMutationLog(t)
-	dir := importThenDeclare(t, orphanYAML)
-	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
-		[]byte(workspaceYAML+"lifecycle:\n  prevent_destroy:\n    - database.tasks\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// Review Focus #4: acknowledge_destroy is an acknowledgement of reading. The
+// destruction goes out, and the mention stays displayed — under the key as the
+// user wrote it, so the line matches their YAML even under the deprecated name.
+func TestApplyTrashesAnAcknowledgedDatabase(t *testing.T) {
+	for _, key := range []string{"acknowledge_destroy", "prevent_destroy"} {
+		t.Run(key, func(t *testing.T) {
+			logPath := withMutationLog(t)
+			dir := importThenDeclare(t, orphanYAML)
+			if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"),
+				[]byte(workspaceYAML+"lifecycle:\n  "+key+":\n    - database.tasks\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
-	if err != nil {
-		t.Fatalf("Execute() error = %v\n%s", err, out)
-	}
-	if !strings.Contains(out, "→ declared in lifecycle.prevent_destroy.") {
-		t.Errorf("the prevent_destroy mention disappeared:\n%s", out)
-	}
-	if got := readMutationLog(t, logPath); got != trashLine {
-		t.Errorf("writes = %q, want exactly %q", got, trashLine)
+			out, err := runCmd(t, "apply", "--dir", dir, "--auto-approve")
+			if err != nil {
+				t.Fatalf("Execute() error = %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "→ declared in lifecycle."+key+".") {
+				t.Errorf("the %s mention disappeared:\n%s", key, out)
+			}
+			if got := readMutationLog(t, logPath); got != trashLine {
+				t.Errorf("writes = %q, want exactly %q", got, trashLine)
+			}
+		})
 	}
 }
 

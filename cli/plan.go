@@ -3,10 +3,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -28,6 +30,9 @@ type planOptions struct {
 	ratePerSec    float64
 	burst         int
 	failOn        []string
+	// out is the plan file to write, "" for none. Only plan and diff bind
+	// it: apply takes the file as its argument instead.
+	out string
 }
 
 func (o *planOptions) bind(cmd *cobra.Command) {
@@ -46,6 +51,14 @@ func (o *planOptions) bind(cmd *cobra.Command) {
 			"silent-rewrite, unknown, migration. Empty = nothing fails.")
 }
 
+// bindOut adds --out. plan and diff take it, apply does not: apply reads a
+// plan file, it never writes one.
+func (o *planOptions) bindOut(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&o.out, "out", "",
+		"also write the plan to this `file`, for notion-seed apply <file> to apply "+
+			"exactly what was reviewed. Changes neither the output nor the exit code.")
+}
+
 // validate rejects the flag values the rate limiter refuses. Without it,
 // `--rate 0` would surface as a panic from NewTokenBucket, which is a useless
 // message for the user.
@@ -62,6 +75,14 @@ func (o *planOptions) validate() error {
 	// nobody would know.
 	if _, err := failOnClasses(o.failOn); err != nil {
 		return err
+	}
+	// Offline, nothing was read back nor counted: a plan file would promise
+	// apply a guarantee nothing in it can back.
+	if o.out != "" && o.skipPreflight {
+		return fmt.Errorf(
+			"--out does not accept --skip-preflight\n" +
+				"  → an offline plan measured nothing that apply could be held to: " +
+				"run `notion-seed plan --out` online")
 	}
 	return nil
 }
@@ -144,6 +165,7 @@ func newPlanCmd() *cobra.Command {
 		},
 	}
 	opts.bind(cmd)
+	opts.bindOut(cmd)
 	return cmd
 }
 
@@ -185,7 +207,7 @@ func preparePlan(cmd *cobra.Command, opts *planOptions) (*prepared, error) {
 
 	// 1. Load — validate each file, merge, THEN check the global uniqueness of
 	// keys. config.Load guarantees this order.
-	cfg, err := config.Load(opts.dir)
+	cfg, err := loadConfig(cmd, opts.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +294,22 @@ func measuredDataSourceIDs(snap *state.Snapshot, refreshed map[string]diff.Refre
 	return out
 }
 
+// loadConfig loads the configuration and prints its warnings on stderr. Every
+// command that reads the config goes through here, so that a deprecated key
+// warns wherever it is read, not only on the command that happened to be run.
+// stderr, not stdout: stdout carries only the plan, which must stay usable in
+// a pipe.
+func loadConfig(cmd *cobra.Command, dir string) (*config.Config, error) {
+	cfg, err := config.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range cfg.Warnings {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+w)
+	}
+	return cfg, nil
+}
+
 // reportMeasureFailures says what could not be counted, on stderr: these are
 // incidents, not plan. stdout carries only the plan, which must stay usable in
 // a pipe.
@@ -289,23 +327,37 @@ func runPlan(cmd *cobra.Command, opts *planOptions) error {
 	p := prep.plan
 	reportMeasureFailures(cmd, prep)
 
-	// 6. Render — plain text on stdout.
-	if err := diff.Render(cmd.OutOrStdout(), p); err != nil {
+	// 6. Render — plain text on stdout, and kept for the plan file: its
+	// `rendered` field is exactly what was printed.
+	var rendered bytes.Buffer
+	if err := diff.Render(io.MultiWriter(cmd.OutOrStdout(), &rendered), p); err != nil {
 		return err
 	}
+	var verdict error
 	if p.Blocked {
 		// The render above already details each block reason with its
 		// corrective action ("Plan blocked" section). This error does not
 		// repeat them, but still carries its own arrow: it reaches the user as
 		// is on stderr (cli/root.go prints it), and the project's constraint on
 		// error messages is unconditional.
-		return fmt.Errorf("plan blocked\n" +
+		verdict = fmt.Errorf("plan blocked\n" +
 			"  → each block is detailed above, with what clears it")
+	} else {
+		// AFTER the render: --fail-on exits with a non-zero code, it does not
+		// deprive the user of the plan that explains why. The error message
+		// points to what was just printed.
+		verdict = checkFailOn(p, opts.failOn)
 	}
-	// AFTER the render: --fail-on exits with a non-zero code, it does not
-	// deprive the user of the plan that explains why. The error message points
-	// to what was just printed.
-	return checkFailOn(p, opts.failOn)
+	// 7. Plan file — AFTER the render and after --fail-on, and whatever they
+	// decided: a CI that fails on --fail-on still gets the plan to review.
+	// --out changes neither the output nor the exit code; only its own
+	// failure adds an error.
+	if opts.out != "" {
+		if err := writePlanFile(opts.out, prep, rendered.String()); err != nil {
+			return errors.Join(verdict, err)
+		}
+	}
+	return verdict
 }
 
 // checkWorkspaceMatch rejects a state coming from another workspace.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/state"
@@ -543,7 +544,7 @@ func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
 			{Op: "-", Class: ClassSilentRewrite, Count: 47,
 				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
 			{Op: "~", Class: ClassSilentRewrite, Count: 230,
-				Measure: &resources.Measurement{PropertyType: "multi_select"}},
+				Measure: &resources.Measurement{PropertyType: "multi_select", Bound: change.BoundAtMost}},
 		},
 	}}}
 	got := Impact(p)
@@ -727,14 +728,14 @@ func TestRenderForApplyDiffersFromRenderOnlyByTheImpactLine(t *testing.T) {
 func TestRenderShowsLifecycleAcknowledgements(t *testing.T) {
 	p := &Plan{ToDestroy: 1, Changes: []Change{{
 		Resource: "database.archive", Kind: resources.KindDestroy,
-		Class: ClassDestructive, Acknowledged: []string{"prevent_destroy"},
+		Class: ClassDestructive, Acknowledged: []string{"acknowledge_destroy"},
 		Details: []resources.Detail{{Op: "-", Target: "database.archive", Class: ClassDestructive, Count: -1}},
 	}}}
 	var b bytes.Buffer
 	if err := Render(&b, p); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "prevent_destroy") {
+	if !strings.Contains(b.String(), "      → declared in lifecycle.acknowledge_destroy.\n") {
 		t.Errorf("output:\n%s", b.String())
 	}
 }
@@ -1094,5 +1095,169 @@ func TestRenderSaysAtLeastWhenSomeDataSourcesWereNotCounted(t *testing.T) {
 	if got, want := Impact(&Plan{Changes: []Change{capped, destroyOf("a", 2, false)}}),
 		"Impact: 2 database(s) in the trash with more than 302 row(s)."; got != want {
 		t.Errorf("Impact = %q, want %q", got, want)
+	}
+}
+
+// renderOne renders a plan holding a single detail.
+func renderOne(t *testing.T, d resources.Detail) string {
+	t.Helper()
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate, Class: d.Class,
+		Details: []resources.Detail{d},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// A type change's figure reads with its bound: exact, at least, up to. Each
+// says something different, and "at least" and "up to" name their cause.
+func TestRenderStatesTheBoundOfATypeChangeCount(t *testing.T) {
+	tests := []struct {
+		name string
+		d    resources.Detail
+		want string
+	}{
+		{"exact loss",
+			resources.Detail{Op: "~", Target: `property "N"`, Class: ClassDestructive, Count: 5,
+				Measure: &resources.Measurement{Property: "N", PropertyType: "date", TargetType: "number"}},
+			"→ 5 rows will lose their value."},
+		{"exact loss with its caveat",
+			resources.Detail{Op: "~", Target: `property "C"`, Class: ClassDestructive, Count: 2,
+				Measure: &resources.Measurement{Property: "C", PropertyType: "checkbox", TargetType: "number",
+					Count: change.CountChecked, Caveat: "unchecked rows are emptied too"}},
+			"→ 2 rows will lose their value: unchecked rows are emptied too."},
+		{"lower bound",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassDestructive, Count: 3,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "people",
+					Bound: change.BoundAtLeast, Caveat: "blank text is not counted"}},
+			"→ at least 3 rows will lose their value: blank text is not counted."},
+		{"lower bound of zero",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassDestructive, Count: 0,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "people",
+					Bound: change.BoundAtLeast, Caveat: "blank text is not counted"}},
+			"→ no rows counted, which does not mean none is touched: blank text is not counted."},
+		{"upper bound",
+			resources.Detail{Op: "~", Target: `property "U"`, Class: ClassSilentRewrite, Count: 12,
+				Measure: &resources.Measurement{Property: "U", PropertyType: "url", TargetType: "number",
+					Bound: change.BoundAtMost, Caveat: "some values survive the conversion"}},
+			"→ up to 12 rows will be rewritten or emptied, without a trace: some values survive the conversion."},
+		{"no sound filter",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassSilentRewrite, Count: -1, Unmeasurable: true,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "number",
+					Count: change.CountUnsound, Caveat: "no filter separates the text that survives"}},
+			"→ actual impact unknown: no filter separates the text that survives."},
+	}
+	for _, tt := range tests {
+		if got := renderOne(t, tt.d); !strings.Contains(got, tt.want) {
+			t.Errorf("%s: output:\n%s\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Toward status, an option that is not redeclared reassigns its rows to the
+// first declared option (measured on 2026-09-25): the line says so, and the
+// total files it with the reassignments.
+func TestRenderSaysAnOptionRetypedToStatusIsReassigned(t *testing.T) {
+	got := renderOne(t, resources.Detail{
+		Op: "-", Target: `option "Moyenne" (property "Prio")`, Class: ClassSilentRewrite, Count: 2,
+		Measure: &resources.Measurement{Property: "Prio", PropertyType: "select", Option: "Moyenne",
+			Retyped: true, TargetType: "status"},
+	})
+	if !strings.Contains(got, "2 rows will be rewritten to one of the declared options, without a trace") {
+		t.Errorf("output:\n%s", got)
+	}
+	if !strings.Contains(got, "Impact: 2 values reassigned without a trace.") {
+		t.Errorf("output:\n%s\nthe total must count a reassignment", got)
+	}
+}
+
+// A destructive type change loses values: the total says so, with its bound.
+// Leaving it out would make the product's most-read line announce less than
+// the lines above it.
+func TestImpactCountsDestructiveTypeChangesWithTheirBound(t *testing.T) {
+	tests := []struct {
+		bounds []change.Bound
+		want   string
+	}{
+		{[]change.Bound{change.BoundExact, change.BoundExact}, "Impact: 8 values lost."},
+		{[]change.Bound{change.BoundExact, change.BoundAtLeast}, "Impact: at least 8 values lost."},
+		{[]change.Bound{change.BoundExact, change.BoundAtMost}, "Impact: up to 8 values lost."},
+		{[]change.Bound{change.BoundAtLeast, change.BoundAtMost}, "Impact: an unmeasured number of values lost."},
+	}
+	for _, tt := range tests {
+		var ds []resources.Detail
+		for _, b := range tt.bounds {
+			ds = append(ds, resources.Detail{Op: "~", Class: ClassDestructive, Count: 4,
+				Measure: &resources.Measurement{PropertyType: "date", Bound: b}})
+		}
+		got := Impact(&Plan{Changes: []Change{{Resource: "database.tasks", Details: ds}}})
+		if got != tt.want {
+			t.Errorf("bounds %v: Impact = %q, want %q", tt.bounds, got, tt.want)
+		}
+	}
+}
+
+// A term the family cannot count — a line with no sound filter, a lower bound
+// of zero — still belongs to it: the total is then a lower bound. Skipping
+// such terms printed "Impact: 2 values lost." as an exact figure next to a
+// status → select whose never-set rows nobody counted.
+func TestImpactTreatsUncountedTermsAsALowerBound(t *testing.T) {
+	property := resources.Detail{Op: "~", Target: `property "Statut"`, Class: ClassDestructive,
+		Count: -1, Unmeasurable: true,
+		Measure: &resources.Measurement{Property: "Statut", PropertyType: "status", TargetType: "select",
+			Count: change.CountUnsound}}
+	removal := resources.Detail{Op: "-", Target: `option "In progress" (property "Statut")`,
+		Class: ClassDestructive, Count: 2,
+		Measure: &resources.Measurement{Property: "Statut", PropertyType: "status",
+			Option: "In progress", Retyped: true, TargetType: "select"}}
+	atLeastZero := resources.Detail{Op: "~", Target: `property "Notes"`, Class: ClassDestructive,
+		Count: 0, Measure: &resources.Measurement{Property: "Notes", PropertyType: "rich_text",
+			TargetType: "people", Bound: change.BoundAtLeast}}
+
+	tests := []struct {
+		details []resources.Detail
+		want    string
+	}{
+		{[]resources.Detail{property, removal, atLeastZero}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{property, removal}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{removal, atLeastZero}, "Impact: at least 2 values lost."},
+		{[]resources.Detail{property}, "Impact: an unmeasured number of values lost."},
+		{[]resources.Detail{atLeastZero}, "Impact: an unmeasured number of values lost."},
+	}
+	for _, tt := range tests {
+		p := &Plan{Changes: []Change{{Resource: "database.tasks", Kind: resources.KindUpdate,
+			Details: tt.details}}}
+		if got := Impact(p); got != tt.want {
+			t.Errorf("Impact = %q, want %q", got, tt.want)
+		}
+		if got := WritableImpact(p); got != tt.want {
+			t.Errorf("WritableImpact = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+// Toward status nothing is emptied: every row gets an option. "rewritten or
+// emptied" would announce an emptying that does not happen.
+func TestRenderSaysATypeChangeToStatusRewritesOnly(t *testing.T) {
+	got := renderOne(t, resources.Detail{Op: "~", Target: `property "D"`, Class: ClassSilentRewrite, Count: 4,
+		Measure: &resources.Measurement{Property: "D", PropertyType: "date", TargetType: "status",
+			Count: change.CountEveryRow}})
+	if !strings.Contains(got, "→ 4 rows will be rewritten, without a trace.") {
+		t.Errorf("output:\n%s", got)
+	}
+}
+
+// A measured behavior is described once: the status notes name no default
+// option — a status property always declares its options — and no ordering
+// that was measured only once.
+func TestTypeChangeToStatusClaimsNoUnmeasuredOrdering(t *testing.T) {
+	for _, from := range []string{"rich_text", "number", "url", "select", "multi_select", "date", "checkbox", "people"} {
+		note := change.TypeChangeOf(from, "status", []string{"A"}).Note
+		if strings.Contains(note, "default") || strings.Contains(note, "first declared") {
+			t.Errorf("%s → status: note %q", from, note)
+		}
 	}
 }

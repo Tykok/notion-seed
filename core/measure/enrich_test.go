@@ -145,6 +145,38 @@ func TestEnrichDoesNotMarkAFailedMeasurementAsUnmeasurable(t *testing.T) {
 	}
 }
 
+// A count that failed is the one case where rerunning may give a figure: the
+// line says so, for a plan file comparison to tell a retryable drift from one
+// that needs a new review.
+func TestEnrichMarksOnlyAFailedCountAsFailed(t *testing.T) {
+	failing := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, errors.New("429 rate_limited")
+	})
+	unfilterable := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedFilter, "people")
+	})
+	counted := counterFunc(func(context.Context, Request) (Result, error) {
+		return Result{Count: 3}, nil
+	})
+	for _, tc := range []struct {
+		name string
+		c    Counter
+		ids  map[string]string
+		want bool
+	}{
+		{"failed count", failing, map[string]string{"tasks": "ds-1"}, true},
+		{"unfilterable type", unfilterable, map[string]string{"tasks": "ds-1"}, false},
+		{"no data source id", failing, map[string]string{}, false},
+		{"successful count", counted, map[string]string{"tasks": "ds-1"}, false},
+	} {
+		p := planWithRemoval("status", "Annulé")
+		Enrich(context.Background(), tc.c, tc.ids, p)
+		if got := p.Changes[0].Details[0].CountFailed; got != tc.want {
+			t.Errorf("%s: CountFailed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // No measurement request: no call. Not paying for calls for nothing is a
 // property, not an optimization.
 func TestEnrichEmitsNoCallWhenNothingNeedsMeasuring(t *testing.T) {
@@ -325,5 +357,57 @@ func TestEnrichKeepsADestroyDestructiveWhenCountingFails(t *testing.T) {
 	d := p.Changes[0].Details[0]
 	if d.Count != -1 || d.Class != change.ClassDestructive {
 		t.Errorf("Detail = {Count:%d Class:%v}, want {-1 destructive}", d.Count, d.Class)
+	}
+}
+
+// A lower bound of zero proves nothing: text made only of spaces escapes
+// is_not_empty and is lost too. Downgrading to safe would announce "nothing
+// to lose" on a count that cannot say so — the worst bug this product can
+// have.
+func TestEnrichNeverMakesALowerBoundSafe(t *testing.T) {
+	p := planWithTypeChange()
+	d := &p.Changes[0].Details[0]
+	d.Class = change.ClassDestructive
+	d.Measure = &resources.Measurement{
+		Property: "Notes", PropertyType: "rich_text", Bound: change.BoundAtLeast,
+	}
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 0}, nil })
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if got := p.Changes[0].Details[0]; got.Count != 0 || got.Class != change.ClassDestructive {
+		t.Errorf("Detail = {Count:%d Class:%v}, want {0 destructive}", got.Count, got.Class)
+	}
+}
+
+// The request carries the type change's filter as the comparator built it.
+func TestEnrichPassesTheTypeChangeFilterThrough(t *testing.T) {
+	p := planWithTypeChange()
+	p.Changes[0].Details[0].Measure = &resources.Measurement{
+		Property: "Notes", PropertyType: "rich_text", TargetType: "status",
+		Count: change.CountEveryRow, Except: []string{"Un"},
+	}
+	var got Request
+	c := counterFunc(func(_ context.Context, r Request) (Result, error) {
+		got = r
+		return Result{Count: 3}, nil
+	})
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if got.Count != change.CountEveryRow || strings.Join(got.Except, ",") != "Un" {
+		t.Errorf("request = %+v, want every row except Un", got)
+	}
+}
+
+// Toward status, an option that is not redeclared does not empty its rows:
+// measured on 2026-09-25, they get the first declared option. It is a silent
+// rewrite, whatever the old type.
+func TestEnrichClassifiesAnOptionRetypedToStatusAsSilentRewrite(t *testing.T) {
+	p := planWithRemoval("select", "Moyenne")
+	p.Changes[0].Details[0].Measure.Retyped = true
+	p.Changes[0].Details[0].Measure.TargetType = "status"
+	c := counterFunc(func(context.Context, Request) (Result, error) { return Result{Count: 2}, nil })
+
+	Enrich(context.Background(), c, map[string]string{"tasks": "ds-1"}, p)
+	if d := p.Changes[0].Details[0]; d.Class != change.ClassSilentRewrite {
+		t.Errorf("Class = %v, want silent rewrite", d.Class)
 	}
 }

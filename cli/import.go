@@ -73,7 +73,7 @@ func runImport(cmd *cobra.Command, opts *planOptions, addr, rawID string) error 
 		return err
 	}
 
-	cfg, err := config.Load(opts.dir)
+	cfg, err := loadConfig(cmd, opts.dir)
 	if err != nil {
 		return err
 	}

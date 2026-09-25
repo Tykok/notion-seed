@@ -62,6 +62,7 @@ l'avez demandé avec [`--fail-on`](#en-ci).
 | `--rate` | `5` | plafond d'appels API par seconde |
 | `--burst` | `10` | appels tolérés en rafale |
 | `--fail-on` | vide | classes de changement qui font sortir en code non nul — voir [En CI](#en-ci). Vide : rien ne fait échouer |
+| `--out` | vide | écrit aussi le plan dans ce fichier, pour `notion-seed apply <fichier>` — voir [Un plan relu](#un-plan-relu). Ne change ni la sortie ni le code de retour ; refuse `--skip-preflight` |
 
 `import` prend `--dir`, `--rate` et `--burst`, mais refuse `--skip-preflight` —
 la commande lit l'état réel, elle n'a aucun sens hors ligne — et `--fail-on`,
@@ -69,11 +70,8 @@ puisqu'elle ne calcule aucun plan.
 
 ### Ce qui peut être compté, et ce qui ne peut pas
 
-Compter demande un filtre, et `notion-seed` n'en sait construire un que pour
-`select`, `status` et `multi_select`.
-
-Un **retrait d'option** est donc toujours chiffré : les options n'existent que
-sur ces trois types.
+Un **retrait d'option** est toujours chiffré : les options n'existent que sur
+`select`, `status` et `multi_select`, et chacun a son filtre.
 
 Une **destruction** l'est aussi, sans filtre : le compte porte sur toutes les
 lignes du data source de la database — celui que le plan vient de relire —,
@@ -82,26 +80,104 @@ data sources les emporte tous, mais un seul est compté : la ligne et l'agrégat
 disent alors « at least N row(s) », et combien de data sources n'ont pas été
 comptés. Elle reste `destructive` quel que soit ce compte, 0 compris.
 
-Un **changement de type** n'est chiffré que si la colonne de départ est de l'un
-d'eux. Des trois couples dangereux ci-dessous, un seul l'est — et seul
-`multi_select` → `select` fait partie des comportements mesurés sur la
-présentation ([Pourquoi](/fr/#pourquoi)) :
+Un **changement de type** est chiffré avec le filtre que la campagne du
+2026-09-25 a vérifié contre les lignes que chaque couple touche réellement, sur
+la colonne de départ, avant l'écriture. Tous les filtres ne sont pas exacts, et
+le chiffre dit quelle borne il est :
 
-| Couple | Chiffré ? |
-|---|---|
-| `multi_select` → `select` | oui — la colonne de départ est filtrable |
-| `rich_text` → `number` | non |
-| `checkbox` → `number` | non |
+| Chiffre | Filtre | Couples |
+|---|---|---|
+| `N rows` | toutes les lignes | tout type → `status`, quand aucune option ne peut garder une valeur |
+| `N rows` | `is_not_empty` | tout couple où rien ne survit (`date` → `number`, `people` → `select`, `status` → `checkbox`…) |
+| `N rows` | lignes cochées | `checkbox` → `number`, `date`, `people`, et → `select` / `multi_select` sans option `Yes` |
+| `N rows` | lignes vides | `select` → `status` : les lignes vides reçoivent une option |
+| `N rows` | non vides (toutes les lignes vers `status`), sauf les options déclarées écrites comme des nombres | `number` → `select`, `multi_select`, `status` avec options déclarées : seule une option nommée par l'écriture décimale exacte du nombre, sans exposant, le garde (`7` garde 7, `7.0` ne garde rien). À partir d'un nombre déclaré de magnitude 1e21, jamais mesuré, le chiffre devient `at least N` |
+| `at least N rows` | `is_not_empty` sur `rich_text` | `rich_text` → `select`, `multi_select`, `checkbox`, `people` : un texte fait seulement d'espaces ou de sauts de ligne n'est pas compté, et il est perdu aussi |
+| `at least N rows` | non vides, sauf les options déclarées | `rich_text` / `url` → `select`, `multi_select`, `status` avec options déclarées : le filtre ignore la casse et les espaces de fin (sur `url`, pas une barre oblique finale), la conversion non — une telle valeur n'est pas comptée, et ne survit pas non plus |
+| `up to N rows` | `is_not_empty` | `url`, `select`, `multi_select` → `number` ou `date`, `multi_select` → `select` : certaines valeurs survivent à la conversion |
+| `up to N rows` | toutes les lignes | `multi_select` → `status` : une ligne qui ne porte qu'une valeur déclarée la garde |
+| inconnu | aucun | `rich_text` → `number` / `date`, `status` → `rich_text`, `url`, `select`, `multi_select` |
 
-Dans les deux derniers cas, la ligne ne porte pas de chiffre mais le dit :
+Un minorant nul ne rend jamais un changement `safe` : il se lit « no rows
+counted, which does not mean none is touched ». Un zéro exact ou majorant, si
+— une colonne vide n'a rien à perdre.
+
+Une `checkbox` ne compte que ses lignes cochées : une case décochée passe à
+vide aussi, mais une checkbox n'a pas d'état vide, donc « décochée » ne porte
+rien que « jamais renseignée » ne porte pas. La ligne le dit.
+
+Là où aucun filtre n'est sain, la ligne ne porte pas de chiffre et dit
+pourquoi :
 
 ```
-      ~ property "Notes" — rich_text → number  [silent rewrite]
-          → actual impact unknown: notion-seed cannot count the rows of a rich_text property.
+      ~ property "Notes" — rich_text → number: the leading number is kept ('42 text' → 42, '2026-01-15' → 2026, a false value); everything else is emptied  [silent rewrite]
+          → actual impact unknown: no filter separates the text that survives the conversion from the rest.
 ```
 
-La classe reste celle de la mesure — vous savez que le changement est dangereux,
-vous ne savez pas sur combien de lignes. Et `--fail-on=unknown` les attrape.
+```
+      ~ property "Statut" — status → select: a value survives only where an option with the same name is declared; a row that never received a status is emptied  [destructive]
+          → actual impact unknown: a row that never received a status reads as the default option, is emptied too, and no filter isolates it.
+      + option "Not started" (property "Statut")
+      + option "Done" (property "Statut")
+      - option "In progress" (property "Statut") — not redeclared under this name: the type change re-creates the options  [destructive]
+          → 2 rows will be emptied.
+
+Impact: at least 2 values lost.
+```
+
+Le total dit « at least » : les lignes jamais renseignées sont perdues aussi,
+et personne n'a pu les compter. Depuis `multi_select`, les lignes qui portent
+une option non redéclarée sont comptées une fois, sur leur ligne de retrait, et
+laissées hors de la ligne de propriété.
+
+La classe reste celle de la mesure — vous savez que le changement est
+dangereux, vous ne savez pas toujours sur combien de lignes.
+
+### Changements de type
+
+Les 90 couples ordonnés de types gérés ont été mesurés contre l'API, 7 le
+2026-09-24 et les 83 autres le 2026-09-25. La classe est le coût du corps que
+notion-seed envoie : les options que le YAML déclare, par nom, sans id. La ligne
+du plan dit, pour chaque couple, ce qui survit.
+
+| de \ vers | title | rich_text | number | url | select | status | multi_select | date | checkbox | people |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **title** | | M | M | M | M | M | M | M | M | M |
+| **rich_text** | M | | D | S | D¹ | R | D¹ | D | D | D |
+| **number** | M | S | | S | D | R | D | D | D | D |
+| **url** | M | S | D | | D | R | D | D | D | D |
+| **select** | M | S | D | S | | R² | S² | D | D | D |
+| **status** | M | D | D | D | D² | | D² | D | D | D |
+| **multi_select** | M | S | D | S | R² | R² | | D | D | D |
+| **date** | M | S | D | D | D | R | D | | D | D |
+| **checkbox** | M | S | D | S | D³ | R³ | D³ | D | | D |
+| **people** | M | S | D | D | D | R | D | D | D | |
+
+S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
+
+- **L'API ne crée jamais d'option.** Vers `select`, `multi_select` ou `status`,
+  une valeur ne survit que si une option portant exactement son texte est
+  déclarée dans la même écriture ; depuis `rich_text`, le texte est coupé à la
+  première virgule (`multi_select` : découpé sur les virgules). ¹ Avec options
+  déclarées, ces couples deviennent `silent rewrite`.
+- **Vers `number`**, un texte garde son nombre de tête (`'2026-01-15'` → 2026)
+  et tout le reste passe à vide : mesuré `destructive`, et la ligne nomme les
+  valeurs réécrites.
+- ² Entre types à options, chaque option actuelle que le YAML ne redéclare pas
+  sous le même nom ressort en ligne `-` avec son compte. Vers `status`, ses
+  lignes ne passent pas à vide : elles sont réécrites vers l'une des options
+  déclarées.
+- ³ `checkbox` devient `Yes` / `No` : → `select` / `multi_select` est `safe`
+  avec une option `Yes`, → `status` avec `Yes` et `No`.
+- **Vers `status`, chaque ligne reçoit une valeur**, vides comprises : l'une
+  des options déclarées — un `status` les déclare toujours.
+- **`status` en départ :** une ligne qui n'a jamais reçu de status se lit comme
+  l'option par défaut, et pourtant toute conversion la vide.
+- **`status` → `select` était documenté sans perte jusqu'au 2026-09-25.** C'était
+  faux : re-mesuré, il vide toutes les lignes sans option redéclarée, et vide
+  les lignes jamais renseignées même avec.
+- **`title` :** l'API refuse les deux sens en `400`. notion-seed retient la
+  database — voir [Ce que l'API ne sait pas faire](/fr/#ce-que-l-api-ne-sait-pas-faire).
 
 Vous êtes garant de votre base. notion-seed est garant de ce que vous savez en
 appuyant sur entrée. En CI, [`--fail-on`](#en-ci) rend la décision au workflow.
@@ -118,11 +194,13 @@ jour où `plan` y touchera.
 
 ```sh
 notion-seed apply
+notion-seed apply plan.out   # un plan relu avec plan --out
 ```
 
 `apply` recalcule le plan, l'affiche, demande confirmation, puis écrit. Il ne
-prend aucun argument : il n'y a pas de fichier de plan à rejouer, donc pas de
-plan périmé à appliquer par mégarde.
+rejoue jamais un plan : même avec un fichier écrit par `plan --out`, il
+recalcule, et confronte le nouveau plan au plan relu — voir [Un plan
+relu](#un-plan-relu).
 
 ### Ce qu'il écrit
 
@@ -151,9 +229,9 @@ options existantes sont transmises avec leur id, les neuves sans : l'API leur en
 crée un, que la relecture rapporte au state. Sous un changement de type, les
 options sont recréées : seules celles du YAML partent, sans id, et chaque option
 actuelle que le YAML ne redéclare pas sous le même nom ressort en `-`, avec le
-nombre de lignes qu'elle vide. Seul `select` → `multi_select` a été mesuré ; les
-autres couples entre `select`, `multi_select` et `status` suivent la même règle,
-sans l'avoir été.
+nombre de lignes qu'elle vide — ou, vers `status`, qu'elle réécrit vers l'une
+des options déclarées. Mesuré le 2026-09-25 pour tous les couples entre
+`select`, `multi_select` et `status`.
 
 L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône
 sont à jour et **aucune donnée de ligne n'a été touchée** — l'échec le moins
@@ -166,7 +244,7 @@ du state. L'entrée n'est retirée que si la réponse de l'API confirme la
 corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
 `plan` et `apply` disent avant combien de lignes partent avec elle ; si le
 comptage échoue, la ligne dit que ce nombre n'est pas mesuré, jamais 0.
-`lifecycle.prevent_destroy` n'y change rien — voir
+`lifecycle.acknowledge_destroy` n'y change rien — voir
 [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture). Une database mise à la corbeille
 se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
 nouveau, redéclarez-la puis lancez `notion-seed import`.
@@ -189,8 +267,9 @@ qui écrit, et que la confirmation annonce sur sa propre ligne.
 ### Ce qu'il retient
 
 ::: warning Une limite de l'API, pas un jugement
-Renommer une option ou changer sa couleur est le seul changement déclaré que
-notion-seed refuse d'écrire : l'API ne sait pas l'exprimer.
+Renommer une option, changer sa couleur, ou changer le type d'une propriété
+`title` sont les seuls changements déclarés que notion-seed refuse d'écrire :
+l'API ne sait pas les exprimer.
 :::
 
 Ce que l'API ne sait pas exprimer ressort sous `Withheld — migration required` : ce
@@ -222,8 +301,19 @@ Withheld — migration required
       → create the new option in Notion, move the rows counted above to it, remove the old one, then rerun
 ```
 
-C'est le seul changement déclaré que notion-seed refuse d'écrire — et ce n'est
-pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
+Un changement de type d'un `title` est retenu de la même façon, avec sa propre
+procédure :
+
+```
+Withheld — migration required
+
+  ~ database.tasks
+      the API refuses to change the type of a title property, in either direction
+      → add a new property of the wanted type, copy the values into it in Notion, then remove the type change from the YAML and rerun
+```
+
+Ce sont les seuls changements déclarés que notion-seed refuse d'écrire — et ce
+n'est pas un jugement sur le coût, c'est une limite de l'API. Écrire quand même
 inscrirait dans le state un état que Notion ne porte pas, et chaque run suivant
 afficherait une dérive fantôme.
 
@@ -308,6 +398,116 @@ database, la page parente et la marche à suivre : vérifier dans Notion, puis
 `notion-seed import` si elle existe. Pour une modification, l'identité est déjà
 dans le state : `notion-seed plan` suffit à voir ce que Notion porte.
 
+### Un plan relu
+
+`notion-seed plan --out plan.out` écrit le plan dans un fichier en plus de
+l'afficher. `notion-seed apply plan.out` applique alors **le plan relu, ou
+n'écrit rien et dit pourquoi**.
+
+`apply` ne rejoue pas le fichier. Il recalcule le plan exactement comme sans
+fichier — mêmes vérifications, même relecture, mêmes comptages —, puis, avant
+de l'afficher, avant la confirmation et avant toute écriture, le confronte au
+plan relu :
+
+- la même version de notion-seed : une autre version peut classer ou compter
+  autrement — un build non publié s'annonce toujours `0.0.0-dev`, donc cette
+  vérification ne distingue que les versions publiées entre elles, pas un build
+  de développement d'un autre ;
+- le même workspace, la même configuration et le même state. La configuration
+  est comparée telle que notion-seed la comprend : un commentaire ou une
+  réindentation ne rendent pas un plan périmé, une `key` d'option ou une entrée
+  de `lifecycle`, si ;
+- les mêmes ressources, de même nature, retenues pour la même raison, avec les
+  mêmes lignes — opération, cible, classe — et les mêmes entrées de state
+  obsolètes ;
+- sur chaque ligne comptée, pas plus de lignes que relu, et un chiffre qui
+  n'est pas plus vague.
+
+| Relu \ maintenant | exact M | jusqu'à M | au moins M, plus de M | non mesuré |
+|---|---|---|---|---|
+| exact n | M ≤ n | refus | refus | refus |
+| jusqu'à n | M ≤ n | M ≤ n | refus | refus |
+| au moins n, plus de n | M ≤ n | M ≤ n | M ≤ n | refus |
+| non mesuré | accepté | accepté | accepté | accepté |
+
+Un impact moindre reste couvert par ce qui a été accepté : sur une base
+vivante, moins de lignes que relu est le cas courant, et un plan strictement
+identique survivrait rarement aux heures qui séparent une relecture d'un merge.
+Une ligne relue sans chiffre a été acceptée sans chiffre — quelle que soit la
+classe qu'elle prendra —, donc tout chiffre et toute classe recalculés restent
+dans ce qui a été accepté. Un comptage qui tombe à zéro rend sa ligne `safe`,
+et ce changement de classe-là ne provoque pas de refus.
+
+Quand le plan passe, `apply` affiche le plan **recalculé** — ses comptes sont
+ceux qui vont partir — et continue comme d'habitude : `--fail-on`, annonce,
+confirmation ou `--auto-approve`, écriture. Sinon, il nomme chaque
+écart sur sa ligne, et n'écrit rien :
+
+```
+error: the plan recomputed now is not the one reviewed in plan.out, nothing was applied
+  state changed since the plan: another apply went through in between
+  database.tasks: option "High" (property "Prio") — 12 rows reviewed, 15 rows now
+  → rerun `notion-seed plan --out` and have the new plan reviewed
+```
+
+Les autres refus disent `configuration changed since the plan` ou `workspace
+changed since the plan`, commencent par `change added`, `change gone`, `line
+added` ou `line gone`, ou nomment la classe qui a changé. Un fichier de plan
+écrit par une autre version de notion-seed, ou d'un format inconnu, est refusé
+avant toute comparaison. Quand le seul écart est un comptage qui a échoué
+maintenant — un `403`, un `429` à bout de patience —, la dernière ligne dit de
+simplement relancer la même commande pour appliquer `plan.out` : le plan relu
+tient peut-être encore.
+
+Un plan relu qui était bloqué n'est jamais appliqué. Un plan vide s'écrit
+aussi : l'appliquer n'écrit rien et sort en `0`. Une ressource retenue reste
+retenue, et `apply` sort en code non nul comme sans fichier.
+
+`plan --out` et `diff --out` ne changent ni la sortie ni le code de retour. Le
+fichier est écrit après l'affichage du plan et après `--fail-on` : une CI qui
+échoue sur `--fail-on` a tout de même son plan à relire. L'écriture est
+atomique, comme celle du state. `--out` refuse `--skip-preflight` : un plan
+hors ligne n'a rien mesuré à quoi `apply` puisse être tenu.
+
+Le fichier est du JSON, format `1`. Il porte ce que le plan affiche et rien de
+plus — ni payload, ni jeton, ni contenu de ligne —, il peut donc vivre dans un
+artefact de CI. Son champ `rendered` est le plan tel qu'affiché, prêt à poster
+en commentaire de pull request sans relancer notion-seed.
+
+```json
+{
+  "format": 1,
+  "notion_seed": "0.9.0",
+  "workspace_id": "33333333-3333-4333-8333-333333333333",
+  "created_at": "2026-09-25T14:00:00Z",
+  "config_sha256": "…",
+  "state_sha256": "…",
+  "changes": [
+    {
+      "resource": "database.tasks",
+      "kind": "update",
+      "withheld": "",
+      "details": [
+        {
+          "op": "-",
+          "target": "option \"High\" (property \"Prio\")",
+          "class": "destructive",
+          "count": 12,
+          "bound": "exact"
+        }
+      ]
+    }
+  ],
+  "stale_state": [],
+  "rendered": "Plan: 0 to add, 1 to change, 0 to destroy\n…"
+}
+```
+
+`bound` vaut `exact`, `at_most`, `at_least`, `more_than` ou `unmeasured`. Une
+ligne qui ne coûte rien ne porte ni `count` ni `bound` ; une ligne
+`unmeasured` ne porte pas de `count`. Un plan bloqué porte en plus
+`"blocked": true`.
+
 ## import
 
 ```sh
@@ -365,9 +565,9 @@ notion-seed diff --fail-on=silent-rewrite,destructive
 
 | Valeur | Ce qu'elle attrape |
 |---|---|
-| `destructive` | une donnée est perdue, sans qu'aucune fausse valeur soit écrite |
+| `destructive` | une donnée est perdue : des valeurs passent à vide. Vers `number`, certains textes ne gardent en plus que leur nombre de tête — la ligne le dit |
 | `silent-rewrite` | une donnée est remplacée par une autre, sans trace |
-| `unknown` | l'impact n'a pas pu être mesuré : type hors table, comptage en échec, ou hors ligne |
+| `unknown` | l'impact n'a pas pu être mesuré : comptage en échec, ou hors ligne |
 | `migration` | l'API accepte la requête et ne change rien : il faut migrer les lignes à la main |
 
 Cinq choses à savoir :
@@ -392,11 +592,36 @@ Cinq choses à savoir :
   donc un `--fail-on=destructive,silent-rewrite` ne l'attrape plus et sort en
   `0`. Ajoutez `unknown` à votre liste si vous voulez que le garde-fou tienne
   même quand l'API refuse de compter — sans quoi une CI se croit protégée
-  précisément le jour où elle ne l'est pas. Seule exception : une destruction
+  précisément le jour où elle ne l'est pas. Deux exceptions : une destruction
   dont le comptage de lignes échoue reste `destructive`, puisque la database
-  part à la corbeille quel qu'en soit le compte.
+  part à la corbeille quel qu'en soit le compte ; et un changement de type garde
+  sa classe mesurée, puisque sa nature est connue — seule son ampleur ne l'est
+  pas.
 
 `--fail-on` vaut aussi pour `apply`, où il est vérifié avant toute écriture.
 Attention à `--skip-preflight` : hors ligne, rien n'est compté, et chaque ligne
 qui aurait pu coûter ressort en `unknown impact` — un `--fail-on=destructive`
 n'y attrape donc plus rien, alors que `--fail-on=unknown` les attrape toutes.
+
+### Relire dans la pull request, appliquer après le merge
+
+```sh
+# dans la pull request : le plan à relire, figé
+notion-seed plan --out plan.out --fail-on=destructive,silent-rewrite,unknown
+# garder plan.out en artefact, et poster son champ `rendered` en commentaire
+
+# après le merge, avec le même plan.out
+notion-seed apply plan.out --auto-approve
+git add notion-seed.state.json   # puis le committer et le pousser
+```
+
+Le plan doit être calculé sur ce qui sera mergé : si `main` a reçu d'autres
+changements de configuration entre-temps, `apply` refuse avec `configuration
+changed since the plan` — rebasez la pull request sur `main` et replanifiez.
+
+Le job d'apply **doit committer** `notion-seed.state.json` : notion-seed ne le
+fait pas, cela dépend de chaque CI. Un plan calculé avant ce commit est alors
+refusé avec `state changed since the plan`, et c'est ce qu'on veut. Un plan
+calculé sur un state qui n'a jamais été committé n'est, lui, **pas** rattrapé :
+le plan et l'apply lisent le même fichier périmé, qui ne sait plus ce que le
+dernier `apply` a créé — ces databases ressortiraient en créations.

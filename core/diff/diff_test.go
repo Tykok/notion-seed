@@ -174,11 +174,11 @@ func TestComputeDoesNotAnnounceDestroyWithoutRefresh(t *testing.T) {
 	}
 }
 
-// prevent_destroy no longer blocks the cleanup of an orphan that vanished
+// acknowledge_destroy never blocks the cleanup of an orphan that vanished
 // outside notion-seed: the stale state entry is cleaned in every case, and the
 // rendering of StaleState carries the notice, not a block.
-func TestComputeMovesProtectedOrphanToStaleState(t *testing.T) {
-	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
+func TestComputeMovesAcknowledgedOrphanToStaleState(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{AcknowledgeDestroy: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
@@ -197,10 +197,10 @@ func TestComputeMovesProtectedOrphanToStaleState(t *testing.T) {
 	}
 }
 
-// prevent_destroy no longer blocks: it is recorded on the resource, and it is
-// up to the rendering to say it loudly.
-func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
-	cfg := &config.Config{Lifecycle: config.Lifecycle{PreventDestroy: []string{"database.tasks"}}}
+// acknowledge_destroy blocks nothing: it is recorded on the resource, and it
+// is up to the rendering to say it loudly.
+func TestComputeDoesNotBlockAnAcknowledgedDestroy(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{AcknowledgeDestroy: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
@@ -217,15 +217,15 @@ func TestComputeDoesNotBlockADestroyUnderPreventDestroy(t *testing.T) {
 	if p.ToDestroy != 1 {
 		t.Errorf("ToDestroy = %d, want 1", p.ToDestroy)
 	}
-	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "prevent_destroy" {
-		t.Errorf("Acknowledged = %v, want [prevent_destroy]", got)
+	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "acknowledge_destroy" {
+		t.Errorf("Acknowledged = %v, want [acknowledge_destroy]", got)
 	}
 }
 
-// allow_data_loss becomes an acknowledgement: its presence is recorded, its
-// absence no longer blocks anything.
-func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
-	cfg := &config.Config{Lifecycle: config.Lifecycle{AllowDataLoss: []string{"database.tasks"}}}
+// acknowledge_data_loss is an acknowledgement: its presence is recorded, its
+// absence blocks nothing.
+func TestComputeNotesAcknowledgedDataLossWithoutBlocking(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{AcknowledgeDataLoss: []string{"database.tasks"}}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
 		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
@@ -239,8 +239,27 @@ func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
 	if p.Blocked {
 		t.Errorf("Blocked = true, want false")
 	}
-	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "allow_data_loss" {
-		t.Errorf("Acknowledged = %v, want [allow_data_loss]", got)
+	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "acknowledge_data_loss" {
+		t.Errorf("Acknowledged = %v, want [acknowledge_data_loss]", got)
+	}
+}
+
+// A deprecated key is named as the user wrote it: the plan line must match
+// their YAML, the load warning says to rename it.
+func TestComputeNamesADeprecatedLifecycleKeyAsWritten(t *testing.T) {
+	cfg := &config.Config{Lifecycle: config.Lifecycle{DeprecatedPreventDestroy: []string{"database.tasks"}}}
+	applied := &state.Snapshot{
+		Version:   state.Version,
+		Databases: map[string]state.Database{"tasks": {ID: "db-1", Name: "Tasks"}},
+	}
+	actual := map[string]Refreshed{"tasks": {Database: state.Database{ID: "db-1", Name: "Tasks"}}}
+
+	p, err := Compute(cfg, applied, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Changes[0].Acknowledged; len(got) != 1 || got[0] != "prevent_destroy" {
+		t.Errorf("Acknowledged = %v, want [prevent_destroy]", got)
 	}
 }
 
@@ -251,10 +270,10 @@ func TestComputeNotesAllowDataLossWithoutBlocking(t *testing.T) {
 // Without this test, the order only depends on the sequence of the two `if`s
 // in absorb: swapping them, or pouring the keys from a map, would change the
 // output without any test noticing.
-func TestComputeAcknowledgesPreventDestroyBeforeAllowDataLoss(t *testing.T) {
+func TestComputeAcknowledgesDestroyBeforeDataLoss(t *testing.T) {
 	cfg := &config.Config{Lifecycle: config.Lifecycle{
-		PreventDestroy: []string{"database.tasks"},
-		AllowDataLoss:  []string{"database.tasks"},
+		AcknowledgeDestroy:  []string{"database.tasks"},
+		AcknowledgeDataLoss: []string{"database.tasks"},
 	}}
 	applied := &state.Snapshot{
 		Version:   state.Version,
@@ -270,7 +289,7 @@ func TestComputeAcknowledgesPreventDestroyBeforeAllowDataLoss(t *testing.T) {
 		t.Fatalf("Changes = %d, want 1", len(p.Changes))
 	}
 	got := p.Changes[0].Acknowledged
-	want := []string{"prevent_destroy", "allow_data_loss"}
+	want := []string{"acknowledge_destroy", "acknowledge_data_loss"}
 	if len(got) != len(want) {
 		t.Fatalf("Acknowledged = %v, want %v", got, want)
 	}
@@ -486,13 +505,13 @@ func TestComputeReportsNotComparedWhenActualWasNotRead(t *testing.T) {
 	}
 }
 
-// Before this commit, allow_data_loss only cleared the ordinary destructive
+// Before this commit, allow_data_loss (now acknowledge_data_loss) only cleared the ordinary destructive
 // block: a silent rewrite stayed blocked no matter what, even when it was
-// listed in allow_data_loss. Since this commit, no class blocks the plan by
+// listed there. Since this commit, no class blocks the plan by
 // itself any more — notion-seed measures the cost of a change and says it, it
 // no longer refuses it on the strength of its class. tasks loses a select
 // option, flows loses a status option: both now go through, whether
-// allow_data_loss covers them or not.
+// acknowledge_data_loss covers them or not.
 func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 	cfg := &config.Config{
 		Databases: []config.Database{
@@ -505,7 +524,7 @@ func TestComputeDoesNotBlockOnOptionRemovalClassAlone(t *testing.T) {
 				}},
 			}},
 		},
-		Lifecycle: config.Lifecycle{AllowDataLoss: []string{"database.tasks", "database.flows"}},
+		Lifecycle: config.Lifecycle{AcknowledgeDataLoss: []string{"database.tasks", "database.flows"}},
 	}
 	applied := &state.Snapshot{Version: state.Version, Databases: map[string]state.Database{
 		"tasks": {ID: "db1", Name: "Tasks", Properties: map[string]state.Property{

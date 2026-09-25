@@ -35,7 +35,7 @@ Déclarer un workspace Notion en fichiers n'est pas le problème difficile. Le
 problème difficile, c'est de savoir ce que l'API va faire de vos données quand
 la déclaration change.
 
-Six comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
+Neuf comportements mesurés contre l'API, qu'un outil qui se contente d'envoyer
 la requête ne vous signale pas :
 
 | Changement | Ce que fait l'API |
@@ -46,13 +46,17 @@ la requête ne vous signale pas :
 | Retirer une option de `status` | **Réassigne les lignes à une autre option**, sans erreur |
 | `multi_select` → `select` | **Ne garde qu'une valeur** sur les lignes qui en portaient plusieurs |
 | `select` → `multi_select` | Recrée les options : une ligne ne garde sa valeur que si le YAML redéclare une option **de même nom** ; les autres passent à vide |
+| `status` → `select` | Vide chaque ligne dont l'option n'est pas redéclarée, **et chaque ligne qui n'a jamais reçu de status**, bien qu'elle se lise « Not started » |
+| Tout type → `status` | **Donne une valeur à chaque ligne**, vides comprises |
+| Changer le type d'un `title` | Refusé, `400` |
 
-Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies — le
-dernier le 2026-09-25.
+Mesurés le 2026-09-24 contre l'API `2025-09-03`, sur des lignes remplies — les
+quatre derniers le 2026-09-25, avec les 90 changements de type listés dans
+[Changements de type](/fr/commands#changements-de-type).
 
-Le retrait d'option de `status` et `multi_select` → `select` sont ceux qui
-justifient l'outil : la donnée n'est pas perdue, elle est remplacée par une
-valeur plausible et fausse, indistinguable après coup.
+Le retrait d'option de `status`, `multi_select` → `select` et tout type →
+`status` sont ceux qui justifient l'outil : la donnée n'est pas perdue, elle
+est remplacée par une valeur plausible et fausse, indistinguable après coup.
 
 `notion-seed` ne vous en empêche pas. Il vous dit, **avant d'écrire**, combien
 de lignes sont concernées. Une option de `status` retirée du YAML, deux lignes
@@ -84,12 +88,13 @@ confie la décision au workflow.
 
 ## Ce que l'API ne sait pas faire
 
-Deux changements sont inexprimables, mesurés le 2026-09-24 :
+Trois changements sont inexprimables, mesurés le 2026-09-24 et le 2026-09-25 :
 
 | Changement | Ce que fait l'API |
 |---|---|
 | Renommer une option | Répond `200`, ne change rien |
 | Changer la couleur d'une option | Répond `400`, que l'option soit désignée par son id ou par son nom, et tout le PATCH de la propriété échoue |
+| Changer le type d'une propriété `title`, ou faire d'une propriété un `title` | Répond `400` : un data source ne porte qu'une propriété titre |
 
 `notion-seed` ne les écrit donc pas, et retient la database entière tant qu'ils
 sont déclarés. Les autres databases du plan s'appliquent. Voir
@@ -101,15 +106,16 @@ nombre de lignes qu'elle nomme.
 `apply` crée les databases déclarées et absentes de Notion, modifie celles qui
 existent déjà — nom, description, icône et propriétés déclarées — et met à la
 corbeille celles que le YAML ne déclare plus. Le state est mis à jour après
-chaque ressource écrite. Deux changements d'option, que l'API ne sait pas
-exprimer, sont retenus avec la migration à faire à la main, et `apply` sort en
-code non nul tant qu'ils restent — voir
+chaque ressource écrite. Deux changements d'option et le changement de type
+d'un `title`, que l'API ne sait pas exprimer, sont retenus avec la migration à
+faire à la main, et `apply` sort en code non nul tant qu'ils restent — voir
 [Ce que l'API ne sait pas faire](#ce-que-l-api-ne-sait-pas-faire).
 
 | | |
 |---|---|
 | `init`, `version`, `plan`, `diff`, `import` | disponibles |
 | `apply` | créations, modifications et destructions — voir [Appliquer](/fr/commands#apply) |
+| `plan --out` / `apply <fichier>` | le plan relu, appliqué tel quel ou pas du tout — voir [Un plan relu](/fr/commands#un-plan-relu) |
 | fichier de state | `notion-seed.state.json`, écrit par `import` et `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | accusés de lecture — voir [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture) |
+| `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | accusés de lecture — voir [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture) |
 | `--fail-on` | le garde-fou de CI — voir [En CI](/fr/commands#en-ci) |

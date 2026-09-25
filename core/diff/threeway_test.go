@@ -324,7 +324,7 @@ func TestUpdateShowsTheOptionsWrittenOnATypeChange(t *testing.T) {
 		`- option "Basse" (property "Prio") not redeclared under this name: the type change re-creates the options`,
 	})
 	for _, d := range res.Changeset.Details {
-		if d.Target == `property "Prio"` && d.Class != change.ClassifyTypeChange("select", "status") {
+		if d.Target == `property "Prio"` && d.Class != change.TypeChangeOf("select", "status", []string{"Haute", "Faite"}).Class {
 			t.Errorf("class of the type change = %v, want the table's", d.Class)
 		}
 		if d.Property == "Prio" && d.Op == "+" && d.Class != ClassSafe {
@@ -673,15 +673,13 @@ func TestCompareDatabase(t *testing.T) {
 			wantLine:  "number → rich_text",
 		},
 		{
-			// Outside the table: nobody tried, so the impact is unknown — and it
-			// dominates the header, because not knowing deserves more attention
-			// than knowing it is safe.
-			name:      "property type changed outside the table: unknown impact",
+			// Measured on 2026-09-25: nothing survives number → people.
+			name:      "property type changed, measured destructive",
 			desired:   db("Estimate", state.Property{Type: "people"}),
 			applied:   db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			actual:    db("Estimate", state.Property{ID: "p1", Type: "number", Format: "number"}),
 			wantKind:  resources.KindUpdate,
-			wantClass: change.ClassUnknownImpact,
+			wantClass: change.ClassDestructive,
 			wantLine:  "number → people",
 		},
 		{
@@ -1332,8 +1330,9 @@ func TestTypeChangeAnnouncesEveryOptionItDrops(t *testing.T) {
 	// the write, and the current name that finds them.
 	wantMeasure := resources.Measurement{
 		Property: "Prio", PropertyType: "select", Option: "Basse", Retyped: true,
+		TargetType: "multi_select",
 	}
-	if *removed[0].Measure != wantMeasure {
+	if !reflect.DeepEqual(*removed[0].Measure, wantMeasure) {
 		t.Errorf("Measure = %+v, want %+v", *removed[0].Measure, wantMeasure)
 	}
 	// The target stays the one the 2026-09-25 measurement says is right: only
@@ -1436,5 +1435,212 @@ func TestCompareDatabaseAsksToCountTheRowsOfADestroy(t *testing.T) {
 	d := res.Changeset.Details[0]
 	if d.Measure == nil || !d.Measure.AllRows || d.Count != -1 || d.Class != ClassDestructive {
 		t.Errorf("Detail = %+v, want an AllRows request, Count -1, destructive", d)
+	}
+}
+
+// The API refuses to change the type of a title property, both ways (400,
+// measured on 2026-09-25). Sending it would fail the whole PATCH: the
+// resource is withheld, with its own procedure — not the option one.
+func TestTitleTypeChangeWithholdsTheResource(t *testing.T) {
+	for _, tc := range []struct{ from, to string }{
+		{"title", "rich_text"},
+		{"rich_text", "title"},
+	} {
+		actual := state.Database{
+			ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+			Properties: map[string]state.Property{"Nom": {ID: "p1", Type: tc.from}},
+		}
+		desired := state.Database{Properties: map[string]state.Property{
+			"Nom": {Type: tc.to, Options: nil},
+		}}
+		res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+		if res.Target != nil {
+			t.Errorf("%s → %s: Target non-nil: apply would send a PATCH the API refuses", tc.from, tc.to)
+		}
+		if len(res.Changeset.Details) != 1 {
+			t.Fatalf("%s → %s: details = %+v, want the one refused line", tc.from, tc.to, res.Changeset.Details)
+		}
+		d := res.Changeset.Details[0]
+		if d.Class != change.ClassMigration || d.Measure != nil {
+			t.Errorf("%s → %s: {Class:%v Measure:%+v}, want migration required, nothing to count",
+				tc.from, tc.to, d.Class, d.Measure)
+		}
+		if !strings.Contains(d.Note, "400") {
+			t.Errorf("%s → %s: Note = %q, want the API refusal named", tc.from, tc.to, d.Note)
+		}
+		if !strings.Contains(res.Withheld, "title") || !strings.Contains(res.Withheld, "  → ") {
+			t.Errorf("%s → %s: Withheld = %q, want the title procedure", tc.from, tc.to, res.Withheld)
+		}
+		if strings.Contains(res.Withheld, "option") {
+			t.Errorf("%s → %s: Withheld = %q speaks of options", tc.from, tc.to, res.Withheld)
+		}
+	}
+}
+
+// A plan file holds a recomputed type change to its SOURCE type: the type
+// line carries it on every kind of pair — safe (no measurement), refused by
+// the API, measured — and the option lines it brings carry none.
+func TestTypeChangeLineCarriesItsSourceType(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		have     state.Property
+		want     state.Property
+		minLines int
+	}{
+		{"safe pair", state.Property{ID: "p1", Type: "number", Format: "number"},
+			state.Property{Type: "rich_text"}, 1},
+		{"refused pair", state.Property{ID: "p1", Type: "title"},
+			state.Property{Type: "rich_text"}, 1},
+		{"measured pair", state.Property{ID: "p1", Type: "rich_text"},
+			state.Property{Type: "select", Options: []state.Option{{Name: "Un"}}}, 2},
+		{"pair dropping options", state.Property{ID: "p1", Type: "select", Options: []state.Option{
+			{ID: "o1", Name: "Haute"}, {ID: "o2", Name: "Basse"}}},
+			state.Property{Type: "multi_select", Options: []state.Option{{Name: "Haute"}}}, 3},
+	} {
+		actual := state.Database{
+			ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+			Properties: map[string]state.Property{"Prio": tc.have},
+		}
+		desired := state.Database{Properties: map[string]state.Property{"Prio": tc.want}}
+		res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+		ds := res.Changeset.Details
+		if len(ds) < tc.minLines {
+			t.Fatalf("%s: details =\n%s\nwant at least %d lines", tc.name,
+				strings.Join(detailStrings(ds), "\n"), tc.minLines)
+		}
+		for _, d := range ds {
+			want := ""
+			if d.Target == `property "Prio"` {
+				want = tc.have.Type
+			}
+			if d.FromType != want {
+				t.Errorf("%s: %s %s: FromType = %q, want %q", tc.name, d.Op, d.Target, d.FromType, want)
+			}
+		}
+		if ds[0].Target != `property "Prio"` {
+			t.Errorf("%s: first line = %s %s, want the type change", tc.name, ds[0].Op, ds[0].Target)
+		}
+	}
+}
+
+// The line says what survives, measured: the user reads it to decide.
+func TestTypeChangeLineSaysWhatSurvives(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{"Notes": {ID: "p1", Type: "rich_text"}},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Notes": {Type: "select", Options: []state.Option{{Name: "Un"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	lines := detailStrings(res.Changeset.Details)
+	if !containsSub(lines, "rich_text → select: the API creates no option: values survive only where an option with the same text is declared") {
+		t.Errorf("lines:\n%s", strings.Join(lines, "\n"))
+	}
+	// A declared option brings the cut at the first comma: a rewrite.
+	if res.Changeset.Details[0].Class != change.ClassSilentRewrite {
+		t.Errorf("Class = %v, want silent rewrite", res.Changeset.Details[0].Class)
+	}
+}
+
+// The property line carries the count the measured table prescribes: the
+// filter, its bound, the declared options whose rows survive, and why the
+// figure is only a bound.
+func TestTypeChangeCarriesTheMeasuredCount(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{"Notes": {ID: "p1", Type: "rich_text"}},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Notes": {Type: "select", Options: []state.Option{{Name: "Un"}, {Name: "Deux"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	m := res.Changeset.Details[0].Measure
+	if m == nil {
+		t.Fatal("no measurement request on the type change")
+	}
+	want := change.TypeChangeOf("rich_text", "select", []string{"Un", "Deux"})
+	if m.PropertyType != "rich_text" || m.TargetType != "select" ||
+		m.Count != want.Count || m.Bound != change.BoundAtLeast ||
+		!reflect.DeepEqual(m.Except, []string{"Un", "Deux"}) || m.Caveat == "" {
+		t.Errorf("Measure = %+v", *m)
+	}
+}
+
+// Toward status, the removal lines of a type change carry the new type: it
+// decides the fate of the rows.
+func TestRetypedRemovalTowardStatusCarriesTheNewType(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Prio": sel(state.Option{ID: "o1", Name: "Haute"}, state.Option{ID: "o2", Name: "Basse"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Prio": {Type: "status", Options: []state.Option{{Name: "Haute", Group: "To-do"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	for _, d := range res.Changeset.Details {
+		if d.Op == "-" && (d.Measure == nil || d.Measure.TargetType != "status") {
+			t.Errorf("%s: Measure = %+v, want TargetType status", d.Target, d.Measure)
+		}
+	}
+}
+
+// multi_select → select: the removal lines count the rows holding "Basse";
+// the property line must not count them again in another family.
+func TestMultiSelectTypeChangeDoesNotCountRemovedRowsTwice(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Tags": multiSel(state.Option{ID: "o1", Name: "Haute"}, state.Option{ID: "o2", Name: "Basse"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Tags": {Type: "select", Options: []state.Option{{Name: "Haute"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+	m := res.Changeset.Details[0].Measure
+	if m == nil || !reflect.DeepEqual(m.Except, []string{"Basse"}) {
+		t.Errorf("property line Measure = %+v, want the rows holding Basse excluded", m)
+	}
+}
+
+// multi_select → select keeps only the FIRST value (measured on 2026-09-24).
+// A row [B, A], B not redeclared, is counted on B's removal line only — and
+// loses A as well, which no line counts. The removal lines therefore bound the
+// loss from below, and the total must say "at least".
+func TestRetypedMultiSelectRemovalIsALowerBound(t *testing.T) {
+	actual := state.Database{
+		ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+		Properties: map[string]state.Property{
+			"Tags": multiSel(state.Option{ID: "o1", Name: "B"}, state.Option{ID: "o2", Name: "A"}),
+		},
+	}
+	desired := state.Database{Properties: map[string]state.Property{
+		"Tags": {Type: "select", Options: []state.Option{{Name: "A"}}},
+	}}
+	res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+	details := res.Changeset.Details
+	for i := range details {
+		d := &details[i]
+		switch {
+		case d.Op == "-":
+			if d.Measure.Bound != change.BoundAtLeast {
+				t.Errorf("%s: Bound = %v, want at least", d.Target, d.Measure.Bound)
+			}
+			// The row [B, A]: one row holds B.
+			d.Count, d.Class = 1, change.ClassDestructive
+		case d.Measure != nil:
+			// The property line excludes rows holding B: none left.
+			d.Count, d.Class = 0, change.ClassSafe
+		}
+	}
+	p := &Plan{Changes: []Change{{Resource: "database.tasks", Kind: resources.KindUpdate, Details: details}}}
+	if got := Impact(p); got != "Impact: at least 1 values lost." {
+		t.Errorf("Impact = %q, want a lower bound", got)
 	}
 }

@@ -25,8 +25,10 @@ const (
 	ClassMigration
 
 	// ClassDestructive: removing a select or multi_select option, deleting a
-	// property, changing a type. The data is lost, but no false value is
-	// written.
+	// property, changing a type. The data is lost. Toward number, the
+	// conversion also keeps the leading number of some texts ('2026-01-15' →
+	// 2026): measured destructive on 2026-09-25, since values are emptied, and
+	// the note on the plan line names the rewritten ones.
 	//
 	// select and multi_select share the class, NOT the behaviour, and the
 	// rendering tells them apart: measured on 2026-09-24, a removed select
@@ -92,14 +94,14 @@ func ClassifyOptionRemoval(propertyType string, count int) Class {
 
 // ClassifyRetypedOptionRemoval gives the cost of an option that disappears
 // with a type change, because the YAML does not redeclare it under the same
-// name.
+// name. targetType is the NEW type.
 //
-// Measured on 2026-09-25 against the API, on select → multi_select only: a row
-// keeps its value only if an option with the same name goes in the payload,
-// otherwise it is emptied. No option remains to reassign the row to, so the
-// old type — status included — changes nothing: it is a loss.
-func ClassifyRetypedOptionRemoval(count int) Class {
-	return classifyLoss(count, false)
+// Measured on 2026-09-25 against the API: a row keeps its value only if an
+// option with the same name goes in the payload. Otherwise, toward select or
+// multi_select it is emptied — a loss, whatever the old type —, and toward
+// status it is rewritten to one of the declared options — a false value.
+func ClassifyRetypedOptionRemoval(targetType string, count int) Class {
+	return classifyLoss(count, targetType == "status")
 }
 
 // classifyLoss is the rule shared by both removals: the count first, the fate

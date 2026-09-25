@@ -42,6 +42,8 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				PropertyType: d.Measure.PropertyType,
 				Option:       d.Measure.Option,
 				AllRows:      d.Measure.AllRows,
+				Count:        d.Measure.Count,
+				Except:       d.Measure.Except,
 			})
 			if err != nil {
 				// The line stays unknown, which it already was. A failure never
@@ -59,6 +61,7 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				// Rerunning will not make rich_text filterable.
 				if !errors.Is(err, ErrUnsupportedFilter) {
 					failures = append(failures, fmt.Sprintf("%s: %v", ch.Resource, err))
+					d.CountFailed = true
 				} else {
 					d.Unmeasurable = true
 				}
@@ -86,9 +89,15 @@ func Enrich(ctx context.Context, c Counter, dataSourceIDs map[string]string, p *
 				// count, and `--fail-on=migration` would stop triggering on a
 				// plain rename.
 			case d.Measure.Option != "" && d.Measure.Retyped:
-				d.Class = change.ClassifyRetypedOptionRemoval(res.Count)
+				d.Class = change.ClassifyRetypedOptionRemoval(d.Measure.TargetType, res.Count)
 			case d.Measure.Option != "":
 				d.Class = change.ClassifyOptionRemoval(d.Measure.PropertyType, res.Count)
+			case res.Count == 0 && d.Measure.Bound == change.BoundAtLeast:
+				// A lower bound of zero proves nothing: the rows the filter
+				// cannot see — text made only of spaces, a value that differs
+				// from an option only by case — are touched all the same.
+				// Downgrading here would announce "safe" on a count that cannot
+				// say so.
 			case res.Count == 0:
 				// The count reclassifies a type change IN ONE DIRECTION ONLY,
 				// and the asymmetry is not obvious:

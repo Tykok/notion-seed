@@ -58,6 +58,23 @@ type Measurement struct {
 	// sources the count does not query: it counts only one, the trashing takes
 	// them all. When non-zero, the count is a lower bound.
 	UncountedDataSources int
+
+	// TargetType is the NEW type, on a type change and on the removal lines
+	// it brings: toward status, a value that is not redeclared is reassigned
+	// to the first option instead of emptied (measured on 2026-09-25).
+	TargetType string
+	// Bound also marks a retyped multi_select option removal as a lower bound
+	// of what its rows lose: toward select or status, only the first value is
+	// kept.
+	//
+	// Count, Bound, Except and Caveat describe a type change's count, as
+	// change.TypeChangeOf gives it: which rows to filter, how the figure
+	// relates to the rows really touched, which declared option names are
+	// excluded, and why the figure is only a bound or cannot be taken.
+	Count  change.Count
+	Bound  change.Bound
+	Except []string
+	Caveat string
 }
 
 // Detail describes an elementary change inside a resource.
@@ -81,6 +98,12 @@ type Detail struct {
 	// "description" or "icon". Empty on a property-level detail. Property and
 	// Field are exclusive: a detail concerns one or the other, never both.
 	Field string
+
+	// FromType is the property's type before a type change, "" on every other
+	// detail. It is set even when the pair is safe and Measure stays nil: Note
+	// is the only other place that carries it, and Note is free text, not
+	// compared by a plan file (core/planfile).
+	FromType string
 
 	// Measure is the measurement request, nil when the detail costs nothing.
 	Measure *Measurement
@@ -111,6 +134,17 @@ type Detail struct {
 	// wrongly marked true would instead make a working remedy disappear. So
 	// the default leans the right way.
 	Unmeasurable bool
+
+	// CountFailed says a count was asked and did not succeed: a 403, an
+	// exhausted 429, a misunderstood response. It is the one "no figure" that
+	// rerunning may clear — unlike Unmeasurable, and unlike a count that was
+	// never attempted (no data source id, --skip-preflight).
+	//
+	// Only core/measure sets it. A plan file comparison (core/planfile) reads
+	// it to say that rerunning apply may be enough. The default, false, is
+	// the cautious one: at worst it asks for a new review where a rerun would
+	// have done.
+	CountFailed bool
 }
 
 // NewDetail builds an unmeasured detail. Use it SYSTEMATICALLY: a Detail
