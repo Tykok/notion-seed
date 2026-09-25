@@ -140,11 +140,12 @@ S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
   the rewritten values.
 - ² Between option types, each current option the YAML does not redeclare
   under the same name comes out as its own `-` line with its count. Toward
-  `status` its rows are not emptied: they get the first declared option.
+  `status` its rows are not emptied: they are rewritten to one of the declared
+  options.
 - ³ `checkbox` becomes `Yes` / `No`: → `select` / `multi_select` is `safe` with
   an option `Yes`, → `status` with `Yes` and `No`.
-- **Toward `status`, every row gets a value**, empty ones included: the API's
-  default option without declared options, the first declared one otherwise.
+- **Toward `status`, every row gets a value**, empty ones included: one of the
+  declared options — a `status` always declares them.
 - **`status` as a source:** a row that never received a status reads as the
   default option, yet every conversion empties it.
 - **`status` → `select` was documented as lossless until 2026-09-25.** It was
@@ -482,7 +483,7 @@ creates one for them, which the read-back brings back to the state. Under a
 type change, the options are recreated: only the YAML's go out, without an id,
 and each current option the YAML does not redeclare under the same name comes
 out as `-`, with the number of rows it empties — or, toward `status`, that it
-reassigns to the first declared option. Measured on 2026-09-25 for every pair
+rewrites to one of the declared options. Measured on 2026-09-25 for every pair
 among `select`, `multi_select` and `status`.
 
 The order is chosen for failure. If the second call fails, the name and the

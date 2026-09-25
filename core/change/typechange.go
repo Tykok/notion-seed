@@ -120,14 +120,18 @@ const (
 		"with the same text is declared"
 	byTextCut   = byText + ", cut at the first comma"
 	byTextSplit = byText + ", split on commas"
-	toStatus    = "every row, empty ones included, gets the default option; " +
-		"with declared options, a value survives only where an option with the " +
-		"same text is declared, and the others get the first one"
+	// A status property always declares its options (the schema requires
+	// them), so the API's own default option is never what a row gets. Which
+	// declared option a rewritten row gets was observed on one ordering only:
+	// it is not asserted.
+	toStatus = "a value survives only where an option with the same text is " +
+		"declared; every other row, empty ones included, is rewritten to one " +
+		"of the declared options"
 	toStatusByName = "a value survives only where an option with the same name " +
-		"is declared; the others and empty rows get the first declared option, " +
-		"or the API's default one"
-	toStatusAll = "every row, empty ones included, gets the first declared " +
-		"option or the API's default one, even with an option of the same text"
+		"is declared; every other row, empty ones included, is rewritten to one " +
+		"of the declared options"
+	toStatusAll = "every row, empty ones included, is rewritten to one of the " +
+		"declared options, even with an option of the same text"
 	nothing        = "nothing survives"
 	unchecked      = "nothing survives: every row becomes unchecked"
 	uncheckedEmpty = "every row is emptied, checked or not"
@@ -139,7 +143,7 @@ const (
 	statusImplicit    = "explicit values are kept; a row that never received a status is emptied"
 	statusByName      = byName + "; a row that never received a status is emptied"
 	checkboxByOption  = "a checked row survives only as an option \"Yes\"; unchecked rows are emptied without an option \"No\""
-	checkboxToStatus  = "rows survive only as options \"Yes\" and \"No\"; the others get the first declared option, or the API's default one"
+	checkboxToStatus  = "rows survive only as options \"Yes\" and \"No\"; every other row is rewritten to one of the declared options"
 	measuredFirst     = "2026-09-24"
 	measuredCampaign  = "2026-09-25"
 	measuredRemeasure = "2026-09-24, re-measured 2026-09-25"
@@ -311,6 +315,10 @@ func TypeChangeOf(from, to string, declared []string) TypeChange {
 			tc.Class = ClassSafe
 		}
 		tc.Count, tc.Caveat = CountChecked, caveatUnchecked
+		// With an option "No", unchecked rows become "No": nothing to warn.
+		if (to == "select" || to == "multi_select") && no {
+			tc.Caveat = ""
+		}
 		if to == "status" {
 			switch {
 			case yes:

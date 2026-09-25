@@ -1166,7 +1166,7 @@ func TestRenderSaysAnOptionRetypedToStatusIsReassigned(t *testing.T) {
 		Measure: &resources.Measurement{Property: "Prio", PropertyType: "select", Option: "Moyenne",
 			Retyped: true, TargetType: "status"},
 	})
-	if !strings.Contains(got, "2 rows will be reassigned to the first declared option, without a trace") {
+	if !strings.Contains(got, "2 rows will be rewritten to one of the declared options, without a trace") {
 		t.Errorf("output:\n%s", got)
 	}
 	if !strings.Contains(got, "Impact: 2 values reassigned without a trace.") {
@@ -1235,6 +1235,29 @@ func TestImpactTreatsUncountedTermsAsALowerBound(t *testing.T) {
 		}
 		if got := WritableImpact(p); got != tt.want {
 			t.Errorf("WritableImpact = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+// Toward status nothing is emptied: every row gets an option. "rewritten or
+// emptied" would announce an emptying that does not happen.
+func TestRenderSaysATypeChangeToStatusRewritesOnly(t *testing.T) {
+	got := renderOne(t, resources.Detail{Op: "~", Target: `property "D"`, Class: ClassSilentRewrite, Count: 4,
+		Measure: &resources.Measurement{Property: "D", PropertyType: "date", TargetType: "status",
+			Count: change.CountEveryRow}})
+	if !strings.Contains(got, "→ 4 rows will be rewritten, without a trace.") {
+		t.Errorf("output:\n%s", got)
+	}
+}
+
+// A measured behavior is described once: the status notes name no default
+// option — a status property always declares its options — and no ordering
+// that was measured only once.
+func TestTypeChangeToStatusClaimsNoUnmeasuredOrdering(t *testing.T) {
+	for _, from := range []string{"rich_text", "number", "url", "select", "multi_select", "date", "checkbox", "people"} {
+		note := change.TypeChangeOf(from, "status", []string{"A"}).Note
+		if strings.Contains(note, "default") || strings.Contains(note, "first declared") {
+			t.Errorf("%s → status: note %q", from, note)
 		}
 	}
 }

@@ -144,11 +144,12 @@ S `safe`, D `destructive`, R `silent rewrite`, M `migration required`.
   valeurs réécrites.
 - ² Entre types à options, chaque option actuelle que le YAML ne redéclare pas
   sous le même nom ressort en ligne `-` avec son compte. Vers `status`, ses
-  lignes ne passent pas à vide : elles reçoivent la première option déclarée.
+  lignes ne passent pas à vide : elles sont réécrites vers l'une des options
+  déclarées.
 - ³ `checkbox` devient `Yes` / `No` : → `select` / `multi_select` est `safe`
   avec une option `Yes`, → `status` avec `Yes` et `No`.
-- **Vers `status`, chaque ligne reçoit une valeur**, vides comprises : l'option
-  par défaut de l'API sans option déclarée, la première déclarée sinon.
+- **Vers `status`, chaque ligne reçoit une valeur**, vides comprises : l'une
+  des options déclarées — un `status` les déclare toujours.
 - **`status` en départ :** une ligne qui n'a jamais reçu de status se lit comme
   l'option par défaut, et pourtant toute conversion la vide.
 - **`status` → `select` était documenté sans perte jusqu'au 2026-09-25.** C'était
@@ -490,8 +491,8 @@ options existantes sont transmises avec leur id, les neuves sans : l'API leur en
 crée un, que la relecture rapporte au state. Sous un changement de type, les
 options sont recréées : seules celles du YAML partent, sans id, et chaque option
 actuelle que le YAML ne redéclare pas sous le même nom ressort en `-`, avec le
-nombre de lignes qu'elle vide — ou, vers `status`, qu'elle réassigne à la
-première option déclarée. Mesuré le 2026-09-25 pour tous les couples entre
+nombre de lignes qu'elle vide — ou, vers `status`, qu'elle réécrit vers l'une
+des options déclarées. Mesuré le 2026-09-25 pour tous les couples entre
 `select`, `multi_select` et `status`.
 
 L'ordre est choisi pour l'échec. Si le second appel échoue, le nom et l'icône

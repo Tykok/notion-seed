@@ -232,3 +232,17 @@ func TestTypeChangeOfCountsWithTheMeasuredFilter(t *testing.T) {
 		}
 	}
 }
+
+// With an option "No", unchecked rows become "No": saying they are emptied
+// would be false.
+func TestCheckboxCaveatFollowsTheDeclaredOptions(t *testing.T) {
+	if c := TypeChangeOf("checkbox", "select", []string{"No"}).Caveat; strings.Contains(c, "unchecked") {
+		t.Errorf("caveat with \"No\" declared = %q", c)
+	}
+	if c := TypeChangeOf("checkbox", "select", []string{"Other"}).Caveat; !strings.Contains(c, "unchecked rows are emptied") {
+		t.Errorf("caveat without \"No\" = %q", c)
+	}
+	if c := TypeChangeOf("checkbox", "number", nil).Caveat; !strings.Contains(c, "unchecked rows are emptied") {
+		t.Errorf("caveat toward number = %q", c)
+	}
+}
