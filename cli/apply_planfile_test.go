@@ -70,6 +70,42 @@ func editPlanFile(t *testing.T, path, field string, value any) {
 	}
 }
 
+// Important 2 (final review): the state fingerprint in metaOf is computed
+// from prep.snap BEFORE cli/apply.go stamps prep.snap.WorkspaceID — an
+// ordering guaranteed today only by a comment on that line. It is what lets a
+// project with NO state yet be bootstrapped from a reviewed plan: a first
+// apply from such a file must converge, and only afterwards does the state
+// stop matching the file it was applied from, so a second apply of the SAME
+// file is refused as any other apply going through in between would be.
+func TestApplyOfAPlanFileBootstrapsAProjectWithNoState(t *testing.T) {
+	withFakeNtn(t, "authenticated_create")
+	dir := writeConfigDir(t, map[string]string{
+		"workspace.yaml":     workspaceYAML,
+		"databases/all.yaml": oneDatabase,
+	})
+	planPath := filepath.Join(t.TempDir(), "plan.out")
+	if out, err := runCmd(t, "plan", "--dir", dir, "--out", planPath); err != nil {
+		t.Fatalf("plan --out: %v\n%s", err, out)
+	}
+
+	out, err := runCmd(t, "apply", planPath, "--dir", dir, "--auto-approve")
+	if err != nil {
+		t.Fatalf("first apply: %v\n%s", err, out)
+	}
+	snap, lerr := state.Load(dir)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if snap.WorkspaceID == "" {
+		t.Fatal("the bootstrapped state carries no workspace_id")
+	}
+
+	out, err = runCmd(t, "apply", planPath, "--dir", dir, "--auto-approve")
+	if err == nil || !strings.Contains(err.Error(), "state changed since the plan") {
+		t.Fatalf("second apply error = %v, want the refusal of a changed state\n%s", err, out)
+	}
+}
+
 // The flow of the spec: plan --out, then apply of the file, converges.
 func TestApplyOfAReviewedPlanConverges(t *testing.T) {
 	dir, planPath, logPath := reviewedOrphan(t)
