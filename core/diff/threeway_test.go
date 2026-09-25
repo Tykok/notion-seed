@@ -1478,6 +1478,53 @@ func TestTitleTypeChangeWithholdsTheResource(t *testing.T) {
 	}
 }
 
+// A plan file holds a recomputed type change to its SOURCE type: the type
+// line carries it on every kind of pair — safe (no measurement), refused by
+// the API, measured — and the option lines it brings carry none.
+func TestTypeChangeLineCarriesItsSourceType(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		have     state.Property
+		want     state.Property
+		minLines int
+	}{
+		{"safe pair", state.Property{ID: "p1", Type: "number", Format: "number"},
+			state.Property{Type: "rich_text"}, 1},
+		{"refused pair", state.Property{ID: "p1", Type: "title"},
+			state.Property{Type: "rich_text"}, 1},
+		{"measured pair", state.Property{ID: "p1", Type: "rich_text"},
+			state.Property{Type: "select", Options: []state.Option{{Name: "Un"}}}, 2},
+		{"pair dropping options", state.Property{ID: "p1", Type: "select", Options: []state.Option{
+			{ID: "o1", Name: "Haute"}, {ID: "o2", Name: "Basse"}}},
+			state.Property{Type: "multi_select", Options: []state.Option{{Name: "Haute"}}}, 3},
+	} {
+		actual := state.Database{
+			ID: "db-1", DataSourceID: "ds-1", Name: "Tasks",
+			Properties: map[string]state.Property{"Prio": tc.have},
+		}
+		desired := state.Database{Properties: map[string]state.Property{"Prio": tc.want}}
+		res := CompareDatabase("tasks", &desired, &actual, &actual)
+
+		ds := res.Changeset.Details
+		if len(ds) < tc.minLines {
+			t.Fatalf("%s: details =\n%s\nwant at least %d lines", tc.name,
+				strings.Join(detailStrings(ds), "\n"), tc.minLines)
+		}
+		for _, d := range ds {
+			want := ""
+			if d.Target == `property "Prio"` {
+				want = tc.have.Type
+			}
+			if d.FromType != want {
+				t.Errorf("%s: %s %s: FromType = %q, want %q", tc.name, d.Op, d.Target, d.FromType, want)
+			}
+		}
+		if ds[0].Target != `property "Prio"` {
+			t.Errorf("%s: first line = %s %s, want the type change", tc.name, ds[0].Op, ds[0].Target)
+		}
+	}
+}
+
 // The line says what survives, measured: the user reads it to decide.
 func TestTypeChangeLineSaysWhatSurvives(t *testing.T) {
 	actual := state.Database{
