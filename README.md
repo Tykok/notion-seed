@@ -465,6 +465,11 @@ n'atteint jamais le prompt.
 Hors terminal, `apply` exige `--auto-approve` plutôt que de s'exécuter parce que
 personne ne répondait.
 
+Dans un terminal, une fin d'entrée au prompt — `Ctrl-D` — refuse elle aussi,
+avec son propre message : `confirmation interrompue (fin d'entrée) : rien n'a
+été appliqué`. Une entrée branchée sur `/dev/null` n'est pas un terminal, et
+réclame `--auto-approve`.
+
 | Flag | Défaut | Rôle |
 |---|---|---|
 | `--auto-approve` | `false` | applique sans demander confirmation (mode CI) |
