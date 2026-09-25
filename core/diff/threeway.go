@@ -127,25 +127,45 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 
 // withheldReason says why a resource cannot be written, or "" if it can be.
 //
-// A single cause today, measured twice: a `migration required` line is not
-// expressible in the API. An option rename returns 200 without changing
-// anything; an option color returns 400 and fails the whole PATCH. In the
-// first case, writing would record in the state a name Notion does not hold,
-// and every following run would show phantom drift.
+// Two causes, both measured: a `migration required` line is not expressible
+// in the API. An option rename returns 200 without changing anything; an
+// option color returns 400 and fails the whole PATCH — and writing the first
+// would record in the state a name Notion does not hold, so every following
+// run would show phantom drift. The type of a title property cannot change
+// either way: 400, measured on 2026-09-25.
 //
 // It is NOT a safety refusal: notion-seed refuses nothing on the strength of a
 // class, it measures and it says. It is a limit of the API, named as such,
 // with its procedure.
 func withheldReason(ds []resources.Detail) string {
+	var option, title bool
 	for _, d := range ds {
-		if d.Class == change.ClassMigration {
-			return "an option must be migrated by hand: the API can neither rename " +
-				"an option nor change its color\n" +
-				"  → create the new option in Notion, move the rows " +
-				"counted above to it, remove the old one, then rerun"
+		if d.Class != change.ClassMigration {
+			continue
+		}
+		// Two inexpressible changes carry the class, and they are not fixed
+		// the same way: a refused type change is on a property line, an option
+		// migration on an option line.
+		if strings.HasPrefix(d.Target, "property ") {
+			title = true
+		} else {
+			option = true
 		}
 	}
-	return ""
+	var reasons []string
+	if option {
+		reasons = append(reasons, "an option must be migrated by hand: the API can neither rename "+
+			"an option nor change its color\n"+
+			"  → create the new option in Notion, move the rows "+
+			"counted above to it, remove the old one, then rerun")
+	}
+	if title {
+		reasons = append(reasons, "the API refuses to change the type of a title property, "+
+			"in either direction\n"+
+			"  → add a new property of the wanted type, copy the values into it "+
+			"in Notion, then remove the type change from the YAML and rerun")
+	}
+	return strings.Join(reasons, "\n")
 }
 
 // updateTarget resolves the exact state the database will have after the
@@ -358,33 +378,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		}
 
 		if want.Type != have.Type {
-			// The measured table is enough to classify; the count of non-empty
-			// values will specify the extent.
-			class := change.ClassifyTypeChange(have.Type, want.Type)
-			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), class)
-			d.Property = name
-			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
-			// A pair the table says is SAFE (select→multi_select,
-			// number→rich_text, date→rich_text) requires no
-			// measurement: the count would change neither its class nor the
-			// decision, and notion-seed would pay an API call for a number that
-			// says nothing. Not paying for calls for nothing is a property of the
-			// product, not an optimization.
-			//
-			// Safe for the values whose name comes back, not for the others:
-			// those are announced and measured one by one by
-			// retypedRemovalLines, one removal line per option.
-			if class != change.ClassSafe {
-				d.Measure = &resources.Measurement{
-					Property:     name,
-					PropertyType: have.Type,
-				}
-			}
-			out = append(out, d)
-			// A type change re-creates the options: all the YAML's go out new,
-			// with no id, exactly as under a new property.
-			out = append(out, newOptionLines(name, newProperty(want).Options)...)
-			out = append(out, retypedRemovalLines(name, want, have)...)
+			out = append(out, typeChangeLines(name, want, have)...)
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
@@ -396,6 +390,49 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		out = append(out, optionLines(name, want, have, applied.Properties[name])...)
 	}
 	return out
+}
+
+// typeChangeLines announces a property type change: the line itself, with
+// what the measured table says survives, then the options the write re-creates
+// and those it drops.
+func typeChangeLines(name string, want, have state.Property) []resources.Detail {
+	var declared []string
+	for _, o := range want.Options {
+		declared = append(declared, o.Name)
+	}
+	tc := change.TypeChangeOf(have.Type, want.Type, declared)
+	d := resources.NewDetail("~", fmt.Sprintf("property %q", name), tc.Class)
+	d.Property = name
+	d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
+	if tc.Note != "" {
+		d.Note += ": " + tc.Note
+	}
+	// Refused by the API (title, measured on 2026-09-25): nothing will be
+	// written, so there is nothing to count and no option to announce. The
+	// migration class withholds the resource; withheldReason names the way
+	// out.
+	if tc.Refused {
+		return []resources.Detail{d}
+	}
+	// A pair the table says is SAFE requires no measurement: the count would
+	// change neither its class nor the decision, and notion-seed would pay an
+	// API call for a number that says nothing. Not paying for calls for
+	// nothing is a property of the product, not an optimization.
+	//
+	// Safe for the values whose name comes back, not for the others: those
+	// are announced and measured one by one by retypedRemovalLines, one
+	// removal line per option.
+	if tc.Class != change.ClassSafe {
+		d.Measure = &resources.Measurement{
+			Property:     name,
+			PropertyType: have.Type,
+		}
+	}
+	out := []resources.Detail{d}
+	// A type change re-creates the options: all the YAML's go out new, with
+	// no id, exactly as under a new property.
+	out = append(out, newOptionLines(name, newProperty(want).Options)...)
+	return append(out, retypedRemovalLines(name, want, have)...)
 }
 
 // pairing is the result of pairing the declared options with the remote
