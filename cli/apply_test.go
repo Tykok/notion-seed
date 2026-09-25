@@ -253,6 +253,9 @@ func TestApplyRefusesOnAnythingButTheWord(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Execute() error = nil, want un refus pour %q\n%s", answer, out)
 			}
+			if !strings.Contains(err.Error(), "« apply »") {
+				t.Errorf("message = %q, il doit citer « apply » comme le prompt", err.Error())
+			}
 			if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
 				t.Error("un state a été écrit alors que la confirmation a été refusée")
 			}
@@ -356,6 +359,10 @@ func TestApplyRefusesWithoutTTYAndWithoutAutoApprove(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--auto-approve") {
 		t.Errorf("message = %q, il doit nommer --auto-approve", err.Error())
+	}
+	// Le mot à taper s'écrit comme le prompt l'affiche : « apply ».
+	if !strings.Contains(err.Error(), "« apply »") {
+		t.Errorf("message = %q, il doit citer « apply » entre guillemets français", err.Error())
 	}
 	if _, serr := os.Stat(filepath.Join(dir, state.FileName)); !os.IsNotExist(serr) {
 		t.Error("un state a été écrit sans confirmation possible")
