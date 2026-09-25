@@ -59,7 +59,8 @@ func TestTypeChangeOfUsesTheMeasuredClasses(t *testing.T) {
 		{"date", "rich_text", ClassSafe},
 		{"status", "select", ClassDestructive},
 		{"multi_select", "select", ClassSilentRewrite},
-		{"rich_text", "number", ClassSilentRewrite},
+		// Re-measured on 2026-09-25: values are emptied, not only rewritten.
+		{"rich_text", "number", ClassDestructive},
 		{"checkbox", "number", ClassDestructive},
 		// 2026-09-25.
 		{"rich_text", "url", ClassSafe},
@@ -67,7 +68,9 @@ func TestTypeChangeOfUsesTheMeasuredClasses(t *testing.T) {
 		{"checkbox", "rich_text", ClassSafe},
 		{"date", "url", ClassDestructive},
 		{"status", "rich_text", ClassDestructive},
-		{"url", "number", ClassSilentRewrite},
+		{"url", "number", ClassDestructive},
+		{"select", "number", ClassDestructive},
+		{"multi_select", "number", ClassDestructive},
 		{"rich_text", "select", ClassDestructive},
 		{"people", "checkbox", ClassDestructive},
 		// Toward status, every row — empty ones included — gets a value.
@@ -115,7 +118,9 @@ func TestTypeChangeOfDependsOnTheDeclaredOptions(t *testing.T) {
 	}{
 		{"rich_text", "select", []string{"Un"}, ClassSilentRewrite},
 		{"rich_text", "multi_select", []string{"Un"}, ClassSilentRewrite},
-		{"url", "select", []string{"https://a.example"}, ClassSilentRewrite},
+		// url: the comma cut was never measured; unmatched values are emptied.
+		{"url", "select", []string{"https://a.example"}, ClassDestructive},
+		{"url", "multi_select", []string{"https://a.example"}, ClassDestructive},
 		{"number", "select", []string{"7"}, ClassDestructive},
 		// Nothing survives from date or people, even with a homonymous option.
 		{"date", "select", []string{"2026-01-15"}, ClassDestructive},

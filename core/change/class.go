@@ -25,8 +25,10 @@ const (
 	ClassMigration
 
 	// ClassDestructive: removing a select or multi_select option, deleting a
-	// property, changing a type. The data is lost, but no false value is
-	// written.
+	// property, changing a type. The data is lost. Toward number, the
+	// conversion also keeps the leading number of some texts ('2026-01-15' →
+	// 2026): measured destructive on 2026-09-25, since values are emptied, and
+	// the note on the plan line names the rewritten ones.
 	//
 	// select and multi_select share the class, NOT the behaviour, and the
 	// rendering tells them apart: measured on 2026-09-24, a removed select
