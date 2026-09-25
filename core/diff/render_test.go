@@ -1069,3 +1069,34 @@ func TestImpactCountsTheRowsOfDestroyedDatabases(t *testing.T) {
 		}
 	}
 }
+
+// Un compte qui ne couvre qu'un des data sources d'une database est un minorant,
+// et la ligne comme l'agrégat le disent.
+func TestRenderSaysAtLeastWhenSomeDataSourcesWereNotCounted(t *testing.T) {
+	partial := destroyOf("b", 3, false)
+	partial.Details[0].Measure.UncountedDataSources = 1
+	p := &Plan{ToDestroy: 1, Changes: []Change{partial}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"→ au moins 3 ligne(s) partent à la corbeille avec elle : 1 de ses 2 data sources n'a pas été compté.",
+		"Impact : 1 database(s) à la corbeille avec au moins 3 ligne(s).",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("sortie:\n%s\nwant %q", b.String(), want)
+		}
+	}
+
+	capped := destroyOf("b", 300, true)
+	capped.Details[0].Measure.UncountedDataSources = 2
+	if got, want := consequence(capped.Details[0]),
+		"plus de 300 ligne(s) partent à la corbeille avec elle : 2 de ses 3 data sources n'ont pas été comptés"; got != want {
+		t.Errorf("consequence = %q, want %q", got, want)
+	}
+	if got, want := Impact(&Plan{Changes: []Change{capped, destroyOf("a", 2, false)}}),
+		"Impact : 2 database(s) à la corbeille avec plus de 302 ligne(s)."; got != want {
+		t.Errorf("Impact = %q, want %q", got, want)
+	}
+}

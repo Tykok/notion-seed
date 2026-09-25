@@ -328,15 +328,35 @@ func consequence(d resources.Detail) string {
 // destroyedRows dit combien de lignes une database mise à la corbeille emporte.
 // Non mesuré — comptage refusé, épuisé ou incompris —, il le dit : se taire
 // rendrait la ligne indiscernable d'une database vide.
+//
+// Un compte qui ne couvre qu'un des data sources de la database est un
+// minorant : la ligne le dit, et nomme combien n'ont pas été comptés.
 func destroyedRows(d resources.Detail) string {
-	switch {
-	case d.Count < 0:
+	if d.Count < 0 {
 		return "nombre de lignes qui partent à la corbeille avec elle non mesuré ; " +
 			"relancez pour l'obtenir"
-	case d.Count == 0:
-		return "aucune ligne ne part à la corbeille avec elle"
 	}
-	return bound(d.Count, d.Capped) + " ligne(s) partent à la corbeille avec elle"
+	other := d.Measure.UncountedDataSources
+	if other == 0 {
+		if d.Count == 0 {
+			return "aucune ligne ne part à la corbeille avec elle"
+		}
+		return bound(d.Count, d.Capped) + " ligne(s) partent à la corbeille avec elle"
+	}
+	missing := fmt.Sprintf("%d de ses %d data sources n'a pas été compté", other, other+1)
+	if other > 1 {
+		missing = fmt.Sprintf("%d de ses %d data sources n'ont pas été comptés", other, other+1)
+	}
+	if d.Count == 0 {
+		return "aucune ligne sur le data source compté : " + missing
+	}
+	// Plafonné, le compte est déjà un minorant et le dit (« plus de ») ;
+	// « au moins plus de » n'ajouterait rien.
+	count := "au moins " + bound(d.Count, false)
+	if d.Capped {
+		count = bound(d.Count, true)
+	}
+	return count + " ligne(s) partent à la corbeille avec elle : " + missing
 }
 
 // removalFate dit de quel type le sort des lignes suit, pour une option qui
@@ -464,7 +484,9 @@ func impactOf(changes []Change) string {
 // total connu devient un minorant.
 type trashedRows struct {
 	databases, rows, unknown int
-	capped                   bool
+	// capped : un terme est plafonné. partial : un terme ne couvre pas tous
+	// les data sources de sa database. Les deux font du total un minorant.
+	capped, partial bool
 }
 
 func (t *trashedRows) add(c Change) {
@@ -473,6 +495,7 @@ func (t *trashedRows) add(c Change) {
 		if d.Measure != nil && d.Measure.AllRows && d.Count >= 0 {
 			t.rows += d.Count
 			t.capped = t.capped || d.Capped
+			t.partial = t.partial || d.Measure.UncountedDataSources > 0
 			return
 		}
 	}
@@ -488,6 +511,9 @@ func (t trashedRows) String() string {
 	case t.unknown > 0:
 		return fmt.Sprintf("%s avec au moins %d ligne(s), lignes non comptées pour %d d'entre elles",
 			head, t.rows, t.unknown)
+	}
+	if t.partial && !t.capped {
+		return fmt.Sprintf("%s avec au moins %d ligne(s)", head, t.rows)
 	}
 	return head + " avec " + bound(t.rows, t.capped) + " ligne(s)"
 }

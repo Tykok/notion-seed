@@ -96,6 +96,7 @@ func RemoteDatabaseFromJSON(dbBody, dsBody []byte) (resources.RemoteDatabase, er
 		Name:        firstPlainText(ds.Title),
 		Properties:  make(map[string]resources.RemoteProperty, len(ds.Properties)),
 	}
+	out.DataSourceCount = len(db.DataSources)
 	if len(db.DataSources) > 0 {
 		out.DataSourceID = db.DataSources[0].ID
 		if out.Name == "" {

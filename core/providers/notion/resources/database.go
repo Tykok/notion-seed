@@ -53,6 +53,11 @@ type RemoteDatabase struct {
 	Properties map[string]RemoteProperty
 	Archived   bool
 	Found      bool
+	// DataSourceCount est le nombre de data sources que la database porte. Le
+	// MVP n'en lit qu'un, DataSourceID, mais une mise à la corbeille les emporte
+	// tous : sans ce nombre, le compte de lignes d'une destruction se lirait
+	// comme complet alors qu'il ne couvre qu'un data source.
+	DataSourceCount int
 }
 
 func (d RemoteDatabase) Exists() bool { return d.Found }
