@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
 
@@ -255,6 +256,10 @@ func consequence(d resources.Detail) string {
 		// Announcing "rerun" here would announce a corrective action that will
 		// never come.
 		if d.Unmeasurable {
+			// A type change with no sound filter names why, measured.
+			if d.Measure.Caveat != "" {
+				return "actual impact unknown: " + d.Measure.Caveat
+			}
 			return fmt.Sprintf(
 				"actual impact unknown: notion-seed cannot count the rows "+
 					"of a %s property", d.Measure.PropertyType)
@@ -264,6 +269,12 @@ func consequence(d resources.Detail) string {
 		return "impact not measured; rerun online to get it"
 	}
 	if d.Count == 0 {
+		// A lower bound of zero proves nothing: the line says what the filter
+		// cannot see, rather than "0 rows affected".
+		if d.Measure.Option == "" && d.Measure.Bound == change.BoundAtLeast {
+			return withCaveat("no rows counted, which does not mean none is touched",
+				d.Measure.Caveat)
+		}
 		return "0 rows affected"
 	}
 	// On ONE measurement, the count really is a number of distinct rows: one
@@ -287,6 +298,8 @@ func consequence(d resources.Detail) string {
 	// afford.
 	if d.Measure.Option != "" {
 		switch removalFate(*d.Measure) {
+		case "retyped-status":
+			return count + " will be reassigned to the first declared option, without a trace"
 		case "status":
 			return count + " will be reassigned to another option, without a trace"
 		case "multi_select":
@@ -310,18 +323,42 @@ func consequence(d resources.Detail) string {
 			return count + " will be emptied"
 		}
 	}
-	// Type change: the count is that of NON-EMPTY values, hence an upper bound
-	// of what will actually be lost.
+	return typeChangeConsequence(d)
+}
+
+// typeChangeConsequence says what a type change costs, with the bound its
+// filter gives: exact, at least, up to. Each bound names its cause — the
+// caveat measured on 2026-09-25 —, because "at least 3" and "up to 3" are not
+// decided the same way.
+func typeChangeConsequence(d resources.Detail) string {
+	m := d.Measure
+	fate := "will lose their value"
 	if d.Class == ClassSilentRewrite {
-		// Capped, this upper bound itself becomes a lower bound: "up to more
-		// than 300" bounds from above what precisely can no longer be bounded.
-		// We then state the measured floor, and own not knowing the ceiling.
-		if d.Capped {
-			return count + " non-empty, an unmeasured number of which will be degraded, without a trace"
-		}
-		return "up to " + count + " degraded, without a trace"
+		fate = "will be rewritten or emptied, without a trace"
 	}
-	return count + " non-empty in this column"
+	switch {
+	case d.Capped && m.Bound == change.BoundAtMost:
+		// Capped, an upper bound becomes a lower bound of an upper bound: "up
+		// to more than 300" bounds from above what precisely can no longer be
+		// bounded. We then state the measured floor, and own not knowing the
+		// ceiling.
+		return withCaveat(fmt.Sprintf("more than %d rows carry a value, an unmeasured "+
+			"number of which %s", d.Count, fate), m.Caveat)
+	case d.Capped:
+		return withCaveat(fmt.Sprintf("more than %d rows %s", d.Count, fate), m.Caveat)
+	case m.Bound == change.BoundAtLeast:
+		return withCaveat(fmt.Sprintf("at least %d rows %s", d.Count, fate), m.Caveat)
+	case m.Bound == change.BoundAtMost:
+		return withCaveat(fmt.Sprintf("up to %d rows %s", d.Count, fate), m.Caveat)
+	}
+	return withCaveat(fmt.Sprintf("%d rows %s", d.Count, fate), m.Caveat)
+}
+
+func withCaveat(s, caveat string) string {
+	if caveat == "" {
+		return s
+	}
+	return s + ": " + caveat
 }
 
 // destroyedRows says how many rows a database moved to the trash takes with
@@ -360,11 +397,15 @@ func destroyedRows(d resources.Detail) string {
 }
 
 // removalFate says which type the fate of the rows follows, for an option
-// that goes away. It is the old type, except when the option disappears with
-// a type change from status: it is then treated as a select, a loss.
-// Only select → multi_select was measured (2026-09-25); the other pairs are
-// treated as destructive out of caution, without their fate being observed.
+// that goes away. It is the old type, except under a type change: toward
+// status the row is reassigned, and from status toward select or multi_select
+// it is treated as a select, a loss (measured on 2026-09-25).
 func removalFate(m resources.Measurement) string {
+	// Measured on 2026-09-25: toward status, a value whose option is not
+	// redeclared gets the first declared option.
+	if m.Retyped && m.TargetType == "status" {
+		return "retyped-status"
+	}
 	if m.Retyped && m.PropertyType == "status" {
 		return "select"
 	}
@@ -374,15 +415,14 @@ func removalFate(m resources.Measurement) string {
 // Impact aggregates the measured counts into one sentence. It is the product
 // in one line: the one figure nobody else can give.
 //
-// It NEVER adds up two different families. The count says how many rows are
-// non-empty on a column that changes type; it does not say how many hold
-// several values, hence how many will really lose something. Hence "up to N"
-// on one side and a firm count on the other: a false figure here would ruin
-// the product's one argument.
+// It NEVER adds up two different families: reassigned, lost, degraded. And
+// each family is only as firm as its vaguest term: a type change's count can
+// be a lower bound ("at least N") or an upper bound ("up to N"), and a false
+// figure here would ruin the product's one argument.
 //
-// A capped count contaminates its family, and only it: a sum with one term
-// that is a lower bound is a lower bound, but the cap of one does not make the
-// other vaguer than it is.
+// A bound contaminates its family, and only it: a sum with one term that is a
+// lower bound is a lower bound, but the cap of one does not make the other
+// vaguer than it is.
 //
 // These totals count VALUES, not distinct rows, and say so. Each count is a
 // number of rows for ITS measurement, but two measurements of the same
@@ -414,8 +454,7 @@ func WritableImpact(p *Plan) string {
 // aggregation rule, two scopes. Two rules would end up diverging, and plan and
 // apply would end up announcing two different costs for the same write.
 func impactOf(changes []Change) string {
-	reassigned, lost, weakened := 0, 0, 0
-	var reassignedCapped, lostCapped, weakenedCapped bool
+	var reassigned, lost, weakened family
 	var trash trashedRows
 	for _, c := range changes {
 		if c.Kind == resources.KindDestroy {
@@ -433,39 +472,28 @@ func impactOf(changes []Change) string {
 			if d.Class == ClassMigration {
 				continue
 			}
-			switch {
-			case d.Measure.Option != "" && removalFate(*d.Measure) == "status":
-				reassigned += d.Count
-				reassignedCapped = reassignedCapped || d.Capped
+			switch fate := removalFate(*d.Measure); {
+			case d.Measure.Option != "" && (fate == "status" || fate == "retyped-status"):
+				reassigned.add(d)
 			case d.Measure.Option != "":
-				lost += d.Count
-				lostCapped = lostCapped || d.Capped
+				lost.add(d)
 			case d.Class == ClassSilentRewrite:
-				weakened += d.Count
-				weakenedCapped = weakenedCapped || d.Capped
+				weakened.add(d)
+			case d.Class == ClassDestructive:
+				lost.add(d)
 			}
 		}
 	}
 
 	var parts []string
-	if reassigned > 0 {
-		parts = append(parts, fmt.Sprintf("%s values reassigned without a trace",
-			bound(reassigned, reassignedCapped)))
+	if reassigned.sum > 0 {
+		parts = append(parts, reassigned.String()+" values reassigned without a trace")
 	}
-	if lost > 0 {
-		parts = append(parts, fmt.Sprintf("%s values lost",
-			bound(lost, lostCapped)))
+	if lost.sum > 0 {
+		parts = append(parts, lost.String()+" values lost")
 	}
-	if weakened > 0 {
-		// Not capped, the count of non-empty values bounds from above what
-		// will be lost. Capped, it no longer bounds anything from above: "up
-		// to" can no longer be said, and the measured floor lives on the detail
-		// line.
-		if weakenedCapped {
-			parts = append(parts, "an unmeasured number of values degraded without a trace")
-		} else {
-			parts = append(parts, fmt.Sprintf("up to %d values degraded without a trace", weakened))
-		}
+	if weakened.sum > 0 {
+		parts = append(parts, weakened.String()+" values degraded without a trace")
 	}
 	if trash.databases > 0 {
 		parts = append(parts, trash.String())
@@ -474,6 +502,45 @@ func impactOf(changes []Change) string {
 		return ""
 	}
 	return "Impact: " + strings.Join(parts, ", ") + "."
+}
+
+// family sums the counts of one family, and remembers how each term bounds
+// what it counts. A sum is only as firm as its vaguest term: one lower bound
+// makes it a lower bound, one upper bound an upper bound, and both at once
+// bound nothing.
+type family struct {
+	sum int
+	// capped: a term hit the pagination cap. atLeast: a term's filter can miss
+	// rows. atMost: a term's filter can count rows that survive.
+	capped, atLeast, atMost bool
+}
+
+func (f *family) add(d resources.Detail) {
+	f.sum += d.Count
+	switch {
+	case d.Capped && d.Measure.Bound == change.BoundAtMost:
+		// A capped upper bound bounds nothing: both flags.
+		f.atLeast, f.atMost = true, true
+	case d.Capped:
+		f.capped = true
+	case d.Measure.Bound == change.BoundAtLeast:
+		f.atLeast = true
+	case d.Measure.Bound == change.BoundAtMost:
+		f.atMost = true
+	}
+}
+
+func (f family) String() string {
+	lower := f.capped || f.atLeast
+	switch {
+	case lower && f.atMost:
+		return "an unmeasured number of"
+	case f.atMost:
+		return fmt.Sprintf("up to %d", f.sum)
+	case f.atLeast:
+		return fmt.Sprintf("at least %d", f.sum)
+	}
+	return bound(f.sum, f.capped)
 }
 
 // trashedRows aggregates the databases moved to the trash and the rows they

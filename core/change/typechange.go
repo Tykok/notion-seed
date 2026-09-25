@@ -2,6 +2,51 @@
 
 package change
 
+import "strconv"
+
+// Count names the rows a type change touches, as a filter on the SOURCE
+// column — counting happens before the write.
+//
+// The zero value is CountNonEmpty, the historical request: the non-empty
+// values of the column.
+type Count int
+
+const (
+	// CountNonEmpty: `is_not_empty` on the source; with Except, the rows whose
+	// value is not one of those names.
+	CountNonEmpty Count = iota
+	// CountChecked: `checkbox equals true`.
+	CountChecked
+	// CountUnchecked: `checkbox equals false`.
+	CountUnchecked
+	// CountEmpty: `is_empty` on the source — the rows that will RECEIVE a
+	// value they never had.
+	CountEmpty
+	// CountEveryRow: every row, empty ones included; with Except, every row
+	// whose value is not one of those names.
+	CountEveryRow
+	// CountUnsound: rows are affected, and no filter isolates them. Nothing
+	// is sent: a made-up filter would pass a guess off as a measurement.
+	CountUnsound
+)
+
+// Bound says how a count relates to the rows the change really touches.
+type Bound int
+
+const (
+	// BoundExact: the filter counts exactly the rows touched.
+	BoundExact Bound = iota
+	// BoundAtLeast: the filter can miss rows that are touched. A zero count
+	// proves nothing, and must never make the change safe.
+	BoundAtLeast
+	// BoundAtMost: the filter can count rows that survive the conversion.
+	BoundAtMost
+)
+
+// maxExcept caps the option names a filter excludes. Beyond, the compound
+// filter grows past what was ever sent to the API.
+const maxExcept = 50
+
 // TypeChange is what notion-seed knows about a property type change, before
 // any count.
 type TypeChange struct {
@@ -14,7 +59,37 @@ type TypeChange struct {
 	// Note says, in a few words, what survives the conversion. It is the
 	// measured behavior, not a guess, and the plan shows it on the line.
 	Note string
+
+	// Count, Bound, Except and Caveat say how to count the rows the change
+	// touches. They mean nothing on a safe or refused change, which is not
+	// counted.
+	Count Count
+	Bound Bound
+	// Except lists the declared option names whose rows survive: they are
+	// excluded from the count.
+	Except []string
+	// Caveat says why the count is a bound, or why it cannot be taken. The
+	// plan shows it next to the figure.
+	Caveat string
 }
+
+// Caveats, stated once.
+const (
+	caveatBlank = "text made only of spaces or line breaks is not counted, " +
+		"and is lost too"
+	caveatCase = "a value that differs from a declared option only by case " +
+		"may not be counted"
+	caveatParse     = "some values survive the conversion"
+	caveatUnchecked = "unchecked rows are emptied too, which loses nothing they held"
+	caveatEveryRow  = "every row, empty ones included"
+	caveatStatus    = "a row that never received a status reads as the default " +
+		"option, is emptied too, and no filter isolates it"
+	caveatTextParse = "no filter separates the text that survives the " +
+		"conversion from the rest"
+	caveatEmpty = "empty rows receive an option; the values whose option is " +
+		"not redeclared are counted on their own lines"
+	caveatManyOptions = "too many options are declared to build the filter"
+)
 
 // entry is one measured pair.
 //
@@ -232,8 +307,96 @@ func TypeChangeOf(from, to string, declared []string) TypeChange {
 		case to == "status" && yes && no:
 			tc.Class = ClassSafe
 		}
+		tc.Count, tc.Caveat = CountChecked, caveatUnchecked
+		if to == "status" {
+			switch {
+			case yes:
+				tc.Count, tc.Caveat = CountUnchecked, ""
+			case no:
+				tc.Count, tc.Caveat = CountChecked, ""
+			default:
+				tc.Count, tc.Caveat = CountEveryRow, caveatEveryRow
+			}
+		}
+		return tc
 	}
+	countFor(&tc, from, to, declared)
 	return tc
+}
+
+// countFor fills in how to count a type change, from the 2026-09-25
+// campaign's filters. See the design note: a filter is used only where it is
+// sound, with the bound it really gives.
+func countFor(tc *TypeChange, from, to string, declared []string) {
+	except := exceptFor(from, declared)
+	// rich_text: `is_not_empty` misses text made only of spaces or line
+	// breaks, which is lost too. Any such count is a lower bound.
+	blank := from == "rich_text"
+
+	switch {
+	case to == "status":
+		switch from {
+		case "select":
+			tc.Count, tc.Caveat = CountEmpty, caveatEmpty
+		case "multi_select":
+			tc.Count, tc.Bound, tc.Caveat = CountEveryRow, BoundAtMost,
+				"a row holding a single value whose option is declared keeps it"
+		case "rich_text", "url", "number":
+			tc.Count, tc.Except, tc.Caveat = CountEveryRow, except, caveatEveryRow
+			// is_empty counts blank text: only case can escape the filter.
+			if len(except) > 0 && from != "number" {
+				tc.Bound, tc.Caveat = BoundAtLeast, caveatEveryRow+"; "+caveatCase
+			}
+		default:
+			tc.Count, tc.Caveat = CountEveryRow, caveatEveryRow
+		}
+	case from == "status" && to != "number" && to != "date" && to != "checkbox" && to != "people":
+		tc.Count, tc.Caveat = CountUnsound, caveatStatus
+	case from == "rich_text" && (to == "number" || to == "date"):
+		tc.Count, tc.Caveat = CountUnsound, caveatTextParse
+	case to == "number" || to == "date":
+		if from == "url" || from == "select" || from == "multi_select" {
+			tc.Bound, tc.Caveat = BoundAtMost, caveatParse
+		}
+	case to == "select" || to == "multi_select":
+		switch from {
+		case "multi_select":
+			tc.Bound, tc.Caveat = BoundAtMost, "rows holding a single value keep it"
+		case "rich_text", "url", "number":
+			tc.Except = except
+			if len(except) > 0 && from != "number" {
+				tc.Bound, tc.Caveat = BoundAtLeast, caveatCase
+			}
+		}
+	}
+	if blank && tc.Count == CountNonEmpty {
+		tc.Bound = BoundAtLeast
+		if tc.Caveat == "" {
+			tc.Caveat = caveatBlank
+		} else {
+			tc.Caveat = caveatBlank + "; " + tc.Caveat
+		}
+	}
+	if len(tc.Except) > maxExcept {
+		tc.Count, tc.Except, tc.Caveat = CountUnsound, nil, caveatManyOptions
+	}
+}
+
+// exceptFor keeps the declared names a value of the source type can match.
+// A number converts to its shortest decimal writing ('7', '-3.5', '1000000'),
+// so only a name written that way can hold it.
+func exceptFor(from string, declared []string) []string {
+	if from != "number" {
+		return declared
+	}
+	var out []string
+	for _, n := range declared {
+		if v, err := strconv.ParseFloat(n, 64); err == nil &&
+			strconv.FormatFloat(v, 'f', -1, 64) == n {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func contains(names []string, name string) bool {

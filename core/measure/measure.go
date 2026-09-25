@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
@@ -48,12 +50,17 @@ var ErrUnreadableCount = errors.New("misunderstood count response")
 // AllRows counts every row of the data source, without a filter: it is what a
 // destruction takes with it. Property, PropertyType and Option are then
 // ignored.
+//
+// Count and Except describe a type change's count, when Option is empty: see
+// change.Count. The zero Count is the non-empty values of the column.
 type Request struct {
 	DataSourceID string
 	Property     string
 	PropertyType string
 	Option       string
 	AllRows      bool
+	Count        change.Count
+	Except       []string
 }
 
 // fallback says what the plan will show without a count. It differs for a
@@ -98,11 +105,15 @@ func NewCounter(tr transport.Transport) *NotionCounter {
 
 var _ Counter = (*NotionCounter)(nil)
 
-// filterFor builds the filter matching the property type.
+// filterFor builds the filter matching the property type. A nil filter with
+// no error counts every row.
 //
 // Measured on 2026-09-24: select and status filter with `equals`, multi_select
 // with `contains`. The shape MUST match the type, otherwise 400.
 func filterFor(r Request) (map[string]any, error) {
+	if r.Option == "" {
+		return typeChangeFilter(r)
+	}
 	var op string
 	switch r.PropertyType {
 	case "select", "status":
@@ -110,26 +121,96 @@ func filterFor(r Request) (map[string]any, error) {
 	case "multi_select":
 		op = "contains"
 	default:
-		return nil, fmt.Errorf("%w: %q\n"+
-			"  → notion-seed cannot count the rows of this type; the impact "+
-			"will be announced as unknown rather than guessed",
-			ErrUnsupportedFilter, r.PropertyType)
-	}
-
-	cond := map[string]any{op: r.Option}
-	if r.Option == "" {
-		cond = map[string]any{"is_not_empty": true}
+		return nil, unsupported(r.PropertyType)
 	}
 	return map[string]any{
 		"property":     r.Property,
-		r.PropertyType: cond,
+		r.PropertyType: map[string]any{op: r.Option},
 	}, nil
+}
+
+func unsupported(propType string) error {
+	return fmt.Errorf("%w: %q\n"+
+		"  → notion-seed cannot count the rows of this type; the impact "+
+		"will be announced as unknown rather than guessed",
+		ErrUnsupportedFilter, propType)
+}
+
+// emptiable lists the source types whose rows filter with `is_empty` and
+// `is_not_empty`. checkbox has no empty state, and title never changes type.
+var emptiable = map[string]bool{
+	"rich_text": true, "number": true, "url": true, "select": true,
+	"status": true, "multi_select": true, "date": true, "people": true,
+}
+
+// typeChangeFilter builds the count of a type change, per the filters the
+// 2026-09-25 campaign checked against the rows actually touched.
+func typeChangeFilter(r Request) (map[string]any, error) {
+	on := func(cond map[string]any) map[string]any {
+		return map[string]any{"property": r.Property, r.PropertyType: cond}
+	}
+	switch r.Count {
+	case change.CountChecked, change.CountUnchecked:
+		if r.PropertyType != "checkbox" {
+			return nil, unsupported(r.PropertyType)
+		}
+		return on(map[string]any{"equals": r.Count == change.CountChecked}), nil
+	case change.CountUnsound:
+		return nil, unsupported(r.PropertyType)
+	}
+	if !emptiable[r.PropertyType] {
+		return nil, unsupported(r.PropertyType)
+	}
+
+	switch r.Count {
+	case change.CountEmpty:
+		return on(map[string]any{"is_empty": true}), nil
+	case change.CountEveryRow:
+		// No filter at all — not even an empty one, whose API behavior has not
+		// been measured.
+		if len(r.Except) == 0 {
+			return nil, nil
+		}
+		// An empty row gets a value too: it is counted apart, since whether
+		// `does_not_equal` matches an empty value was not measured.
+		rest, err := exceptFilter(r, on)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"or": []any{on(map[string]any{"is_empty": true}), rest}}, nil
+	case change.CountNonEmpty:
+		if len(r.Except) == 0 {
+			return on(map[string]any{"is_not_empty": true}), nil
+		}
+		return exceptFilter(r, on)
+	}
+	return nil, unsupported(r.PropertyType)
+}
+
+// exceptFilter counts the non-empty rows whose value is none of r.Except.
+func exceptFilter(r Request, on func(map[string]any) map[string]any) (map[string]any, error) {
+	and := []any{on(map[string]any{"is_not_empty": true})}
+	for _, name := range r.Except {
+		var v any = name
+		if r.PropertyType == "number" {
+			f, err := strconv.ParseFloat(name, 64)
+			if err != nil {
+				return nil, fmt.Errorf("%w: option %q is not a number\n"+
+					"  → this is a notion-seed bug, not a configuration error: "+
+					"report it", ErrUnsupportedFilter, name)
+			}
+			v = f
+		}
+		and = append(and, on(map[string]any{"does_not_equal": v}))
+	}
+	return map[string]any{"and": and}, nil
 }
 
 // Count returns the number of rows affected, capped.
 func (c *NotionCounter) Count(ctx context.Context, r Request) (Result, error) {
 	// No filter at all for AllRows — not even an empty filter, whose API
-	// behavior has not been measured.
+	// behavior has not been measured. filterFor also returns none for a type
+	// change that touches every row.
 	var filter map[string]any
 	if !r.AllRows {
 		var err error

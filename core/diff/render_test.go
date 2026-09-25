@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/config"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 	"github.com/tykok/notion-seed/core/state"
@@ -543,7 +544,7 @@ func TestImpactSeparatesReassignedFromWeakened(t *testing.T) {
 			{Op: "-", Class: ClassSilentRewrite, Count: 47,
 				Measure: &resources.Measurement{PropertyType: "status", Option: "Annulé"}},
 			{Op: "~", Class: ClassSilentRewrite, Count: 230,
-				Measure: &resources.Measurement{PropertyType: "multi_select"}},
+				Measure: &resources.Measurement{PropertyType: "multi_select", Bound: change.BoundAtMost}},
 		},
 	}}}
 	got := Impact(p)
@@ -1094,5 +1095,107 @@ func TestRenderSaysAtLeastWhenSomeDataSourcesWereNotCounted(t *testing.T) {
 	if got, want := Impact(&Plan{Changes: []Change{capped, destroyOf("a", 2, false)}}),
 		"Impact: 2 database(s) in the trash with more than 302 row(s)."; got != want {
 		t.Errorf("Impact = %q, want %q", got, want)
+	}
+}
+
+// renderOne renders a plan holding a single detail.
+func renderOne(t *testing.T, d resources.Detail) string {
+	t.Helper()
+	p := &Plan{ToChange: 1, Changes: []Change{{
+		Resource: "database.tasks", Kind: resources.KindUpdate, Class: d.Class,
+		Details: []resources.Detail{d},
+	}}}
+	var b bytes.Buffer
+	if err := Render(&b, p); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// A type change's figure reads with its bound: exact, at least, up to. Each
+// says something different, and "at least" and "up to" name their cause.
+func TestRenderStatesTheBoundOfATypeChangeCount(t *testing.T) {
+	tests := []struct {
+		name string
+		d    resources.Detail
+		want string
+	}{
+		{"exact loss",
+			resources.Detail{Op: "~", Target: `property "N"`, Class: ClassDestructive, Count: 5,
+				Measure: &resources.Measurement{Property: "N", PropertyType: "date", TargetType: "number"}},
+			"→ 5 rows will lose their value."},
+		{"exact loss with its caveat",
+			resources.Detail{Op: "~", Target: `property "C"`, Class: ClassDestructive, Count: 2,
+				Measure: &resources.Measurement{Property: "C", PropertyType: "checkbox", TargetType: "number",
+					Count: change.CountChecked, Caveat: "unchecked rows are emptied too"}},
+			"→ 2 rows will lose their value: unchecked rows are emptied too."},
+		{"lower bound",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassDestructive, Count: 3,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "people",
+					Bound: change.BoundAtLeast, Caveat: "blank text is not counted"}},
+			"→ at least 3 rows will lose their value: blank text is not counted."},
+		{"lower bound of zero",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassDestructive, Count: 0,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "people",
+					Bound: change.BoundAtLeast, Caveat: "blank text is not counted"}},
+			"→ no rows counted, which does not mean none is touched: blank text is not counted."},
+		{"upper bound",
+			resources.Detail{Op: "~", Target: `property "U"`, Class: ClassSilentRewrite, Count: 12,
+				Measure: &resources.Measurement{Property: "U", PropertyType: "url", TargetType: "number",
+					Bound: change.BoundAtMost, Caveat: "some values survive the conversion"}},
+			"→ up to 12 rows will be rewritten or emptied, without a trace: some values survive the conversion."},
+		{"no sound filter",
+			resources.Detail{Op: "~", Target: `property "T"`, Class: ClassSilentRewrite, Count: -1, Unmeasurable: true,
+				Measure: &resources.Measurement{Property: "T", PropertyType: "rich_text", TargetType: "number",
+					Count: change.CountUnsound, Caveat: "no filter separates the text that survives"}},
+			"→ actual impact unknown: no filter separates the text that survives."},
+	}
+	for _, tt := range tests {
+		if got := renderOne(t, tt.d); !strings.Contains(got, tt.want) {
+			t.Errorf("%s: output:\n%s\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Toward status, an option that is not redeclared reassigns its rows to the
+// first declared option (measured on 2026-09-25): the line says so, and the
+// total files it with the reassignments.
+func TestRenderSaysAnOptionRetypedToStatusIsReassigned(t *testing.T) {
+	got := renderOne(t, resources.Detail{
+		Op: "-", Target: `option "Moyenne" (property "Prio")`, Class: ClassSilentRewrite, Count: 2,
+		Measure: &resources.Measurement{Property: "Prio", PropertyType: "select", Option: "Moyenne",
+			Retyped: true, TargetType: "status"},
+	})
+	if !strings.Contains(got, "2 rows will be reassigned to the first declared option, without a trace") {
+		t.Errorf("output:\n%s", got)
+	}
+	if !strings.Contains(got, "Impact: 2 values reassigned without a trace.") {
+		t.Errorf("output:\n%s\nthe total must count a reassignment", got)
+	}
+}
+
+// A destructive type change loses values: the total says so, with its bound.
+// Leaving it out would make the product's most-read line announce less than
+// the lines above it.
+func TestImpactCountsDestructiveTypeChangesWithTheirBound(t *testing.T) {
+	tests := []struct {
+		bounds []change.Bound
+		want   string
+	}{
+		{[]change.Bound{change.BoundExact, change.BoundExact}, "Impact: 8 values lost."},
+		{[]change.Bound{change.BoundExact, change.BoundAtLeast}, "Impact: at least 8 values lost."},
+		{[]change.Bound{change.BoundExact, change.BoundAtMost}, "Impact: up to 8 values lost."},
+		{[]change.Bound{change.BoundAtLeast, change.BoundAtMost}, "Impact: an unmeasured number of values lost."},
+	}
+	for _, tt := range tests {
+		var ds []resources.Detail
+		for _, b := range tt.bounds {
+			ds = append(ds, resources.Detail{Op: "~", Class: ClassDestructive, Count: 4,
+				Measure: &resources.Measurement{PropertyType: "date", Bound: b}})
+		}
+		got := Impact(&Plan{Changes: []Change{{Resource: "database.tasks", Details: ds}}})
+		if got != tt.want {
+			t.Errorf("bounds %v: Impact = %q, want %q", tt.bounds, got, tt.want)
+		}
 	}
 }
