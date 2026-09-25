@@ -642,7 +642,7 @@ func genericUpdateError(c diff.Change, err error, here, acquired string, dbWritt
 // possibly live database, which would become invisible to notion-seed:
 // neither declared, nor in the state.
 //
-// Run does not read Acknowledged: lifecycle.prevent_destroy is an
+// Run does not read Acknowledged: lifecycle.acknowledge_destroy is an
 // acknowledgement of the plan, not a ban on writing.
 func destroyOne(ctx context.Context, c diff.Change, rep *Report, snap *state.Snapshot, opts Options) error {
 	id := snap.Databases[c.Key].ID

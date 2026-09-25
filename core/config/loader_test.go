@@ -292,11 +292,11 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 			wantNotInMsg: []string{"delete"},
 		},
 		{
-			name: "lifecycle erases the safeguard",
-			content: "lifecycle:\n  prevent_destroy: []\n" +
+			name: "lifecycle replaces the acknowledgements",
+			content: "lifecycle:\n  acknowledge_destroy: []\n" +
 				"databases:\n  - key: z\n    name: \"Z\"\n    properties:\n      Name:\n        type: title\n",
 			section:      "lifecycle",
-			wantInMsg:    []string{"move", "erases the prevent_destroy safeguard"},
+			wantInMsg:    []string{"move", "silently replaces the acknowledgements"},
 			wantNotInMsg: []string{"delete"},
 		},
 		{
@@ -313,7 +313,7 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 			wantNotInMsg: []string{
 				"move",
 				"hijacks the write target",
-				"erases the prevent_destroy safeguard",
+				"silently replaces the acknowledgements",
 			},
 		},
 	}
@@ -349,7 +349,7 @@ func TestLoadRejectsGlobalSectionsInDatabaseFiles(t *testing.T) {
 	}
 }
 
-// The safeguard must not turn against workspace.yaml itself, which
+// The rule must not turn against workspace.yaml itself, which
 // legitimately holds all three sections.
 func TestLoadStillAcceptsGlobalSectionsInWorkspaceFile(t *testing.T) {
 	dir := writeConfig(t, map[string]string{

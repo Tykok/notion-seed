@@ -115,7 +115,7 @@
             "required": ["type"]
           },
           "then": {
-            "comment": "options is required and non-empty on status: a status property created with an empty list gets filled by the API with its own default options, which the plan never showed — and whose later removal is classified as a silent rewrite, which allow_data_loss does not unblock. select and multi_select do not have this constraint: their options can be managed by hand without risk of reassignment.",
+            "comment": "options is required and non-empty on status: a status property created with an empty list gets filled by the API with its own default options, which the plan never showed — and whose later removal is classified as a silent rewrite, which acknowledge_data_loss only acknowledges, it does not undo it. select and multi_select do not have this constraint: their options can be managed by hand without risk of reassignment.",
             "required": ["options"],
             "properties": {
               "options": {
