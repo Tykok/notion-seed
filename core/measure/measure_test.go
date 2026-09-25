@@ -422,3 +422,53 @@ func TestCountRefusesAnUnsoundTypeChangeCount(t *testing.T) {
 		}
 	}
 }
+
+// depth counts the nesting of compound filters: or/and inside or/and.
+func depth(v any) int {
+	switch x := v.(type) {
+	case map[string]any:
+		best := 0
+		for k, c := range x {
+			d := depth(c)
+			if k == "or" || k == "and" {
+				d++
+			}
+			if d > best {
+				best = d
+			}
+		}
+		return best
+	case []any:
+		best := 0
+		for _, c := range x {
+			if d := depth(c); d > best {
+				best = d
+			}
+		}
+		return best
+	}
+	return 0
+}
+
+// Measured on 2026-09-25: or → and is accepted, one level more is refused
+// with 400. The deepest filter notion-seed emits — every row except the
+// declared options — must stay at two levels, for every source type.
+func TestCountNeverNestsDeeperThanTheAPIAccepts(t *testing.T) {
+	for _, propType := range []string{"rich_text", "url", "number", "select", "multi_select"} {
+		var sent map[string]any
+		tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+			_ = json.Unmarshal(req.Body, &sent)
+			return transport.APIResponse{Status: 200, Body: pageOf(0, "")}, nil
+		})
+		_, err := NewCounter(tr).Count(context.Background(), Request{
+			DataSourceID: "ds-1", Property: "P", PropertyType: propType,
+			Count: change.CountEveryRow, Except: []string{"1", "2", "3"},
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", propType, err)
+		}
+		if d := depth(sent["filter"]); d != 2 {
+			t.Errorf("%s: filter depth = %d, want 2 (or → and): %v", propType, d, sent["filter"])
+		}
+	}
+}

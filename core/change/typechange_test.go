@@ -260,3 +260,13 @@ func TestWithoutRowsHoldingExcludesTheRemovedOptions(t *testing.T) {
 		t.Errorf("no removed option, Except = %q", tc.Except)
 	}
 }
+
+// Measured on 2026-09-25: a number survives toward an option only when the
+// option name is its canonical text — "7" keeps 7, "7.0" keeps nothing. A
+// non-canonical name saves no row, so it is not excluded from the count.
+func TestNumberOptionSavesRowsOnlyUnderItsCanonicalText(t *testing.T) {
+	tc := TypeChangeOf("number", "select", []string{"7.0"})
+	if tc.Except != nil || tc.Count != CountNonEmpty || tc.Bound != BoundExact {
+		t.Errorf("TypeChange = %+v, want every non-empty row counted, exactly", tc)
+	}
+}
