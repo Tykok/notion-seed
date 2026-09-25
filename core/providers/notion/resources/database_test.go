@@ -4,6 +4,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -483,5 +484,93 @@ func TestAsRemoteDatabaseNamesAnUnexpectedTypeAsAnInternalDefect(t *testing.T) {
 	rd, err := asRemoteDatabase("db-1", RemoteDatabase{ID: "db-1"})
 	if err != nil || rd.ID != "db-1" {
 		t.Errorf("asRemoteDatabase(RemoteDatabase) = %v, %v", rd, err)
+	}
+}
+
+// La corbeille part en UN appel, sur la database seule, avec le corps mesuré le
+// 2026-09-24. Le data source n'est ni écrit ni relu.
+func TestDatabaseResourceTrashPatchesInTrashOnTheDatabaseOnly(t *testing.T) {
+	var calls []string
+	var body []byte
+	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+		calls = append(calls, req.Method+" "+req.Path)
+		body = req.Body
+		return transport.APIResponse{Status: 200, Body: []byte(
+			`{"object":"database","id":"db1","archived":true,"in_trash":true}`)}, nil
+	})
+	r := NewDatabaseResource(tr, nil)
+
+	trashed, err := r.Trash(context.Background(), "db1")
+	if err != nil {
+		t.Fatalf("Trash() error = %v", err)
+	}
+	if !trashed {
+		t.Error("Trash() = false, want true : la réponse confirme la corbeille")
+	}
+	if want := []string{"PATCH /v1/databases/db1"}; !reflect.DeepEqual(calls, want) {
+		t.Errorf("appels = %v, want %v", calls, want)
+	}
+	if string(body) != `{"in_trash":true}` {
+		t.Errorf("corps = %s, want {\"in_trash\":true}", body)
+	}
+}
+
+// Review Focus #1 : un 200 n'est pas une corbeille. Seule la réponse le dit, et
+// selon la règle du décodeur — celle par laquelle le plan suivant classerait la
+// database.
+func TestDatabaseResourceTrashConfirmsOnlyWhatTheResponseSays(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"ni archived ni in_trash", `{"object":"database","id":"db1","archived":false,"in_trash":false}`, false},
+		{"archived seul", `{"object":"database","id":"db1","archived":true}`, true},
+		{"in_trash seul", `{"object":"database","id":"db1","in_trash":true}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+				return transport.APIResponse{Status: 200, Body: []byte(tc.body)}, nil
+			})
+			trashed, err := NewDatabaseResource(tr, nil).Trash(context.Background(), "db1")
+			if err != nil {
+				t.Fatalf("Trash() error = %v", err)
+			}
+			if trashed != tc.want {
+				t.Errorf("Trash() = %v, want %v", trashed, tc.want)
+			}
+		})
+	}
+}
+
+// Une réponse 200 illisible ne dit ni oui ni non : la mutation a peut-être eu
+// lieu. C'est une issue inconnue, pas un refus.
+func TestDatabaseResourceTrashCallsAnUnreadableResponseAnUnknownOutcome(t *testing.T) {
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		return transport.APIResponse{Status: 200, Body: []byte("pas du json")}, nil
+	})
+	trashed, err := NewDatabaseResource(tr, nil).Trash(context.Background(), "db1")
+	var unknown *transport.OutcomeUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("Trash() error = %v, want une OutcomeUnknownError", err)
+	}
+	if trashed {
+		t.Error("Trash() = true sur une réponse illisible")
+	}
+	if !strings.Contains(err.Error(), "  → ") {
+		t.Errorf("message = %q, il doit porter une action corrective", err.Error())
+	}
+}
+
+func TestDatabaseResourceTrashReturnsTheAPIError(t *testing.T) {
+	wantErr := &transport.APIError{Status: 404, NotionCode: "object_not_found"}
+	st := &stubTransport{errs: map[string]error{"PATCH /v1/databases/db1": wantErr}}
+
+	trashed, err := NewDatabaseResource(st, nil).Trash(context.Background(), "db1")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Trash() error = %v, want l'erreur de l'API telle quelle", err)
+	}
+	if trashed {
+		t.Error("Trash() = true alors que le PATCH a échoué")
 	}
 }
