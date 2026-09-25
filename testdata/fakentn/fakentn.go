@@ -63,9 +63,11 @@ const queryTwoRows = `{"object":"list","results":[` +
 	`"has_more":false}`
 
 // parentPage est la page parente lisible et vivante que rendent les scénarios.
-// Elle porte archived et in_trash comme la vraie API : checkParentPage refuse
-// une réponse qui ne dit pas si la page est à la corbeille.
-const parentPage = `{"object":"page","id":"page1","archived":false,"in_trash":false}`
+// Mesuré le 2026-09-25 contre l'API 2025-09-03 : une page porte in_trash, et
+// PAS archived. La fixture a la même forme, pour qu'une régression qui
+// cesserait de lire in_trash ne soit pas masquée par un archived que l'API
+// n'envoie pas.
+const parentPage = `{"object":"page","id":"page1","in_trash":false}`
 
 // subcommand dit quelle sous-commande ntn a été invoquée. Les scénarios d'auth
 // doivent répondre différemment à --version et à whoami : dispatcher uniquement
@@ -141,8 +143,9 @@ func main() {
 			}
 			fmt.Fprint(os.Stderr, "> GET https://api.notion.com"+path+"\n"+
 				"< 200 OK\n< content-type: application/json\n")
-			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1",`+
-				`"archived":true,"in_trash":true}`)
+			// La forme mesurée le 2026-09-25 : 200, in_trash à true, et aucun
+			// champ archived.
+			fmt.Fprint(os.Stdout, `{"object":"page","id":"page1","in_trash":true}`)
 		default:
 			fmt.Fprint(os.Stdout, versionLine)
 		}
