@@ -109,5 +109,5 @@ a non-zero code as long as they remain — see
 | `init`, `version`, `plan`, `diff`, `import` | available |
 | `apply` | creations, updates and destructions — see [Applying](/commands#apply) |
 | state file | `notion-seed.state.json`, written by `import` and `apply` |
-| `lifecycle.prevent_destroy` / `allow_data_loss` | acknowledgements — see [lifecycle](/yaml#lifecycle-acknowledgements) |
+| `lifecycle.acknowledge_destroy` / `acknowledge_data_loss` | acknowledgements — see [lifecycle](/yaml#lifecycle-acknowledgements) |
 | `--fail-on` | the CI safeguard — see [In CI](/commands#in-ci) |

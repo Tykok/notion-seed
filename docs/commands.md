@@ -164,8 +164,8 @@ declares and that Notion still holds is moved to the trash by a single call,
 from the state. The entry is removed only if the API response confirms the
 trash: otherwise it is kept, and `apply` reports it as a mismatch. `plan` and
 `apply` say beforehand how many rows go with it; if the count fails, the line
-says that number is not measured, never 0. `lifecycle.prevent_destroy` changes
-nothing about it — see [lifecycle](/yaml#lifecycle-acknowledgements). A database
+says that number is not measured, never 0. `lifecycle.acknowledge_destroy`
+changes nothing about it — see [lifecycle](/yaml#lifecycle-acknowledgements). A database
 moved to the trash is restored from the Notion trash; for notion-seed to manage
 it again, redeclare it then run `notion-seed import`.
 

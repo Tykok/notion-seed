@@ -166,7 +166,7 @@ du state. L'entrée n'est retirée que si la réponse de l'API confirme la
 corbeille : sinon elle est gardée, et `apply` le signale comme un écart.
 `plan` et `apply` disent avant combien de lignes partent avec elle ; si le
 comptage échoue, la ligne dit que ce nombre n'est pas mesuré, jamais 0.
-`lifecycle.prevent_destroy` n'y change rien — voir
+`lifecycle.acknowledge_destroy` n'y change rien — voir
 [lifecycle](/fr/yaml#lifecycle-des-accuses-de-lecture). Une database mise à la corbeille
 se restaure depuis la corbeille de Notion ; pour que notion-seed la gère de
 nouveau, redéclarez-la puis lancez `notion-seed import`.
