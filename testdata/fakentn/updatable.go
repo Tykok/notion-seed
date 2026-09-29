@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -97,8 +98,29 @@ func runUpdatable() {
 	switch {
 	// Always BEFORE the prefix case: see queryTwoRows.
 	case strings.HasSuffix(path, "/query"):
+		// FAKE_NTN_QUERY_STATUS=403 makes every count fail, the way a token
+		// without read access would: a count that fails at apply time, after a
+		// plan that counted.
+		if os.Getenv("FAKE_NTN_QUERY_STATUS") == "403" {
+			fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
+				"< 403 Forbidden\n"+
+				"error: Public API request failed (403 Forbidden restricted_resource): "+
+				"Insufficient permissions.\n")
+			os.Exit(5)
+		}
 		fmt.Fprint(os.Stderr, "> POST https://api.notion.com"+path+"\n"+
 			"< 200 OK\n< content-type: application/json\n")
+		// FAKE_NTN_QUERY_ROWS sets the number of rows EVERY count returns,
+		// filtered or not: a test moves the count between plan and apply.
+		if rows, set := os.LookupEnv("FAKE_NTN_QUERY_ROWS"); set {
+			n, err := strconv.Atoi(rows)
+			if err != nil || n < 0 || n > 100 {
+				fmt.Fprintf(os.Stderr, "fakentn: FAKE_NTN_QUERY_ROWS=%q, want 0 to 100\n", rows)
+				os.Exit(64)
+			}
+			fmt.Fprint(os.Stdout, queryRows(n))
+			return
+		}
 		// Without a filter, it is the count of ALL the rows — a destruction's.
 		// The database holds three, two of which hold "Fait": a count
 		// different from queryTwoRows proves the request went out without a
@@ -142,6 +164,16 @@ func runUpdatable() {
 const queryThreeRows = `{"object":"list","results":[` +
 	`{"object":"page","id":"p1"},{"object":"page","id":"p2"},` +
 	`{"object":"page","id":"p3"}],"has_more":false}`
+
+// queryRows is a count response of n rows on a single page. 100 is the page
+// size notion-seed asks for: beyond, the response would have to paginate.
+func queryRows(n int) string {
+	rows := make([]string, n)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"object":"page","id":"p%d"}`, i+1)
+	}
+	return `{"object":"list","results":[` + strings.Join(rows, ",") + `],"has_more":false}`
+}
 
 // isUnfilteredQuery says whether the body of a count query carries no
 // filter.

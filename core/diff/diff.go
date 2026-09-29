@@ -36,7 +36,8 @@ type Change struct {
 	// — Withheld == "" is the permission. See diff.Result.Withheld.
 	Withheld string
 
-	// Acknowledged names the lifecycle keys that cover this resource.
+	// Acknowledged names the lifecycle keys that cover this resource, as the
+	// user wrote them (a deprecated name stays deprecated here).
 	//
 	// They no longer block anything: the user answers for their database. They
 	// say what the user has already acknowledged, and the rendering uses them
@@ -117,9 +118,6 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		appliedDBs = applied.Databases
 	}
 
-	allowDataLoss := setOf(cfg.Lifecycle.AllowDataLoss)
-	preventDestroy := setOf(cfg.Lifecycle.PreventDestroy)
-
 	seen := map[string]bool{}
 	for _, db := range cfg.Databases {
 		seen[db.Key] = true
@@ -149,7 +147,7 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		}
 
 		p.absorb(db.Key, CompareDatabase(db.Key, &desired, appliedPtr, actualPtr),
-			allowDataLoss, preventDestroy)
+			cfg.Lifecycle)
 	}
 
 	// The state's resources that the configuration no longer declares.
@@ -177,7 +175,7 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		case r.Missing:
 			// Not found or archived: in Notion, destroying a database means
 			// archiving it, so both cases count as a destruction already done.
-			// prevent_destroy no longer blocks this cleanup: the stale state
+			// acknowledge_destroy never blocks this cleanup: the stale state
 			// entry is removed in every case, and the rendering of StaleState
 			// carries the notice, not a refusal.
 			p.StaleState = append(p.StaleState, resource)
@@ -187,7 +185,7 @@ func Compute(cfg *config.Config, applied *state.Snapshot, actual map[string]Refr
 		d := r.Database
 		res := CompareDatabase(key, nil, &a, &d)
 		markUncountedDataSources(res.Changeset.Details, r.DataSources)
-		p.absorb(key, res, allowDataLoss, preventDestroy)
+		p.absorb(key, res, cfg.Lifecycle)
 	}
 	return p, nil
 }
@@ -207,9 +205,9 @@ func markUncountedDataSources(details []resources.Detail, dataSources int) {
 }
 
 // absorb pours a resource's result into the plan, and records the lifecycle
-// keys that cover it. allowDataLoss and preventDestroy no longer block
-// anything here: they are acknowledgements, not safeguards.
-func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[string]bool) {
+// keys that cover it. They block nothing here: they are acknowledgements of
+// reading, not safeguards.
+func (p *Plan) absorb(key string, res Result, lifecycle config.Lifecycle) {
 	resource := "database." + key
 
 	if len(res.Drift) > 0 {
@@ -250,15 +248,11 @@ func (p *Plan) absorb(key string, res Result, allowDataLoss, preventDestroy map[
 
 	// lifecycle no longer blocks anything: notion-seed no longer refuses a
 	// change on the strength of its class, it MEASURES its cost and says it
-	// (see Class and Details above). prevent_destroy and allow_data_loss are
-	// therefore only acknowledgements, put on the line so the rendering raises
-	// or lowers the tone.
-	if preventDestroy[resource] {
-		c.Acknowledged = append(c.Acknowledged, "prevent_destroy")
-	}
-	if allowDataLoss[resource] {
-		c.Acknowledged = append(c.Acknowledged, "allow_data_loss")
-	}
+	// (see Class and Details above). acknowledge_destroy and
+	// acknowledge_data_loss are therefore only acknowledgements, put on the
+	// line so the rendering raises or lowers the tone — named as written, so
+	// the line matches the user's YAML even under a deprecated name.
+	c.Acknowledged = lifecycle.Acknowledged(resource)
 	p.Changes = append(p.Changes, c)
 }
 
@@ -270,12 +264,4 @@ func (p *Plan) block(reason string) {
 		}
 	}
 	p.BlockedReasons = append(p.BlockedReasons, reason)
-}
-
-func setOf(items []string) map[string]bool {
-	out := make(map[string]bool, len(items))
-	for _, i := range items {
-		out[i] = true
-	}
-	return out
 }

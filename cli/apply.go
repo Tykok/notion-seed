@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tykok/notion-seed/core/apply"
 	"github.com/tykok/notion-seed/core/diff"
+	"github.com/tykok/notion-seed/core/planfile"
 	"github.com/tykok/notion-seed/core/providers/notion/mapper"
 	"github.com/tykok/notion-seed/core/providers/notion/resources"
 )
@@ -52,11 +53,15 @@ func newApplyCmd() *cobra.Command {
 	autoApprove := false
 
 	cmd := &cobra.Command{
-		Use:   "apply",
+		Use:   "apply [plan-file]",
 		Short: "Apply the plan: create, update and trash databases, and update the state",
-		Long: "apply recomputes the plan, prints it, asks for confirmation, then writes.\n" +
-			"It takes no argument: there is no plan file to replay, so no stale\n" +
-			"plan to apply by mistake.\n\n" +
+		Long: "apply recomputes the plan, prints it, asks for confirmation, then writes.\n\n" +
+			"Given a file written by `plan --out`, apply still recomputes the plan —\n" +
+			"nothing is replayed — and holds it to the reviewed one BEFORE printing\n" +
+			"it: same resources, same lines, no count higher and no bound vaguer\n" +
+			"than reviewed, same notion-seed version, same workspace, configuration\n" +
+			"and state. Any difference refuses the apply, named line by line, and\n" +
+			"nothing is written. Without a file, nothing of this applies.\n\n" +
 			"apply writes creations, updates, destructions — a database the YAML\n" +
 			"no longer declares is moved to the Notion trash — and the cleanup of\n" +
 			"state entries whose resource has already vanished.\n" +
@@ -65,9 +70,13 @@ func newApplyCmd() *cobra.Command {
 			"and apply exits with a non-zero code as long as it remains.\n\n" +
 			"Confirmation clears no block: a plan blocked by a managed resource\n" +
 			"Notion no longer knows never reaches the prompt.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runApply(cmd, opts, autoApprove)
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			planPath := ""
+			if len(args) == 1 {
+				planPath = args[0]
+			}
+			return runApply(cmd, opts, autoApprove, planPath)
 		},
 	}
 	opts.bind(cmd)
@@ -80,7 +89,9 @@ func newApplyCmd() *cobra.Command {
 	return cmd
 }
 
-func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
+// runApply applies the recomputed plan. planPath is the reviewed plan file,
+// "" for none.
+func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool, planPath string) error {
 	if cmd.Flags().Changed("skip-preflight") {
 		return fmt.Errorf(
 			"apply does not accept --skip-preflight\n" +
@@ -89,11 +100,37 @@ func runApply(cmd *cobra.Command, opts *planOptions, autoApprove bool) error {
 				"to validate the configuration without network")
 	}
 
+	// The plan file is read BEFORE anything else: a missing file, an
+	// unreadable one, an unknown format or another version is known without
+	// the network, and refused without spending a single call.
+	var reviewed *planfile.File
+	if planPath != "" {
+		saved, err := readReviewedPlan(planPath)
+		if err != nil {
+			return err
+		}
+		reviewed = &saved
+	}
+
 	prep, err := preparePlan(cmd, opts)
 	if err != nil {
 		return err
 	}
 	reportMeasureFailures(cmd, prep)
+
+	// The reviewed plan, BEFORE the render, the confirmation and any write:
+	// a plan that is no longer the reviewed one is not shown as if it were
+	// about to go out. Once it passes, the RECOMPUTED plan is rendered — its
+	// counts are the ones that will go out, and they can only be lower or
+	// equal.
+	//
+	// It runs before prep.snap.WorkspaceID is stamped, below: the state's
+	// fingerprint is the file's, as at plan time.
+	if reviewed != nil {
+		if err := checkReviewedPlan(planPath, *reviewed, prep); err != nil {
+			return err
+		}
+	}
 
 	out := cmd.OutOrStdout()
 	// The aggregate line counts only what apply will write: a withheld resource
