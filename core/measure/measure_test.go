@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tykok/notion-seed/core/change"
 	"github.com/tykok/notion-seed/core/providers/notion/transport"
 )
 
@@ -334,6 +335,140 @@ func TestCountAllRowsFailureDoesNotPromiseAnUnknownImpact(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "still announced as destructive, without its number of rows") {
 			t.Errorf("%s: message = %q, it must say the destruction stays destructive", name, err.Error())
+		}
+	}
+}
+
+// sentFilter runs one count and returns the filter sent, as JSON, or "none".
+func sentFilter(t *testing.T, r Request) string {
+	t.Helper()
+	var sent map[string]json.RawMessage
+	tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+		_ = json.Unmarshal(req.Body, &sent)
+		return transport.APIResponse{Status: 200, Body: pageOf(0, "")}, nil
+	})
+	if _, err := NewCounter(tr).Count(context.Background(), r); err != nil {
+		t.Fatalf("Count(%+v) error = %v", r, err)
+	}
+	if f, ok := sent["filter"]; ok {
+		return string(f)
+	}
+	return "none"
+}
+
+// The type-change filters of the 2026-09-25 campaign, on the SOURCE column.
+func TestCountBuildsTheTypeChangeFilters(t *testing.T) {
+	tests := []struct {
+		name string
+		r    Request
+		want string
+	}{
+		{"non-empty on any filterable type",
+			Request{Property: "N", PropertyType: "date"},
+			`{"date":{"is_not_empty":true},"property":"N"}`},
+		{"checked rows",
+			Request{Property: "C", PropertyType: "checkbox", Count: change.CountChecked},
+			`{"checkbox":{"equals":true},"property":"C"}`},
+		{"unchecked rows",
+			Request{Property: "C", PropertyType: "checkbox", Count: change.CountUnchecked},
+			`{"checkbox":{"equals":false},"property":"C"}`},
+		{"empty rows",
+			Request{Property: "S", PropertyType: "select", Count: change.CountEmpty},
+			`{"property":"S","select":{"is_empty":true}}`},
+		{"every row: no filter at all",
+			Request{Property: "S", PropertyType: "date", Count: change.CountEveryRow},
+			"none"},
+		{"non-empty except the declared options",
+			Request{Property: "T", PropertyType: "rich_text", Except: []string{"Un", "Deux"}},
+			`{"and":[{"property":"T","rich_text":{"is_not_empty":true}},` +
+				`{"property":"T","rich_text":{"does_not_equal":"Un"}},` +
+				`{"property":"T","rich_text":{"does_not_equal":"Deux"}}]}`},
+		{"a number option filters as a number",
+			Request{Property: "N", PropertyType: "number", Except: []string{"-3.5"}},
+			`{"and":[{"number":{"is_not_empty":true},"property":"N"},` +
+				`{"number":{"does_not_equal":-3.5},"property":"N"}]}`},
+		{"multi_select rows holding none of the removed options",
+			Request{Property: "M", PropertyType: "multi_select", Except: []string{"B"}},
+			`{"and":[{"multi_select":{"is_not_empty":true},"property":"M"},` +
+				`{"multi_select":{"does_not_contain":"B"},"property":"M"}]}`},
+		{"every row except the declared options",
+			Request{Property: "U", PropertyType: "url", Count: change.CountEveryRow, Except: []string{"a"}},
+			`{"or":[{"property":"U","url":{"is_empty":true}},` +
+				`{"and":[{"property":"U","url":{"is_not_empty":true}},` +
+				`{"property":"U","url":{"does_not_equal":"a"}}]}]}`},
+	}
+	for _, tt := range tests {
+		tt.r.DataSourceID = "ds-1"
+		if got := sentFilter(t, tt.r); got != tt.want {
+			t.Errorf("%s:\n got %s\nwant %s", tt.name, got, tt.want)
+		}
+	}
+}
+
+// No sound filter: nothing is sent, and the question is reported as one
+// notion-seed cannot ask — not as an outage.
+func TestCountRefusesAnUnsoundTypeChangeCount(t *testing.T) {
+	tr := transportFunc(func(context.Context, transport.APIRequest) (transport.APIResponse, error) {
+		t.Error("no call should have been made")
+		return transport.APIResponse{}, nil
+	})
+	for _, r := range []Request{
+		{DataSourceID: "ds-1", Property: "T", PropertyType: "rich_text", Count: change.CountUnsound},
+		{DataSourceID: "ds-1", Property: "T", PropertyType: "title"},
+		{DataSourceID: "ds-1", Property: "C", PropertyType: "checkbox"},
+	} {
+		if _, err := NewCounter(tr).Count(context.Background(), r); !errors.Is(err, ErrUnsupportedFilter) {
+			t.Errorf("%+v: error = %v, want ErrUnsupportedFilter", r, err)
+		}
+	}
+}
+
+// depth counts the nesting of compound filters: or/and inside or/and.
+func depth(v any) int {
+	switch x := v.(type) {
+	case map[string]any:
+		best := 0
+		for k, c := range x {
+			d := depth(c)
+			if k == "or" || k == "and" {
+				d++
+			}
+			if d > best {
+				best = d
+			}
+		}
+		return best
+	case []any:
+		best := 0
+		for _, c := range x {
+			if d := depth(c); d > best {
+				best = d
+			}
+		}
+		return best
+	}
+	return 0
+}
+
+// Measured on 2026-09-25: or → and is accepted, one level more is refused
+// with 400. The deepest filter notion-seed emits — every row except the
+// declared options — must stay at two levels, for every source type.
+func TestCountNeverNestsDeeperThanTheAPIAccepts(t *testing.T) {
+	for _, propType := range []string{"rich_text", "url", "number", "select", "multi_select"} {
+		var sent map[string]any
+		tr := transportFunc(func(_ context.Context, req transport.APIRequest) (transport.APIResponse, error) {
+			_ = json.Unmarshal(req.Body, &sent)
+			return transport.APIResponse{Status: 200, Body: pageOf(0, "")}, nil
+		})
+		_, err := NewCounter(tr).Count(context.Background(), Request{
+			DataSourceID: "ds-1", Property: "P", PropertyType: propType,
+			Count: change.CountEveryRow, Except: []string{"1", "2", "3"},
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", propType, err)
+		}
+		if d := depth(sent["filter"]); d != 2 {
+			t.Errorf("%s: filter depth = %d, want 2 (or → and): %v", propType, d, sent["filter"])
 		}
 	}
 }

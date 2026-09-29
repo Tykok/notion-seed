@@ -127,25 +127,45 @@ func CompareDatabase(key string, desired, applied, actual *state.Database) Resul
 
 // withheldReason says why a resource cannot be written, or "" if it can be.
 //
-// A single cause today, measured twice: a `migration required` line is not
-// expressible in the API. An option rename returns 200 without changing
-// anything; an option color returns 400 and fails the whole PATCH. In the
-// first case, writing would record in the state a name Notion does not hold,
-// and every following run would show phantom drift.
+// Two causes, both measured: a `migration required` line is not expressible
+// in the API. An option rename returns 200 without changing anything; an
+// option color returns 400 and fails the whole PATCH — and writing the first
+// would record in the state a name Notion does not hold, so every following
+// run would show phantom drift. The type of a title property cannot change
+// either way: 400, measured on 2026-09-25.
 //
 // It is NOT a safety refusal: notion-seed refuses nothing on the strength of a
 // class, it measures and it says. It is a limit of the API, named as such,
 // with its procedure.
 func withheldReason(ds []resources.Detail) string {
+	var option, title bool
 	for _, d := range ds {
-		if d.Class == change.ClassMigration {
-			return "an option must be migrated by hand: the API can neither rename " +
-				"an option nor change its color\n" +
-				"  → create the new option in Notion, move the rows " +
-				"counted above to it, remove the old one, then rerun"
+		if d.Class != change.ClassMigration {
+			continue
+		}
+		// Two inexpressible changes carry the class, and they are not fixed
+		// the same way: a refused type change is on a property line, an option
+		// migration on an option line.
+		if strings.HasPrefix(d.Target, "property ") {
+			title = true
+		} else {
+			option = true
 		}
 	}
-	return ""
+	var reasons []string
+	if option {
+		reasons = append(reasons, "an option must be migrated by hand: the API can neither rename "+
+			"an option nor change its color\n"+
+			"  → create the new option in Notion, move the rows "+
+			"counted above to it, remove the old one, then rerun")
+	}
+	if title {
+		reasons = append(reasons, "the API refuses to change the type of a title property, "+
+			"in either direction\n"+
+			"  → add a new property of the wanted type, copy the values into it "+
+			"in Notion, then remove the type change from the YAML and rerun")
+	}
+	return strings.Join(reasons, "\n")
 }
 
 // updateTarget resolves the exact state the database will have after the
@@ -358,33 +378,7 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		}
 
 		if want.Type != have.Type {
-			// The measured table is enough to classify; the count of non-empty
-			// values will specify the extent.
-			class := change.ClassifyTypeChange(have.Type, want.Type)
-			d := resources.NewDetail("~", fmt.Sprintf("property %q", name), class)
-			d.Property = name
-			d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
-			// A pair the table says is SAFE (select→multi_select,
-			// number→rich_text, status→select, date→rich_text) requires no
-			// measurement: the count would change neither its class nor the
-			// decision, and notion-seed would pay an API call for a number that
-			// says nothing. Not paying for calls for nothing is a property of the
-			// product, not an optimization.
-			//
-			// Safe for the values whose name comes back, not for the others:
-			// those are announced and measured one by one by
-			// retypedRemovalLines, one removal line per option.
-			if class != change.ClassSafe {
-				d.Measure = &resources.Measurement{
-					Property:     name,
-					PropertyType: have.Type,
-				}
-			}
-			out = append(out, d)
-			// A type change re-creates the options: all the YAML's go out new,
-			// with no id, exactly as under a new property.
-			out = append(out, newOptionLines(name, newProperty(want).Options)...)
-			out = append(out, retypedRemovalLines(name, want, have)...)
+			out = append(out, typeChangeLines(name, want, have)...)
 			continue
 		}
 		if want.Type == "number" && want.Format != "" && want.Format != have.Format {
@@ -396,6 +390,57 @@ func planLines(desired, applied, actual *state.Database) []resources.Detail {
 		out = append(out, optionLines(name, want, have, applied.Properties[name])...)
 	}
 	return out
+}
+
+// typeChangeLines announces a property type change: the line itself, with
+// what the measured table says survives, then the options the write re-creates
+// and those it drops.
+func typeChangeLines(name string, want, have state.Property) []resources.Detail {
+	var declared []string
+	for _, o := range want.Options {
+		declared = append(declared, o.Name)
+	}
+	tc := change.TypeChangeOf(have.Type, want.Type, declared)
+	if have.Type == "multi_select" && hasOptions(want.Type) {
+		tc = tc.WithoutRowsHolding(undeclaredOptions(want, have))
+	}
+	d := resources.NewDetail("~", fmt.Sprintf("property %q", name), tc.Class)
+	d.Property = name
+	d.Note = fmt.Sprintf("%s → %s", have.Type, want.Type)
+	if tc.Note != "" {
+		d.Note += ": " + tc.Note
+	}
+	// Refused by the API (title, measured on 2026-09-25): nothing will be
+	// written, so there is nothing to count and no option to announce. The
+	// migration class withholds the resource; withheldReason names the way
+	// out.
+	if tc.Refused {
+		return []resources.Detail{d}
+	}
+	// A pair the table says is SAFE requires no measurement: the count would
+	// change neither its class nor the decision, and notion-seed would pay an
+	// API call for a number that says nothing. Not paying for calls for
+	// nothing is a property of the product, not an optimization.
+	//
+	// Safe for the values whose name comes back, not for the others: those
+	// are announced and measured one by one by retypedRemovalLines, one
+	// removal line per option.
+	if tc.Class != change.ClassSafe {
+		d.Measure = &resources.Measurement{
+			Property:     name,
+			PropertyType: have.Type,
+			TargetType:   want.Type,
+			Count:        tc.Count,
+			Bound:        tc.Bound,
+			Except:       tc.Except,
+			Caveat:       tc.Caveat,
+		}
+	}
+	out := []resources.Detail{d}
+	// A type change re-creates the options: all the YAML's go out new, with
+	// no id, exactly as under a new property.
+	out = append(out, newOptionLines(name, newProperty(want).Options)...)
+	return append(out, retypedRemovalLines(name, want, have)...)
 }
 
 // pairing is the result of pairing the declared options with the remote
@@ -559,16 +604,36 @@ func retypedRemovalLines(propName string, want, have state.Property) []resources
 	if !hasOptions(want.Type) {
 		return nil
 	}
+	var out []resources.Detail
+	for _, name := range undeclaredOptions(want, have) {
+		d := removalLine(propName, have.Type, name, true)
+		d.Measure.TargetType = want.Type
+		// From multi_select toward a single value, only the FIRST value is
+		// kept (measured on 2026-09-24): a row [B, A] with B not redeclared is
+		// counted here, and loses A too, which no line counts. The count is
+		// exact for B, a lower bound of what the row loses — and the total
+		// must say so.
+		if have.Type == "multi_select" && want.Type != "multi_select" {
+			d.Measure.Bound = change.BoundAtLeast
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// undeclaredOptions lists the current options the YAML does not redeclare
+// under the same name, in their current order. Under a type change they
+// disappear: the pairing is by name alone.
+func undeclaredOptions(want, have state.Property) []string {
 	declared := make(map[string]bool, len(want.Options))
 	for _, o := range want.Options {
 		declared[o.Name] = true
 	}
-	var out []resources.Detail
+	var out []string
 	for _, o := range have.Options {
-		if declared[o.Name] {
-			continue
+		if !declared[o.Name] {
+			out = append(out, o.Name)
 		}
-		out = append(out, removalLine(propName, have.Type, o.Name, true))
 	}
 	return out
 }
@@ -582,7 +647,8 @@ func removalLine(propName, propType, option string, retyped bool) resources.Deta
 	class := change.ClassifyOptionRemoval(propType, -1)
 	note := "absent from the YAML: the API replaces the whole list of options"
 	if retyped {
-		class = change.ClassifyRetypedOptionRemoval(-1)
+		// Not measured yet: -1 gives unknown impact whatever the new type.
+		class = change.ClassifyRetypedOptionRemoval("", -1)
 		// A key kept under another name saves nothing here: "absent from the
 		// YAML" would be wrong, it is the name that is missing.
 		note = "not redeclared under this name: the type change re-creates the options"
